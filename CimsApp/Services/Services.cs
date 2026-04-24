@@ -78,12 +78,15 @@ public class AuthService(CimsDbContext db, IConfiguration cfg)
     private string GenerateAccess(User user)
     {
         var key   = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(AccessSecret));
-        var token = new JwtSecurityToken(Issuer, Audience,
-            [
-                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-                new Claim(ClaimTypes.Email, user.Email),
-                new Claim(CimsApp.Services.Tenancy.HttpTenantContext.OrganisationClaimType, user.OrganisationId.ToString())
-            ],
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new(ClaimTypes.Email, user.Email),
+            new(CimsApp.Services.Tenancy.HttpTenantContext.OrganisationClaimType, user.OrganisationId.ToString()),
+        };
+        if (user.GlobalRole is { } role)
+            claims.Add(new Claim(CimsApp.Services.Tenancy.HttpTenantContext.GlobalRoleClaimType, role.ToString()));
+        var token = new JwtSecurityToken(Issuer, Audience, claims,
             expires: DateTime.UtcNow.AddMinutes(AccessMinutes),
             signingCredentials: new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
         return new JwtSecurityTokenHandler().WriteToken(token);

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using CimsApp.Models;
 using CimsApp.Services.Tenancy;
 using Microsoft.AspNetCore.Http;
 using Xunit;
@@ -58,6 +59,50 @@ public class HttpTenantContextTests
 
         Assert.Null(sut.UserId);
         Assert.Null(sut.OrganisationId);
+    }
+
+    [Fact]
+    public void GlobalRole_is_null_when_claim_absent()
+    {
+        var accessor = FakeAccessor(PrincipalWith(
+            (ClaimTypes.NameIdentifier, Guid.NewGuid().ToString())));
+        var sut = new HttpTenantContext(accessor);
+
+        Assert.Null(sut.GlobalRole);
+        Assert.False(sut.IsSuperAdmin);
+    }
+
+    [Fact]
+    public void GlobalRole_parses_SuperAdmin_claim_and_flips_IsSuperAdmin()
+    {
+        var accessor = FakeAccessor(PrincipalWith(
+            (HttpTenantContext.GlobalRoleClaimType, nameof(UserRole.SuperAdmin))));
+        var sut = new HttpTenantContext(accessor);
+
+        Assert.Equal(UserRole.SuperAdmin, sut.GlobalRole);
+        Assert.True(sut.IsSuperAdmin);
+    }
+
+    [Fact]
+    public void GlobalRole_parses_OrgAdmin_but_IsSuperAdmin_stays_false()
+    {
+        var accessor = FakeAccessor(PrincipalWith(
+            (HttpTenantContext.GlobalRoleClaimType, nameof(UserRole.OrgAdmin))));
+        var sut = new HttpTenantContext(accessor);
+
+        Assert.Equal(UserRole.OrgAdmin, sut.GlobalRole);
+        Assert.False(sut.IsSuperAdmin);
+    }
+
+    [Fact]
+    public void GlobalRole_is_null_for_unparseable_role_claim()
+    {
+        var accessor = FakeAccessor(PrincipalWith(
+            (HttpTenantContext.GlobalRoleClaimType, "SomethingElse")));
+        var sut = new HttpTenantContext(accessor);
+
+        Assert.Null(sut.GlobalRole);
+        Assert.False(sut.IsSuperAdmin);
     }
 
     private static IHttpContextAccessor FakeAccessor(ClaimsPrincipal user)

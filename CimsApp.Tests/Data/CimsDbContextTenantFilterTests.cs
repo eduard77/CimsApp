@@ -29,12 +29,12 @@ public class CimsDbContextTenantFilterTests
         typeof(ActionItem),
         typeof(ProjectTemplate),
         typeof(Notification),
+        typeof(AuditLog),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =
     [
         typeof(Organisation),
-        typeof(AuditLog),
     ];
 
     private static CimsDbContext BuildContext() =>

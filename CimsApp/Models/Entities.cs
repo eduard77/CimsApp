@@ -33,6 +33,10 @@ public class User
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public Guid OrganisationId { get; set; }
     public Organisation Organisation { get; set; } = null!;
+    // Cross-project role: SuperAdmin or OrgAdmin. Null for regular users
+    // whose only roles live on ProjectMember. SuperAdmin is permitted
+    // cross-tenant visibility (see ADR-0003, PAFM F.1).
+    public UserRole? GlobalRole { get; set; }
     [NotMapped] public string FullName => $"{FirstName} {LastName}";
     public ICollection<ProjectMember> ProjectMemberships { get; set; } = [];
     public ICollection<RefreshToken> RefreshTokens { get; set; } = [];

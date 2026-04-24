@@ -18,6 +18,8 @@ public class CimsDbContext(
         public static readonly NullTenantContext Instance = new();
         public Guid? OrganisationId => null;
         public Guid? UserId => null;
+        public UserRole? GlobalRole => null;
+        public bool IsSuperAdmin => false;
     }
 
     public DbSet<Organisation>       Organisations       => Set<Organisation>();
@@ -154,9 +156,10 @@ public class CimsDbContext(
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
-        // AuthService use IgnoreQueryFilters() to bypass.
-        // Organisation and AuditLog remain unfiltered deliberately
-        // (anchor entity; audit-write across tenants via SuperAdmin).
+        // AuthService use IgnoreQueryFilters() to bypass. Only
+        // Organisation (the tenant anchor) is unfiltered — SuperAdmin
+        // cross-tenant reads opt in via IgnoreQueryFilters() at the
+        // call site (T-S0-07).
         m.Entity<User>().HasQueryFilter(u => u.OrganisationId == _tenant.OrganisationId);
         m.Entity<RefreshToken>().HasQueryFilter(x => x.User.OrganisationId == _tenant.OrganisationId);
         m.Entity<Project>().HasQueryFilter(p => p.AppointingPartyId == _tenant.OrganisationId);
@@ -170,6 +173,7 @@ public class CimsDbContext(
         m.Entity<ActionItem>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<ProjectTemplate>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<Notification>().HasQueryFilter(x => x.User.OrganisationId == _tenant.OrganisationId);
+        m.Entity<AuditLog>().HasQueryFilter(x => x.User.OrganisationId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
