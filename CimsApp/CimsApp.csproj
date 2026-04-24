@@ -32,4 +32,8 @@
     <Folder Include="wwwroot\Templates\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="CimsApp.Tests" />
+  </ItemGroup>
+
 </Project>

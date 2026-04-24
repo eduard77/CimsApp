@@ -13,11 +13,13 @@ using MudBlazor.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 // ── Database ──────────────────────────────────────────────────────────────────
-builder.Services.AddDbContext<CimsDbContext>(o =>
-    o.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+builder.Services.AddScoped<CimsApp.Services.Tenancy.ITenantContext, CimsApp.Services.Tenancy.HttpTenantContext>();
+builder.Services.AddScoped<CimsApp.Services.Audit.AuditInterceptor>();
+builder.Services.AddDbContext<CimsDbContext>((sp, o) =>
+    o.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
+     .AddInterceptors(sp.GetRequiredService<CimsApp.Services.Audit.AuditInterceptor>()));
 builder.Services.AddScoped<IProjectProvisioningService, ProjectProvisioningService>();
 builder.Services.AddScoped<CimsApp.Services.Iso19650.Iso19650FilenameValidator>();
-builder.Services.AddScoped<CimsApp.Services.Tenancy.ITenantContext, CimsApp.Services.Tenancy.HttpTenantContext>();
 
 // ── JWT Auth ──────────────────────────────────────────────────────────────────
 var jwtKey = builder.Configuration["Jwt:AccessSecret"]!;
