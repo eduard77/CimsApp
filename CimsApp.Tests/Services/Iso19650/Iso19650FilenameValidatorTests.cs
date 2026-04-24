@@ -17,7 +17,7 @@ public class Iso19650FilenameValidatorTests
 
         Assert.True(result.IsValid,
             "All implemented checks should pass for the canonical example.");
-        Assert.Equal(8, result.Checks.Count);
+        Assert.Equal(9, result.Checks.Count);
         Assert.All(result.Checks, c => Assert.True(c.Passed, c.Label));
     }
 
@@ -49,6 +49,16 @@ public class Iso19650FilenameValidatorTests
         var outcome = result.Checks.Single(c => c.Id == Iso19650CheckId.UniclassHierarchy);
         Assert.True(outcome.Passed);
         Assert.Contains("live", outcome.Message);
+    }
+
+    [Fact]
+    public void IfcSchema_check_returns_deferred_stub()
+    {
+        var result = _sut.Validate(ValidFilename);
+
+        var outcome = result.Checks.Single(c => c.Id == Iso19650CheckId.IfcSchema);
+        Assert.True(outcome.Passed);
+        Assert.Contains("Deferred", outcome.Message);
     }
 
     [Fact]

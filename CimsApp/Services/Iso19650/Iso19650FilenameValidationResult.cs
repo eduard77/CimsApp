@@ -28,5 +28,6 @@ public enum Iso19650CheckId
     StateTransition = 5,
     Revision = 6,
     UniclassClassification = 7,
-    UniclassHierarchy = 8
+    UniclassHierarchy = 8,
+    IfcSchema = 9
 }

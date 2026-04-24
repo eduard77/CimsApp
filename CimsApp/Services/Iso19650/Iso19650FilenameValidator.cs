@@ -46,6 +46,7 @@ public sealed class Iso19650FilenameValidator
             checks.Add(Skipped(Iso19650CheckId.Revision,               "Revision"));
             checks.Add(Skipped(Iso19650CheckId.UniclassClassification, "Uniclass classification"));
             checks.Add(Skipped(Iso19650CheckId.UniclassHierarchy,      "Uniclass hierarchy validity"));
+            checks.Add(Skipped(Iso19650CheckId.IfcSchema,              "IFC schema (for models)"));
             return new Iso19650FilenameValidationResult(input, checks);
         }
 
@@ -116,6 +117,10 @@ public sealed class Iso19650FilenameValidator
         // live (not deprecated) in the pinned v1 reference?
         checks.Add(CheckUniclassHierarchy(type));
 
+        // Check 9: IFC schema. Stub - schema validation needs the IFC file,
+        // not just the filename.
+        checks.Add(CheckIfcSchema());
+
         return new Iso19650FilenameValidationResult(input, checks);
     }
 
@@ -169,6 +174,12 @@ public sealed class Iso19650FilenameValidator
             true,
             $"Uniclass code '{uniclass}' is live in the pinned v1 reference (NBS feed is Sprint 8).");
     }
+
+    private static Iso19650CheckOutcome CheckIfcSchema() =>
+        new(Iso19650CheckId.IfcSchema,
+            "IFC schema (for models)",
+            true,
+            "Deferred: schema validation needs the IFC file, not just the filename. Sprint 8 scope.");
 
     private static Iso19650CheckOutcome Skipped(Iso19650CheckId id, string label) =>
         new Iso19650CheckOutcome(id, label, false, "Skipped - structure invalid.");
