@@ -253,6 +253,8 @@ public class AuditLog
     [Required] public string Entity { get; set; } = "";
     [Required] public string EntityId { get; set; } = "";
     public string? Detail { get; set; }
+    public string? BeforeValue { get; set; }
+    public string? AfterValue { get; set; }
     public string? IpAddress { get; set; }
     public string? UserAgent { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
