@@ -36,7 +36,8 @@ public class CimsDbContext(
     public DbSet<ActionItem>         ActionItems         => Set<ActionItem>();
     public DbSet<AuditLog>           AuditLogs           => Set<AuditLog>();
     public DbSet<Notification>       Notifications       => Set<Notification>();
-    public DbSet<ProjectTemplate> ProjectTemplates => Set<ProjectTemplate>();
+    public DbSet<ProjectTemplate>    ProjectTemplates    => Set<ProjectTemplate>();
+    public DbSet<Invitation>         Invitations         => Set<Invitation>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -153,6 +154,18 @@ public class CimsDbContext(
              .OnDelete(DeleteBehavior.Cascade);
         });
 
+        m.Entity<Invitation>(e =>
+        {
+            e.HasIndex(i => i.TokenHash).IsUnique();
+            e.HasIndex(i => new { i.OrganisationId, i.ConsumedAt });
+            e.HasOne(i => i.Organisation).WithMany()
+             .HasForeignKey(i => i.OrganisationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(i => i.ConsumedByUser).WithMany()
+             .HasForeignKey(i => i.ConsumedByUserId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(i => i.CreatedBy).WithMany()
+             .HasForeignKey(i => i.CreatedById).OnDelete(DeleteBehavior.SetNull);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -174,6 +187,10 @@ public class CimsDbContext(
         m.Entity<ProjectTemplate>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<Notification>().HasQueryFilter(x => x.User.OrganisationId == _tenant.OrganisationId);
         m.Entity<AuditLog>().HasQueryFilter(x => x.User.OrganisationId == _tenant.OrganisationId);
+        // Invitations are tenant-scoped. Pre-auth consumption in
+        // InvitationService.ConsumeAsync uses IgnoreQueryFilters(), the
+        // same pattern AuthService uses for User/RefreshToken lookups.
+        m.Entity<Invitation>().HasQueryFilter(i => i.OrganisationId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
