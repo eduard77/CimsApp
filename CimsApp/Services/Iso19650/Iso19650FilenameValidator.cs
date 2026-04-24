@@ -48,6 +48,7 @@ public sealed class Iso19650FilenameValidator
             checks.Add(Skipped(Iso19650CheckId.UniclassHierarchy,      "Uniclass hierarchy validity"));
             checks.Add(Skipped(Iso19650CheckId.IfcSchema,               "IFC schema (for models)"));
             checks.Add(Skipped(Iso19650CheckId.CrossReferenceIntegrity, "Cross-reference integrity"));
+            checks.Add(Skipped(Iso19650CheckId.MetadataCompleteness,    "Metadata completeness"));
             return new Iso19650FilenameValidationResult(input, checks);
         }
 
@@ -126,6 +127,10 @@ public sealed class Iso19650FilenameValidator
         // IFC entity agree? (PAFM F.9 #10: a wall-system deliverable should
         // not be classified as a ceiling.)
         checks.Add(CheckCrossReferenceIntegrity(type));
+
+        // Check 11: Metadata completeness. Stub - metadata model lands in
+        // Session 3.
+        checks.Add(CheckMetadataCompleteness());
 
         return new Iso19650FilenameValidationResult(input, checks);
     }
@@ -221,6 +226,12 @@ public sealed class Iso19650FilenameValidator
                 ? $"Type '{type}' -> Uniclass '{uniclass}' ({table}) -> IFC '{ifc}' is consistent."
                 : $"Type '{type}' -> Uniclass '{uniclass}' ({table}) -> IFC '{ifc}' is inconsistent: table '{table}' expects IFC entities starting with {{{string.Join(", ", allowedPrefixes)}}}.");
     }
+
+    private static Iso19650CheckOutcome CheckMetadataCompleteness() =>
+        new(Iso19650CheckId.MetadataCompleteness,
+            "Metadata completeness",
+            true,
+            "Deferred: metadata model (author, status, date, related objects) lands in Session 3.");
 
     private static Iso19650CheckOutcome Skipped(Iso19650CheckId id, string label) =>
         new Iso19650CheckOutcome(id, label, false, "Skipped - structure invalid.");

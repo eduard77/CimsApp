@@ -17,7 +17,7 @@ public class Iso19650FilenameValidatorTests
 
         Assert.True(result.IsValid,
             "All implemented checks should pass for the canonical example.");
-        Assert.Equal(10, result.Checks.Count);
+        Assert.Equal(11, result.Checks.Count);
         Assert.All(result.Checks, c => Assert.True(c.Passed, c.Label));
     }
 
@@ -70,6 +70,16 @@ public class Iso19650FilenameValidatorTests
         Assert.True(outcome.Passed);
         Assert.Contains("IfcAnnotation", outcome.Message);
         Assert.Contains("consistent", outcome.Message);
+    }
+
+    [Fact]
+    public void MetadataCompleteness_check_returns_deferred_stub()
+    {
+        var result = _sut.Validate(ValidFilename);
+
+        var outcome = result.Checks.Single(c => c.Id == Iso19650CheckId.MetadataCompleteness);
+        Assert.True(outcome.Passed);
+        Assert.Contains("Deferred", outcome.Message);
     }
 
     [Fact]

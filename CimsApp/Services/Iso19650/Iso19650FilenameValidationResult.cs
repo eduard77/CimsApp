@@ -30,5 +30,6 @@ public enum Iso19650CheckId
     UniclassClassification = 7,
     UniclassHierarchy = 8,
     IfcSchema = 9,
-    CrossReferenceIntegrity = 10
+    CrossReferenceIntegrity = 10,
+    MetadataCompleteness = 11
 }
