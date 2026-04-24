@@ -11,14 +11,24 @@ public class Iso19650FilenameValidatorTests
     private const string FailingFilename = "RVP-SAG-02-04-DR-A-0126-A3-P03";
 
     [Fact]
-    public void Valid_filename_passes_all_five_checks()
+    public void Valid_filename_passes_all_implemented_checks()
     {
         var result = _sut.Validate(ValidFilename);
 
         Assert.True(result.IsValid,
-            "All 5 checks should pass for the canonical example.");
-        Assert.Equal(5, result.Checks.Count);
+            "All implemented checks should pass for the canonical example.");
+        Assert.Equal(6, result.Checks.Count);
         Assert.All(result.Checks, c => Assert.True(c.Passed, c.Label));
+    }
+
+    [Fact]
+    public void StateTransition_check_passes_with_deferred_message_in_v1()
+    {
+        var result = _sut.Validate(ValidFilename);
+
+        var outcome = result.Checks.Single(c => c.Id == Iso19650CheckId.StateTransition);
+        Assert.True(outcome.Passed);
+        Assert.Contains("Deferred", outcome.Message);
     }
 
     [Fact]

@@ -25,6 +25,6 @@ public enum Iso19650CheckId
     FieldValidity = 2,
     Numbering = 3,
     Suitability = 4,
-    // 5 reserved for StateTransition (PAFM F.9 #5, added in next commit).
+    StateTransition = 5,
     Revision = 6
 }

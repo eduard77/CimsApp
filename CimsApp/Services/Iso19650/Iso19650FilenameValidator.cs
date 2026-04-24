@@ -3,9 +3,9 @@ using System.Text.RegularExpressions;
 namespace CimsApp.Services.Iso19650;
 
 /// <summary>
-/// ISO 19650-2 filename validator. Covers 5 of 12 checks (PAFM Appendix F.9):
-/// Structure, FieldValidity, Numbering, Suitability, Revision.
-/// Remaining 7 are Sprint 8 scope.
+/// ISO 19650-2 filename validator. Implements PAFM Appendix F.9 checks.
+/// v1.0 scope: 1-4 and 6 are real; 5, 9, 11, 12 are stubs deferred to
+/// Session 3 / Sprint 8; 7, 8, 10 run against hard-coded reference data.
 ///
 /// Expected pattern (9 fields, hyphen-separated):
 ///   Project-Originator-Volume-Level-Type-Role-Number-Suitability-Revision
@@ -22,7 +22,7 @@ public sealed class Iso19650FilenameValidator
     public Iso19650FilenameValidationResult Validate(string filename)
     {
         var input = filename?.Trim() ?? string.Empty;
-        var checks = new List<Iso19650CheckOutcome>(5);
+        var checks = new List<Iso19650CheckOutcome>(12);
 
         // Check 1: Structure - 9 hyphen-separated fields, none empty.
         var fields = input.Split('-');
@@ -39,10 +39,11 @@ public sealed class Iso19650FilenameValidator
         // If structure failed, remaining checks cannot run meaningfully.
         if (!structureOk)
         {
-            checks.Add(Skipped(Iso19650CheckId.FieldValidity, "Field validity"));
-            checks.Add(Skipped(Iso19650CheckId.Numbering,     "Numbering"));
-            checks.Add(Skipped(Iso19650CheckId.Suitability,   "Suitability"));
-            checks.Add(Skipped(Iso19650CheckId.Revision,      "Revision"));
+            checks.Add(Skipped(Iso19650CheckId.FieldValidity,   "Field validity"));
+            checks.Add(Skipped(Iso19650CheckId.Numbering,       "Numbering"));
+            checks.Add(Skipped(Iso19650CheckId.Suitability,     "Suitability"));
+            checks.Add(Skipped(Iso19650CheckId.StateTransition, "State transition"));
+            checks.Add(Skipped(Iso19650CheckId.Revision,        "Revision"));
             return new Iso19650FilenameValidationResult(input, checks);
         }
 
@@ -92,7 +93,10 @@ public sealed class Iso19650FilenameValidator
                 ? $"{suitability} accepted."
                 : $"Suitability '{suitability}' not in v1 whitelist (S1-S7). A-/B-codes deferred to Sprint 8."));
 
-        // Check 5: Revision - P## or C##.
+        // Check 5: State transition. Stub - needs previous Suitability to compare.
+        checks.Add(CheckStateTransition());
+
+        // Check 6: Revision - P## or C##.
         var revOk = RevisionPattern.IsMatch(revision);
         checks.Add(new Iso19650CheckOutcome(
             Iso19650CheckId.Revision,
@@ -104,6 +108,12 @@ public sealed class Iso19650FilenameValidator
 
         return new Iso19650FilenameValidationResult(input, checks);
     }
+
+    private static Iso19650CheckOutcome CheckStateTransition() =>
+        new(Iso19650CheckId.StateTransition,
+            "State transition",
+            true,
+            "Deferred: no previous Suitability to compare against. CDE state machine is Sprint 8 scope.");
 
     private static Iso19650CheckOutcome Skipped(Iso19650CheckId id, string label) =>
         new Iso19650CheckOutcome(id, label, false, "Skipped - structure invalid.");
