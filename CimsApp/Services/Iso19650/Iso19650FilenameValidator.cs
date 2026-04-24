@@ -49,6 +49,7 @@ public sealed class Iso19650FilenameValidator
             checks.Add(Skipped(Iso19650CheckId.IfcSchema,               "IFC schema (for models)"));
             checks.Add(Skipped(Iso19650CheckId.CrossReferenceIntegrity, "Cross-reference integrity"));
             checks.Add(Skipped(Iso19650CheckId.MetadataCompleteness,    "Metadata completeness"));
+            checks.Add(Skipped(Iso19650CheckId.AuditTrail,              "Audit trail"));
             return new Iso19650FilenameValidationResult(input, checks);
         }
 
@@ -131,6 +132,9 @@ public sealed class Iso19650FilenameValidator
         // Check 11: Metadata completeness. Stub - metadata model lands in
         // Session 3.
         checks.Add(CheckMetadataCompleteness());
+
+        // Check 12: Audit trail. Stub - audit subsystem lands in Session 3.
+        checks.Add(CheckAuditTrail());
 
         return new Iso19650FilenameValidationResult(input, checks);
     }
@@ -232,6 +236,12 @@ public sealed class Iso19650FilenameValidator
             "Metadata completeness",
             true,
             "Deferred: metadata model (author, status, date, related objects) lands in Session 3.");
+
+    private static Iso19650CheckOutcome CheckAuditTrail() =>
+        new(Iso19650CheckId.AuditTrail,
+            "Audit trail",
+            true,
+            "Deferred: immutable-timestamp audit subsystem lands in Session 3.");
 
     private static Iso19650CheckOutcome Skipped(Iso19650CheckId id, string label) =>
         new Iso19650CheckOutcome(id, label, false, "Skipped - structure invalid.");
