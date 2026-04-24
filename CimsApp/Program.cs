@@ -17,6 +17,7 @@ builder.Services.AddDbContext<CimsDbContext>(o =>
     o.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 builder.Services.AddScoped<IProjectProvisioningService, ProjectProvisioningService>();
 builder.Services.AddScoped<CimsApp.Services.Iso19650.Iso19650FilenameValidator>();
+builder.Services.AddScoped<CimsApp.Services.Tenancy.ITenantContext, CimsApp.Services.Tenancy.HttpTenantContext>();
 
 // ── JWT Auth ──────────────────────────────────────────────────────────────────
 var jwtKey = builder.Configuration["Jwt:AccessSecret"]!;

@@ -72,7 +72,11 @@ public class AuthService(CimsDbContext db, IConfiguration cfg)
     {
         var key   = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(AccessSecret));
         var token = new JwtSecurityToken(Issuer, Audience,
-            [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Email, user.Email)],
+            [
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Email, user.Email),
+                new Claim(CimsApp.Services.Tenancy.HttpTenantContext.OrganisationClaimType, user.OrganisationId.ToString())
+            ],
             expires: DateTime.UtcNow.AddMinutes(AccessMinutes),
             signingCredentials: new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
         return new JwtSecurityTokenHandler().WriteToken(token);
