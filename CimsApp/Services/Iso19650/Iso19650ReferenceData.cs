@@ -69,4 +69,28 @@ internal static class Iso19650ReferenceData
     // the NBS release (or a pinned version per F.9 #8).
     public static readonly HashSet<string> DeprecatedUniclassCodes =
         new(StringComparer.Ordinal);
+
+    // Type -> IFC entity. Placeholder. Not used for IFC-schema validation
+    // (check 9 is a stub) - consumed only by check 10 (cross-reference
+    // integrity) which verifies that Type, Uniclass and IFC triple agree.
+    public static readonly IReadOnlyDictionary<string, string> TypeToIfc =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["DR"] = "IfcAnnotation",
+            ["MD"] = "IfcBuildingElementProxy",
+            ["SP"] = "IfcDocumentReference",
+            ["CA"] = "IfcDocumentReference"
+        };
+
+    // Uniclass table prefix -> allowed IFC entity prefixes. Drives the
+    // Type/Uniclass/IFC agreement rule in check 10. A drawing of an
+    // Ss_25_... wall system should resolve to an IfcBuilding* entity, not
+    // to an IfcAnnotation; a mismatch fails cross-reference integrity.
+    public static readonly IReadOnlyDictionary<string, string[]> UniclassTableToIfcPrefixes =
+        new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            ["EF"] = new[] { "IfcAnnotation" },   // Elements / Functions
+            ["Ss"] = new[] { "IfcBuilding" },     // Systems
+            ["Ac"] = new[] { "IfcDocument" }      // Activities
+        };
 }
