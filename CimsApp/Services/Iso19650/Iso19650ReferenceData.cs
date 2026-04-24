@@ -64,4 +64,9 @@ internal static class Iso19650ReferenceData
             ["SP"] = "Ac_10_50_10",
             ["CA"] = "Ac_10_50_40"
         };
+
+    // Deprecated Uniclass codes. Empty in v1; Sprint 8 populates this from
+    // the NBS release (or a pinned version per F.9 #8).
+    public static readonly HashSet<string> DeprecatedUniclassCodes =
+        new(StringComparer.Ordinal);
 }

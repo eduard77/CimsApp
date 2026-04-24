@@ -17,7 +17,7 @@ public class Iso19650FilenameValidatorTests
 
         Assert.True(result.IsValid,
             "All implemented checks should pass for the canonical example.");
-        Assert.Equal(7, result.Checks.Count);
+        Assert.Equal(8, result.Checks.Count);
         Assert.All(result.Checks, c => Assert.True(c.Passed, c.Label));
     }
 
@@ -39,6 +39,16 @@ public class Iso19650FilenameValidatorTests
         var outcome = result.Checks.Single(c => c.Id == Iso19650CheckId.UniclassClassification);
         Assert.True(outcome.Passed);
         Assert.Contains("EF_25_30_20", outcome.Message);
+    }
+
+    [Fact]
+    public void UniclassHierarchy_check_passes_when_code_not_deprecated()
+    {
+        var result = _sut.Validate(ValidFilename);
+
+        var outcome = result.Checks.Single(c => c.Id == Iso19650CheckId.UniclassHierarchy);
+        Assert.True(outcome.Passed);
+        Assert.Contains("live", outcome.Message);
     }
 
     [Fact]

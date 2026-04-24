@@ -27,5 +27,6 @@ public enum Iso19650CheckId
     Suitability = 4,
     StateTransition = 5,
     Revision = 6,
-    UniclassClassification = 7
+    UniclassClassification = 7,
+    UniclassHierarchy = 8
 }

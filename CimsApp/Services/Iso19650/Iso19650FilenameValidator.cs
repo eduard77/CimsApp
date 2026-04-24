@@ -45,6 +45,7 @@ public sealed class Iso19650FilenameValidator
             checks.Add(Skipped(Iso19650CheckId.StateTransition,        "State transition"));
             checks.Add(Skipped(Iso19650CheckId.Revision,               "Revision"));
             checks.Add(Skipped(Iso19650CheckId.UniclassClassification, "Uniclass classification"));
+            checks.Add(Skipped(Iso19650CheckId.UniclassHierarchy,      "Uniclass hierarchy validity"));
             return new Iso19650FilenameValidationResult(input, checks);
         }
 
@@ -111,6 +112,10 @@ public sealed class Iso19650FilenameValidator
         // mandatory Uniclass code in the v1 hard-coded set?
         checks.Add(CheckUniclassClassification(type));
 
+        // Check 8: Uniclass hierarchy validity - is the derived code still
+        // live (not deprecated) in the pinned v1 reference?
+        checks.Add(CheckUniclassHierarchy(type));
+
         return new Iso19650FilenameValidationResult(input, checks);
     }
 
@@ -136,6 +141,33 @@ public sealed class Iso19650FilenameValidator
             "Uniclass classification",
             false,
             $"Type '{type}' has no mandatory Uniclass code in the v1 hard-coded set.");
+    }
+
+    private static Iso19650CheckOutcome CheckUniclassHierarchy(string type)
+    {
+        if (!Iso19650ReferenceData.TypeToUniclass.TryGetValue(type, out var uniclass))
+        {
+            return new Iso19650CheckOutcome(
+                Iso19650CheckId.UniclassHierarchy,
+                "Uniclass hierarchy validity",
+                false,
+                $"Cannot check hierarchy: Type '{type}' has no Uniclass code.");
+        }
+
+        if (Iso19650ReferenceData.DeprecatedUniclassCodes.Contains(uniclass))
+        {
+            return new Iso19650CheckOutcome(
+                Iso19650CheckId.UniclassHierarchy,
+                "Uniclass hierarchy validity",
+                false,
+                $"Uniclass code '{uniclass}' is deprecated in the pinned v1 reference.");
+        }
+
+        return new Iso19650CheckOutcome(
+            Iso19650CheckId.UniclassHierarchy,
+            "Uniclass hierarchy validity",
+            true,
+            $"Uniclass code '{uniclass}' is live in the pinned v1 reference (NBS feed is Sprint 8).");
     }
 
     private static Iso19650CheckOutcome Skipped(Iso19650CheckId id, string label) =>
