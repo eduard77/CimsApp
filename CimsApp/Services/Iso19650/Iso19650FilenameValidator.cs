@@ -42,8 +42,9 @@ public sealed class Iso19650FilenameValidator
             checks.Add(Skipped(Iso19650CheckId.FieldValidity,   "Field validity"));
             checks.Add(Skipped(Iso19650CheckId.Numbering,       "Numbering"));
             checks.Add(Skipped(Iso19650CheckId.Suitability,     "Suitability"));
-            checks.Add(Skipped(Iso19650CheckId.StateTransition, "State transition"));
-            checks.Add(Skipped(Iso19650CheckId.Revision,        "Revision"));
+            checks.Add(Skipped(Iso19650CheckId.StateTransition,        "State transition"));
+            checks.Add(Skipped(Iso19650CheckId.Revision,               "Revision"));
+            checks.Add(Skipped(Iso19650CheckId.UniclassClassification, "Uniclass classification"));
             return new Iso19650FilenameValidationResult(input, checks);
         }
 
@@ -106,6 +107,10 @@ public sealed class Iso19650FilenameValidator
                 ? $"{revision} well-formed."
                 : "Revision must match P## or C## (e.g. P03, C01)."));
 
+        // Check 7: Uniclass classification - does the Type code map to a
+        // mandatory Uniclass code in the v1 hard-coded set?
+        checks.Add(CheckUniclassClassification(type));
+
         return new Iso19650FilenameValidationResult(input, checks);
     }
 
@@ -114,6 +119,24 @@ public sealed class Iso19650FilenameValidator
             "State transition",
             true,
             "Deferred: no previous Suitability to compare against. CDE state machine is Sprint 8 scope.");
+
+    private static Iso19650CheckOutcome CheckUniclassClassification(string type)
+    {
+        if (Iso19650ReferenceData.TypeToUniclass.TryGetValue(type, out var uniclass))
+        {
+            return new Iso19650CheckOutcome(
+                Iso19650CheckId.UniclassClassification,
+                "Uniclass classification",
+                true,
+                $"Type '{type}' maps to Uniclass '{uniclass}' (hard-coded; BEP-driven mandatory-code check is Sprint 8).");
+        }
+
+        return new Iso19650CheckOutcome(
+            Iso19650CheckId.UniclassClassification,
+            "Uniclass classification",
+            false,
+            $"Type '{type}' has no mandatory Uniclass code in the v1 hard-coded set.");
+    }
 
     private static Iso19650CheckOutcome Skipped(Iso19650CheckId id, string label) =>
         new Iso19650CheckOutcome(id, label, false, "Skipped - structure invalid.");

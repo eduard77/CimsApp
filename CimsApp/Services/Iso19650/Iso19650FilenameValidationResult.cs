@@ -26,5 +26,6 @@ public enum Iso19650CheckId
     Numbering = 3,
     Suitability = 4,
     StateTransition = 5,
-    Revision = 6
+    Revision = 6,
+    UniclassClassification = 7
 }

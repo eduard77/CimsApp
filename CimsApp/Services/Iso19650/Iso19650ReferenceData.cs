@@ -48,4 +48,20 @@ internal static class Iso19650ReferenceData
         "S6", // Shared (as-constructed / PIM handover)
         "S7"  // Shared (as-constructed / AIM)
     };
+
+    // Type -> Uniclass code. Placeholder mapping: values are shape-correct
+    // but not authoritative. Real BEP-driven mandatory codes arrive in
+    // Sprint 8 with the NBS feed. Types absent from this map fail check 7
+    // (no mandatory Uniclass code for the object class).
+    //
+    // SH/RP/CO intentionally omitted: these are not mandatory BIM
+    // deliverables in the v1 canonical project.
+    public static readonly IReadOnlyDictionary<string, string> TypeToUniclass =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["DR"] = "EF_25_30_20",
+            ["MD"] = "Ss_25_30_20",
+            ["SP"] = "Ac_10_50_10",
+            ["CA"] = "Ac_10_50_40"
+        };
 }
