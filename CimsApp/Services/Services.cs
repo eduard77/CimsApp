@@ -110,7 +110,7 @@ public class AuthService(CimsDbContext db, IConfiguration cfg)
 }
 
 // ── Projects ──────────────────────────────────────────────────────────────────
-public class ProjectsService(CimsDbContext db, AuditService audit)
+public class ProjectsService(CimsDbContext db, AuditService audit, CimsApp.Services.Tenancy.ITenantContext tenant)
 {
     public async Task<List<Project>> ListAsync(Guid userId, string? search = null)
     {
@@ -128,10 +128,19 @@ public class ProjectsService(CimsDbContext db, AuditService audit)
 
     public async Task<Project> CreateAsync(CreateProjectRequest req, Guid userId, string? ip, string? ua)
     {
-        var p = new Project { Name = req.Name, Code = req.Code.ToUpperInvariant(), Description = req.Description, AppointingPartyId = req.AppointingPartyId, StartDate = req.StartDate, EndDate = req.EndDate, Location = req.Location, Country = req.Country, Currency = req.Currency ?? "GBP", BudgetValue = req.BudgetValue, Sector = req.Sector, Sponsor = req.Sponsor, EirRef = req.EirRef, Members = [new ProjectMember { UserId = userId, Role = UserRole.ProjectManager }] };
+        // Tenant-ownership of the new Project is determined by AppointingPartyId
+        // (see CimsDbContext query filter). Non-SuperAdmin callers are locked to
+        // their own organisation; SuperAdmin may create projects under any
+        // appointing party (platform-level bypass, audited). See ADR-0012.
+        var appointingPartyId = tenant.IsSuperAdmin
+            ? req.AppointingPartyId
+            : tenant.OrganisationId ?? throw new ForbiddenException("No tenant context");
+        if (!tenant.IsSuperAdmin && req.AppointingPartyId != appointingPartyId)
+            throw new ForbiddenException("AppointingPartyId must match the caller's organisation");
+        var p = new Project { Name = req.Name, Code = req.Code.ToUpperInvariant(), Description = req.Description, AppointingPartyId = appointingPartyId, StartDate = req.StartDate, EndDate = req.EndDate, Location = req.Location, Country = req.Country, Currency = req.Currency ?? "GBP", BudgetValue = req.BudgetValue, Sector = req.Sector, Sponsor = req.Sponsor, EirRef = req.EirRef, Members = [new ProjectMember { UserId = userId, Role = UserRole.ProjectManager }] };
         db.Projects.Add(p);
         await db.SaveChangesAsync();
-        await audit.WriteAsync(userId, "project.created", "Project", p.Id.ToString(), p.Id, ip: ip, ua: ua);
+        await audit.WriteAsync(userId, tenant.IsSuperAdmin ? "project.created.superadmin_bypass" : "project.created", "Project", p.Id.ToString(), p.Id, ip: ip, ua: ua);
         return p;
     }
 
