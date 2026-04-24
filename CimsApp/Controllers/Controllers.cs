@@ -136,7 +136,11 @@ public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsC
 
     [HttpPost]
     public async Task<IActionResult> Create(Guid projectId, CreateDocumentRequest req)
-    { await GetProjectRoleAsync(db, projectId); return Created("", new { success = true, data = await svc.CreateAsync(projectId, req, CurrentUserId, ClientIp, ClientAgent) }); }
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember)) throw new ForbiddenException();
+        return Created("", new { success = true, data = await svc.CreateAsync(projectId, req, CurrentUserId, ClientIp, ClientAgent) });
+    }
 
     [HttpGet("{documentId:guid}")]
     public async Task<IActionResult> Get(Guid projectId, Guid documentId)
@@ -164,11 +168,19 @@ public class RfisController(RfiService svc, CimsDbContext db) : CimsControllerBa
 
     [HttpPost]
     public async Task<IActionResult> Create(Guid projectId, CreateRfiRequest req)
-    { await GetProjectRoleAsync(db, projectId); return Created("", new { success = true, data = await svc.CreateAsync(projectId, req, CurrentUserId, ClientIp, ClientAgent) }); }
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember)) throw new ForbiddenException();
+        return Created("", new { success = true, data = await svc.CreateAsync(projectId, req, CurrentUserId, ClientIp, ClientAgent) });
+    }
 
     [HttpPost("{rfiId:guid}/respond")]
     public async Task<IActionResult> Respond(Guid projectId, Guid rfiId, RespondRfiRequest req)
-    { await GetProjectRoleAsync(db, projectId); return Ok(new { success = true, data = await svc.RespondAsync(rfiId, projectId, req, CurrentUserId, ClientIp, ClientAgent) }); }
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember)) throw new ForbiddenException();
+        return Ok(new { success = true, data = await svc.RespondAsync(rfiId, projectId, req, CurrentUserId, ClientIp, ClientAgent) });
+    }
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -185,11 +197,19 @@ public class ActionsController(ActionsService svc, CimsDbContext db) : CimsContr
 
     [HttpPost]
     public async Task<IActionResult> Create(Guid projectId, CreateActionRequest req)
-    { await GetProjectRoleAsync(db, projectId); return Created("", new { success = true, data = await svc.CreateAsync(projectId, req, CurrentUserId, ClientIp, ClientAgent) }); }
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember)) throw new ForbiddenException();
+        return Created("", new { success = true, data = await svc.CreateAsync(projectId, req, CurrentUserId, ClientIp, ClientAgent) });
+    }
 
     [HttpPatch("{actionId:guid}")]
     public async Task<IActionResult> Update(Guid projectId, Guid actionId, UpdateActionRequest req)
-    { await GetProjectRoleAsync(db, projectId); return Ok(new { success = true, data = await svc.UpdateAsync(actionId, projectId, req, CurrentUserId, ClientIp, ClientAgent) }); }
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember)) throw new ForbiddenException();
+        return Ok(new { success = true, data = await svc.UpdateAsync(actionId, projectId, req, CurrentUserId, ClientIp, ClientAgent) });
+    }
 }
 
 // ── Audit ─────────────────────────────────────────────────────────────────────
