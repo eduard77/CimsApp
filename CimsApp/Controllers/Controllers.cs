@@ -87,6 +87,7 @@ public class ProjectsController(ProjectsService svc, CimsDbContext db) : CimsCon
         Ok(new { success = true, data = await svc.ListAsync(CurrentUserId, search) });
 
     [HttpPost]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
     public async Task<IActionResult> Create(CreateProjectRequest req) =>
         Created("", new { success = true, data = await svc.CreateAsync(req, CurrentUserId, ClientIp, ClientAgent) });
 
