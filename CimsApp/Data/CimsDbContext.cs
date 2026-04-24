@@ -1,10 +1,25 @@
 using Microsoft.EntityFrameworkCore;
 using CimsApp.Models;
+using CimsApp.Services.Tenancy;
 
 namespace CimsApp.Data;
 
-public class CimsDbContext(DbContextOptions<CimsDbContext> options) : DbContext(options)
+public class CimsDbContext(
+    DbContextOptions<CimsDbContext> options,
+    ITenantContext? tenant = null) : DbContext(options)
 {
+    // Null-object default keeps EF design-time (migrations, scaffolding)
+    // working without a DI-provided tenant. In production a scoped
+    // ITenantContext is always injected.
+    private readonly ITenantContext _tenant = tenant ?? NullTenantContext.Instance;
+
+    private sealed class NullTenantContext : ITenantContext
+    {
+        public static readonly NullTenantContext Instance = new();
+        public Guid? OrganisationId => null;
+        public Guid? UserId => null;
+    }
+
     public DbSet<Organisation>       Organisations       => Set<Organisation>();
     public DbSet<User>               Users               => Set<User>();
     public DbSet<RefreshToken>       RefreshTokens       => Set<RefreshToken>();
@@ -135,6 +150,23 @@ public class CimsDbContext(DbContextOptions<CimsDbContext> options) : DbContext(
              .HasForeignKey(t => t.ProjectId)
              .OnDelete(DeleteBehavior.Cascade);
         });
+
+        // ── Tenant isolation (PAFM F.1) ──────────────────────────────────
+        // Global query filter on OrganisationId. Anonymous contexts
+        // (null tenant) see nothing by design; pre-auth paths in
+        // AuthService use IgnoreQueryFilters() to bypass.
+        // Organisation, RefreshToken, RfiDocument, AuditLog, Notification
+        // are intentionally unfiltered — see docs/sprint-log/s0.md T-S0-03.
+        m.Entity<User>().HasQueryFilter(u => u.OrganisationId == _tenant.OrganisationId);
+        m.Entity<Project>().HasQueryFilter(p => p.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<ProjectMember>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<ProjectAppointment>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<CdeContainer>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Document>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<DocumentRevision>().HasQueryFilter(x => x.Document.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Rfi>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<ActionItem>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<ProjectTemplate>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()

@@ -22,7 +22,8 @@ public class AuthService(CimsDbContext db, IConfiguration cfg)
 
     public async Task<UserSummaryDto> RegisterAsync(RegisterRequest req)
     {
-        if (await db.Users.AnyAsync(u => u.Email == req.Email))
+        // Pre-auth: ignore tenant filter while checking email uniqueness.
+        if (await db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == req.Email))
             throw new ConflictException("Email already registered");
         var org = await db.Organisations.FindAsync(req.OrganisationId) ?? throw new NotFoundException("Organisation");
         var user = new User { Email = req.Email.ToLowerInvariant(), PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password), FirstName = req.FirstName, LastName = req.LastName, JobTitle = req.JobTitle, OrganisationId = req.OrganisationId };
@@ -33,7 +34,9 @@ public class AuthService(CimsDbContext db, IConfiguration cfg)
 
     public async Task<AuthResponse> LoginAsync(LoginRequest req, string? ua, string? ip)
     {
-        var user = await db.Users.Include(u => u.Organisation).FirstOrDefaultAsync(u => u.Email == req.Email.ToLowerInvariant() && u.IsActive)
+        // Pre-auth: tenant is not yet known. Bypass the User query filter.
+        var user = await db.Users.IgnoreQueryFilters().Include(u => u.Organisation)
+            .FirstOrDefaultAsync(u => u.Email == req.Email.ToLowerInvariant() && u.IsActive)
             ?? throw new AppException("Invalid credentials", 401, "INVALID_CREDENTIALS");
         if (!BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
             throw new AppException("Invalid credentials", 401, "INVALID_CREDENTIALS");
@@ -51,7 +54,8 @@ public class AuthService(CimsDbContext db, IConfiguration cfg)
         var stored = await db.RefreshTokens.FirstOrDefaultAsync(r => r.Token == token);
         if (stored == null || !stored.IsActive) throw new AppException("Token revoked", 401, "TOKEN_REVOKED");
         stored.RevokedAt = DateTime.UtcNow;
-        var user   = await db.Users.Include(u => u.Organisation).FirstAsync(u => u.Id == userId);
+        // Pre-auth (refresh endpoint has no access token): bypass User filter.
+        var user   = await db.Users.IgnoreQueryFilters().Include(u => u.Organisation).FirstAsync(u => u.Id == userId);
         var access = GenerateAccess(user);
         var newRef = await CreateRefreshAsync(userId, null, null);
         await db.SaveChangesAsync();
