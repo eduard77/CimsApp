@@ -1,0 +1,8 @@
+* { box-sizing: border-box; }
+body { font-family: 'Inter', 'Segoe UI', sans-serif; background: #F4F6F9; margin: 0; }
+.mud-drawer { width: 240px !important; }
+.mud-table-row:hover { background: #F8FAFC !important; }
+.bg-hover { background: #F8FAFC; }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }

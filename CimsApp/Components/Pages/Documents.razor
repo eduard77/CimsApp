@@ -1,0 +1,165 @@
+@page "/documents"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@inject BlazorApiClient Api
+@inject UiStateService UI
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageHeader Title="Documents (CDE)" Subtitle="@(UI.CurrentProject?.Name ?? "Select a project")" ButtonLabel="Register Document" OnButton='() => Nav.NavigateTo("/documents/register")' ShowButton="UI.CurrentProject != null" />
+
+@if (UI.CurrentProject == null)
+{
+    <NoProject />
+}
+else
+{
+    <!-- State tabs -->
+    <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
+        @foreach (var tab in _tabs)
+        {
+            <div @onclick="() => _tab = tab.key" style="@TabStyle(tab.key)">
+                <span style="@($"width:8px;height:8px;border-radius:50%;background:{tab.dot};display:inline-block;margin-right:6px;")"></span>
+                @tab.label
+                <span style="margin-left:6px;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:700;background:rgba(0,0,0,0.1);">
+                    @(_tab == tab.key ? _shown.Count : _docs.Count(d => tab.key == "All" || d.CurrentState.ToString() == tab.key))
+                </span>
+            </div>
+        }
+    </div>
+
+    <MudTextField @bind-Value="_search" Placeholder="Search..." Variant="Variant.Outlined"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  Immediate="true" DebounceInterval="300" OnDebounceIntervalElapsed="LoadAsync"
+                  Style="max-width:380px;margin-bottom:16px;" Margin="Margin.Dense" />
+
+    @if (_loading) { <Loading /> }
+    else if (!_shown.Any())
+    {
+        <EmptyState Icon="@Icons.Material.Filled.Description" Message="No documents in this state" />
+    }
+    else
+    {
+        <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;">
+            <MudTable Items="_shown" Hover="true" Elevation="0" Dense="true">
+                <HeaderContent>
+                    <MudTh Style="@Th()">Document Number</MudTh>
+                    <MudTh Style="@Th()">Title</MudTh>
+                    <MudTh Style="@Th()">Type</MudTh>
+                    <MudTh Style="@Th()">State</MudTh>
+                    <MudTh Style="@Th()">Rev</MudTh>
+                    <MudTh Style="@Th()">Transition</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd Style="padding:14px 16px;"><span style="font-family:monospace;font-size:12px;font-weight:600;color:#1B4F8A;">@context.DocumentNumber</span></MudTd>
+                    <MudTd><div style="font-size:13px;font-weight:500;color:#1A1F2E;">@context.Title</div></MudTd>
+                    <MudTd><span style="font-size:12px;color:#64748B;">@context.Type</span></MudTd>
+                    <MudTd><StatusBadge Status="@context.CurrentState.ToString()" /></MudTd>
+                    <MudTd>
+                        @{ var rev = context.Revisions?.FirstOrDefault(r => r.IsLatest); }
+                        @if (rev != null) { <span style="font-family:monospace;font-size:12px;background:#F8FAFC;padding:2px 8px;border-radius:4px;border:1px solid #E2E8F0;">@rev.Revision</span> }
+                    </MudTd>
+                    <MudTd>
+                        @foreach (var t in Transitions(context.CurrentState))
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                                       Style="@($"text-transform:none;font-size:11px;padding:2px 10px;border-radius:6px;border-color:{t.Color};color:{t.Color};min-width:0;margin-right:4px;")"
+                                       OnClick="@(() => DoTransition(context, t.State))">@t.Label</MudButton>
+                        }
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        </MudCard>
+    }
+}
+
+<!-- Create Dialog -->
+<MudDialog @bind-Visible="_showCreate" Options='new DialogOptions{MaxWidth=MaxWidth.Small,FullWidth=true}'>
+    <TitleContent><MudText Typo="Typo.h6" Style="font-weight:600;">Register Document</MudText></TitleContent>
+    <DialogContent>
+        <p style="font-size:12px;color:#64748B;margin:0 0 16px;">ISO 19650: {Project}-{Originator}-{Volume}-{Level}-{Type}-{Role}-{Number}</p>
+        <MudGrid Spacing="2">
+            <MudItem xs="6"><MudTextField @bind-Value="_df.Originator" Label="Originator" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="3"><MudTextField @bind-Value="_df.Volume"     Label="Volume"     Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="3"><MudTextField @bind-Value="_df.Level"      Label="Level"      Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="4"><MudTextField @bind-Value="_df.DocType"    Label="Type (DR)"  Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="4"><MudTextField @bind-Value="_df.Role"       Label="Role (A)"   Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="4"><MudNumericField @bind-Value="_df.Number"  Label="Number"     Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" Min="1" /></MudItem>
+            <MudItem xs="12"><MudTextField @bind-Value="_df.Title"     Label="Title"      Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12">
+                <MudSelect @bind-Value="_df.Type" Label="Document Type" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense">
+                    <MudSelectItem Value="DocumentType.Drawing">Drawing</MudSelectItem>
+                    <MudSelectItem Value="DocumentType.Specification">Specification</MudSelectItem>
+                    <MudSelectItem Value="DocumentType.Report">Report</MudSelectItem>
+                    <MudSelectItem Value="DocumentType.Model">Model</MudSelectItem>
+                    <MudSelectItem Value="DocumentType.Other">Other</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showCreate = false" Style="text-transform:none;">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateAsync" Disabled="_creating" Style="text-transform:none;font-weight:600;">
+            @(_creating ? "Registering..." : "Register")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    List<Document> _docs = [], _shown = [];
+    bool _loading = true, _showCreate = false, _creating = false;
+    string _tab = "All", _search = "";
+    DocForm _df = new();
+
+    record Tab(string key, string label, string dot);
+    readonly Tab[] _tabs = [
+        new("All","All","#94A3B8"), new("WorkInProgress","WIP","#94A3B8"),
+        new("Shared","Shared","#3B82F6"), new("Published","Published","#10B981"),
+        new("Archived","Archived","#F59E0B")];
+
+    record TransBtn(CdeState State, string Label, string Color);
+    TransBtn[] Transitions(CdeState s) => s switch {
+        CdeState.WorkInProgress => [new(CdeState.Shared,   "→ Share",   "#3B82F6")],
+        CdeState.Shared         => [new(CdeState.WorkInProgress,"← Reject","#94A3B8"), new(CdeState.Published,"→ Publish","#10B981")],
+        CdeState.Published      => [new(CdeState.Archived, "→ Archive", "#F59E0B")],
+        _                       => []};
+
+    string TabStyle(string k) => k == _tab
+        ? "padding:8px 16px;border-radius:8px;background:#1B4F8A;color:white;cursor:pointer;font-size:13px;font-weight:600;user-select:none;display:flex;align-items:center;"
+        : "padding:8px 16px;border-radius:8px;background:white;color:#64748B;cursor:pointer;font-size:13px;border:1px solid #E2E8F0;user-select:none;display:flex;align-items:center;";
+
+    static string Th() => "font-size:11px;font-weight:600;color:#94A3B8;text-transform:uppercase;padding:12px 16px;";
+
+    protected override async Task OnInitializedAsync() { UI.OnChange += Refresh; await LoadAsync(); }
+    void Refresh() { InvokeAsync(async () => { await LoadAsync(); StateHasChanged(); }); }
+
+    async Task LoadAsync()
+    {
+        if (UI.CurrentProject == null) { _loading = false; return; }
+        _loading = true;
+        _docs   = await Api.GetDocumentsAsync(UI.CurrentProject.Id, null, _search);
+        _shown  = _tab == "All" ? _docs : _docs.Where(d => d.CurrentState.ToString() == _tab).ToList();
+        _loading = false;
+    }
+
+    async Task DoTransition(Document doc, CdeState toState)
+    {
+        var result = await Api.TransitionDocumentAsync(UI.CurrentProject!.Id, doc.Id, toState);
+        if (result != null) { Snackbar.Add($"Moved to {toState}", Severity.Success); await LoadAsync(); }
+        else Snackbar.Add("Transition failed — check your role", Severity.Error);
+    }
+
+    async Task CreateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_df.Title) || string.IsNullOrWhiteSpace(_df.Originator))
+        { Snackbar.Add("Originator and Title are required", Severity.Warning); return; }
+        _creating = true;
+        var p = UI.CurrentProject!;
+        var req = new CreateDocumentRequest(p.Code, _df.Originator.ToUpper(), _df.Volume ?? "ZZ", _df.Level ?? "ZZ", _df.DocType.ToUpper(), _df.Role ?? "XX", _df.Number, _df.Title, null, _df.Type, null, null);
+        var result = await Api.CreateDocumentAsync(p.Id, req);
+        _creating = false;
+        if (result != null) { _showCreate = false; _df = new(); Snackbar.Add("Document registered", Severity.Success); await LoadAsync(); }
+        else Snackbar.Add("Failed to register document", Severity.Error);
+    }
+
+    class DocForm { public string Originator = "", DocType = "DR", Title = "", Role = "A"; public string? Volume, Level; public DocumentType Type = DocumentType.Drawing; public int Number = 1; }
+}

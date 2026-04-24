@@ -1,0 +1,159 @@
+using Microsoft.EntityFrameworkCore;
+using CimsApp.Models;
+
+namespace CimsApp.Data;
+
+public class CimsDbContext(DbContextOptions<CimsDbContext> options) : DbContext(options)
+{
+    public DbSet<Organisation>       Organisations       => Set<Organisation>();
+    public DbSet<User>               Users               => Set<User>();
+    public DbSet<RefreshToken>       RefreshTokens       => Set<RefreshToken>();
+    public DbSet<Project>            Projects            => Set<Project>();
+    public DbSet<ProjectMember>      ProjectMembers      => Set<ProjectMember>();
+    public DbSet<ProjectAppointment> ProjectAppointments => Set<ProjectAppointment>();
+    public DbSet<CdeContainer>       CdeContainers       => Set<CdeContainer>();
+    public DbSet<Document>           Documents           => Set<Document>();
+    public DbSet<DocumentRevision>   DocumentRevisions   => Set<DocumentRevision>();
+    public DbSet<Rfi>                Rfis                => Set<Rfi>();
+    public DbSet<RfiDocument>        RfiDocuments        => Set<RfiDocument>();
+    public DbSet<ActionItem>         ActionItems         => Set<ActionItem>();
+    public DbSet<AuditLog>           AuditLogs           => Set<AuditLog>();
+    public DbSet<Notification>       Notifications       => Set<Notification>();
+    public DbSet<ProjectTemplate> ProjectTemplates => Set<ProjectTemplate>();
+
+    protected override void OnModelCreating(ModelBuilder m)
+    {
+        base.OnModelCreating(m);
+
+        m.Entity<Organisation>(e => e.HasIndex(o => o.Code).IsUnique());
+
+        m.Entity<User>(e =>
+        {
+            e.HasIndex(u => u.Email).IsUnique();
+            e.HasOne(u => u.Organisation).WithMany(o => o.Users)
+             .HasForeignKey(u => u.OrganisationId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        m.Entity<RefreshToken>(e =>
+        {
+            e.HasIndex(r => r.Token).IsUnique();
+            e.HasOne(r => r.User).WithMany(u => u.RefreshTokens)
+             .HasForeignKey(r => r.UserId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<Project>(e =>
+        {
+            e.HasIndex(p => new { p.AppointingPartyId, p.Code }).IsUnique();
+            e.HasOne(p => p.AppointingParty).WithMany(o => o.AppointedProjects)
+             .HasForeignKey(p => p.AppointingPartyId).OnDelete(DeleteBehavior.Restrict);
+            e.Property(p => p.BudgetValue).HasPrecision(15, 2);
+        });
+
+        m.Entity<ProjectMember>(e =>
+        {
+            e.HasIndex(m2 => new { m2.ProjectId, m2.UserId }).IsUnique();
+            e.HasOne(m2 => m2.Project).WithMany(p => p.Members)
+             .HasForeignKey(m2 => m2.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(m2 => m2.User).WithMany(u => u.ProjectMemberships)
+             .HasForeignKey(m2 => m2.UserId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<ProjectAppointment>(e =>
+        {
+            e.HasOne(a => a.Project).WithMany(p => p.Appointments)
+             .HasForeignKey(a => a.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(a => a.Organisation).WithMany(o => o.Appointments)
+             .HasForeignKey(a => a.OrganisationId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        m.Entity<CdeContainer>(e =>
+            e.HasOne(c => c.Project).WithMany(p => p.Containers)
+             .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.NoAction));
+
+        m.Entity<Document>(e =>
+        {
+            e.HasIndex(d => d.DocumentNumber).IsUnique();
+            e.HasIndex(d => new { d.ProjectId, d.CurrentState });
+            e.Ignore(d => d.Tags); // handled via TagsCsv
+            e.HasOne(d => d.Project).WithMany(p => p.Documents)
+             .HasForeignKey(d => d.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(d => d.Creator).WithMany(u => u.CreatedDocuments)
+             .HasForeignKey(d => d.CreatorId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(d => d.Container).WithMany(c => c.Documents)
+             .HasForeignKey(d => d.ContainerId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        m.Entity<DocumentRevision>(e =>
+        {
+            e.HasIndex(r => new { r.DocumentId, r.Revision }).IsUnique();
+            e.HasOne(r => r.Document).WithMany(d => d.Revisions)
+             .HasForeignKey(r => r.DocumentId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(r => r.UploadedBy).WithMany(u => u.UploadedRevisions)
+             .HasForeignKey(r => r.UploadedById).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        m.Entity<Rfi>(e =>
+        {
+            e.HasIndex(r => new { r.ProjectId, r.RfiNumber }).IsUnique();
+            e.HasOne(r => r.Project).WithMany(p => p.Rfis)
+             .HasForeignKey(r => r.ProjectId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<RfiDocument>(e =>
+        {
+            e.HasKey(r => new { r.RfiId, r.DocumentId });
+            e.HasOne(r => r.Rfi).WithMany(rfi => rfi.Documents)
+             .HasForeignKey(r => r.RfiId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(r => r.Document).WithMany(d => d.RfiLinks)
+             .HasForeignKey(r => r.DocumentId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<ActionItem>(e =>
+        {
+            e.HasOne(a => a.Project).WithMany(p => p.ActionItems)
+             .HasForeignKey(a => a.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(a => a.CreatedBy).WithMany(u => u.CreatedActions)
+             .HasForeignKey(a => a.CreatedById).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(a => a.Assignee).WithMany(u => u.AssignedActions)
+             .HasForeignKey(a => a.AssigneeId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        m.Entity<AuditLog>(e =>
+        {
+            e.HasIndex(a => new { a.ProjectId, a.CreatedAt });
+            e.HasOne(a => a.User).WithMany(u => u.AuditLogs)
+             .HasForeignKey(a => a.UserId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(a => a.Project).WithMany(p => p.AuditLogs)
+             .HasForeignKey(a => a.ProjectId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(a => a.Document).WithMany(d => d.AuditLogs)
+             .HasForeignKey(a => a.DocumentId).OnDelete(DeleteBehavior.SetNull);
+        });
+        m.Entity<ProjectTemplate>(e =>
+        {
+            e.HasIndex(t => new { t.ProjectId, t.StorageKey }).IsUnique();
+            e.HasOne(t => t.Project).WithMany()
+             .HasForeignKey(t => t.ProjectId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+
+    public override int SaveChanges()
+    { SetTimestamps(); return base.SaveChanges(); }
+
+    public override Task<int> SaveChangesAsync(CancellationToken ct = default)
+    { SetTimestamps(); return base.SaveChangesAsync(ct); }
+
+    private void SetTimestamps()
+    {
+        foreach (var e in ChangeTracker.Entries().Where(e => e.State == EntityState.Modified))
+        {
+            if (e.Entity is Organisation o)  o.UpdatedAt  = DateTime.UtcNow;
+            else if (e.Entity is User u)     u.UpdatedAt  = DateTime.UtcNow;
+            else if (e.Entity is Project p)  p.UpdatedAt  = DateTime.UtcNow;
+            else if (e.Entity is Document d) d.UpdatedAt  = DateTime.UtcNow;
+            else if (e.Entity is CdeContainer c) c.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is Rfi r)      r.UpdatedAt  = DateTime.UtcNow;
+            else if (e.Entity is ActionItem a) a.UpdatedAt = DateTime.UtcNow;
+        }
+    }
+}

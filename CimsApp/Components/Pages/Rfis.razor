@@ -1,0 +1,116 @@
+@* Rfis.razor *@
+@page "/rfis"
+@inject BlazorApiClient Api
+@inject UiStateService UI
+@inject ISnackbar Snackbar
+
+<PageHeader Title="Requests for Information" Subtitle="@(UI.CurrentProject?.Name ?? "Select a project")" ButtonLabel="Raise RFI" OnButton="() => _show = true" ShowButton="UI.CurrentProject != null" />
+
+@if (UI.CurrentProject == null) { <NoProject /> }
+else
+{
+    <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
+        @foreach (var s in new[]{"All","Open","UnderReview","Responded","Closed"})
+        { <div @onclick="() => _f = s" style="@Pill(s)">@(s=="UnderReview"?"In Review":s)</div> }
+    </div>
+
+    @if (_loading) { <Loading /> }
+    else
+    {
+        var shown = _f == "All" ? _rfis : _rfis.Where(r => r.Status.ToString() == _f).ToList();
+        @if (!shown.Any()) { <EmptyState Icon="@Icons.Material.Filled.QuestionAnswer" Message="No RFIs found" /> }
+        else
+        {
+            <div style="display:flex;flex-direction:column;gap:12px;">
+                @foreach (var r in shown)
+                {
+                    <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;">
+                        <MudCardContent Style="padding:20px 24px;">
+                            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+                                <div style="flex:1;">
+                                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
+                                        <span style="font-family:monospace;font-size:12px;font-weight:700;color:#1B4F8A;background:#EBF3FF;padding:2px 8px;border-radius:4px;">@r.RfiNumber</span>
+                                        <StatusBadge Status="@r.Status.ToString()" />
+                                        <PriorityBadge Priority="@r.Priority.ToString()" />
+                                    </div>
+                                    <p style="font-size:14px;font-weight:600;color:#1A1F2E;margin:0 0 4px;">@r.Subject</p>
+                                    <p style="font-size:13px;color:#64748B;margin:0;">@r.Description</p>
+                                    @if (r.Response != null)
+                                    {
+                                        <div style="margin-top:10px;padding:10px 14px;background:#F0FDF4;border-left:3px solid #10B981;border-radius:0 8px 8px 0;">
+                                            <p style="font-size:11px;font-weight:600;color:#065F46;margin:0 0 2px;">RESPONSE</p>
+                                            <p style="font-size:13px;color:#1A1F2E;margin:0;">@r.Response</p>
+                                        </div>
+                                    }
+                                </div>
+                                <div style="text-align:right;flex-shrink:0;">
+                                    @if (r.DueDate.HasValue)
+                                    {
+                                        var od = r.DueDate < DateTime.Now && r.Status != RfiStatus.Closed;
+                                        <p style="@($"font-size:11px;margin:0;color:{(od?"#DC2626":"#94A3B8")};font-weight:{(od?"600":"400")}")">Due @r.DueDate.Value.ToString("dd MMM yyyy")</p>
+                                    }
+                                    @if (r.Status == RfiStatus.Open || r.Status == RfiStatus.UnderReview)
+                                    {
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
+                                                   Style="text-transform:none;font-size:12px;margin-top:8px;border-radius:6px;"
+                                                   OnClick="() => OpenRespond(r)">Respond</MudButton>
+                                    }
+                                </div>
+                            </div>
+                        </MudCardContent>
+                    </MudCard>
+                }
+            </div>
+        }
+    }
+}
+
+<MudDialog @bind-Visible="_show" Options='new DialogOptions{MaxWidth=MaxWidth.Small,FullWidth=true}'>
+    <TitleContent><MudText Typo="Typo.h6" Style="font-weight:600;">Raise RFI</MudText></TitleContent>
+    <DialogContent>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+            <MudTextField @bind-Value="_nf.Subject"     Label="Subject"    Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
+            <MudTextField @bind-Value="_nf.Description" Label="Description" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" Lines="3" />
+            <MudTextField @bind-Value="_nf.Discipline"  Label="Discipline"  Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
+            <MudSelect @bind-Value="_nf.Priority" Label="Priority" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense">
+                <MudSelectItem Value="Priority.Low">Low</MudSelectItem>
+                <MudSelectItem Value="Priority.Medium">Medium</MudSelectItem>
+                <MudSelectItem Value="Priority.High">High</MudSelectItem>
+                <MudSelectItem Value="Priority.Urgent">Urgent</MudSelectItem>
+            </MudSelect>
+            <MudDatePicker @bind-Date="_nf.DueDate" Label="Due Date" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _show = false" Style="text-transform:none;">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateAsync" Disabled="_saving" Style="text-transform:none;font-weight:600;">@(_saving?"Raising...":"Raise RFI")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_showRespond" Options='new DialogOptions{MaxWidth=MaxWidth.Small,FullWidth=true}'>
+    <TitleContent><MudText Typo="Typo.h6" Style="font-weight:600;">Respond to @_target?.RfiNumber</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_respText" Label="Response" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" Lines="4" />
+        <MudSelect @bind-Value="_respStatus" Label="Status" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" Style="margin-top:12px;">
+            <MudSelectItem Value="RfiStatus.Responded">Responded</MudSelectItem>
+            <MudSelectItem Value="RfiStatus.Closed">Closed</MudSelectItem>
+        </MudSelect>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showRespond = false" Style="text-transform:none;">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SubmitRespond" Style="text-transform:none;font-weight:600;">Submit</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    List<Rfi> _rfis = []; bool _loading = true, _show = false, _showRespond = false, _saving = false;
+    string _f = "All", _respText = ""; RfiStatus _respStatus = RfiStatus.Responded; Rfi? _target;
+    RfiForm _nf = new();
+    string Pill(string s) => s == _f ? "padding:6px 14px;border-radius:20px;background:#1B4F8A;color:white;cursor:pointer;font-size:12px;font-weight:600;user-select:none;" : "padding:6px 14px;border-radius:20px;background:white;color:#64748B;cursor:pointer;font-size:12px;border:1px solid #E2E8F0;user-select:none;";
+    protected override async Task OnInitializedAsync() { UI.OnChange += () => InvokeAsync(async () => { await Load(); StateHasChanged(); }); await Load(); }
+    async Task Load() { if (UI.CurrentProject == null) { _loading = false; return; } _loading = true; _rfis = await Api.GetRfisAsync(UI.CurrentProject.Id); _loading = false; }
+    void OpenRespond(Rfi r) { _target = r; _respText = ""; _respStatus = RfiStatus.Responded; _showRespond = true; }
+    async Task CreateAsync() { if (string.IsNullOrWhiteSpace(_nf.Subject)) { Snackbar.Add("Subject required", Severity.Warning); return; } _saving = true; var r = await Api.CreateRfiAsync(UI.CurrentProject!.Id, new CreateRfiRequest(_nf.Subject, _nf.Description, _nf.Discipline, _nf.Priority, null, _nf.DueDate)); _saving = false; if (r != null) { _show = false; _nf = new(); Snackbar.Add("RFI raised", Severity.Success); await Load(); } else Snackbar.Add("Failed", Severity.Error); }
+    async Task SubmitRespond() { if (string.IsNullOrWhiteSpace(_respText)) { Snackbar.Add("Enter a response", Severity.Warning); return; } var r = await Api.RespondRfiAsync(UI.CurrentProject!.Id, _target!.Id, new RespondRfiRequest(_respText, _respStatus)); if (r != null) { _showRespond = false; Snackbar.Add("Response submitted", Severity.Success); await Load(); } else Snackbar.Add("Failed", Severity.Error); }
+    class RfiForm { public string Subject = "", Description = "", Discipline = ""; public Priority Priority = Priority.Medium; public DateTime? DueDate; }
+}

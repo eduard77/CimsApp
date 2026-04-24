@@ -1,0 +1,13 @@
+@* FieldLabel.razor — consistent field label with optional required asterisk *@
+<label style="display:block;font-size:12px;font-weight:600;color:#475569;margin-bottom:4px;letter-spacing:0.2px;">
+    @Text
+    @if (Required)
+    {
+        <span style="color:#DC2626;margin-left:2px;">*</span>
+    }
+</label>
+
+@code {
+    [Parameter] public string Text     { get; set; } = "";
+    [Parameter] public bool   Required { get; set; }
+}

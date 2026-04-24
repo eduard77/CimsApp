@@ -1,0 +1,64 @@
+﻿@page "/tools/iso19650-validator"
+@rendermode @(new InteractiveServerRenderMode())
+@using CimsApp.Services.Iso19650
+@using Microsoft.AspNetCore.Components.Web
+@inject Iso19650FilenameValidator Validator
+
+<PageTitle>ISO 19650 Filename Validator</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="mt-6">
+    <MudText Typo="Typo.h4" GutterBottom="true">
+        ISO 19650 Filename Validator
+    </MudText>
+    <MudText Typo="Typo.body2" Class="mb-4">
+        Validates against 5 of 12 checks (v1 scope). Remaining checks arrive in Sprint 8.
+    </MudText>
+
+    <MudTextField @bind-Value="_input"
+                  Label="Filename"
+                  Placeholder="RVP-SAG-02-04-DR-A-0127-S2-P03"
+                  Variant="Variant.Outlined"
+                  FullWidth="true"
+                  Immediate="true"
+                  OnKeyUp="OnKeyUp" />
+
+    <MudButton OnClick="RunValidation"
+               Color="Color.Primary"
+               Variant="Variant.Filled"
+               Class="mt-3">
+        Validate
+    </MudButton>
+
+    @if (_result is not null)
+    {
+        <MudPaper Class="mt-4 pa-4" Elevation="1">
+            <MudText Typo="Typo.subtitle1" GutterBottom="true">
+                @(_result.IsValid ? "All checks passed" : "Validation failed")
+            </MudText>
+            <MudList T="Iso19650CheckOutcome" Dense="true">
+                @foreach (var check in _result.Checks)
+                {
+                    <MudListItem T="Iso19650CheckOutcome"
+                                 Icon="@(check.Passed
+                                                                      ? Icons.Material.Filled.CheckCircle
+                                                              : Icons.Material.Filled.Cancel)"
+                         IconColor="@(check.Passed ? Color.Success : Color.Error)">
+                <MudText Typo="Typo.body2"><b>@check.Label</b> — @check.Message</MudText>
+            </MudListItem>
+                        }
+            </MudList>
+        </MudPaper>
+    }
+</MudContainer>
+
+@code {
+    private string _input = "RVP-SAG-02-04-DR-A-0127-S2-P03";
+    private Iso19650FilenameValidationResult? _result;
+
+    private void RunValidation() => _result = Validator.Validate(_input);
+
+    private void OnKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") RunValidation();
+    }
+}

@@ -1,0 +1,9 @@
+@* EmptyState.razor *@
+<MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;padding:48px;text-align:center;">
+    <MudIcon Icon="@Icon" Style="font-size:48px;color:#CBD5E1;margin-bottom:12px;display:block;" />
+    <p style="color:#64748B;margin:0;">@Message</p>
+</MudCard>
+@code {
+    [Parameter] public string Icon    { get; set; } = Icons.Material.Filled.Info;
+    [Parameter] public string Message { get; set; } = "Nothing here yet";
+}

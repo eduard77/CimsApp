@@ -1,0 +1,100 @@
+@inherits LayoutComponentBase
+@inject UiStateService UI
+@inject NavigationManager Nav
+
+<MudThemeProvider Theme="_theme" />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+@if (!UI.IsLoggedIn)
+{
+    @Body
+}
+else
+{
+    <MudLayout>
+        <MudDrawer Open="true" Variant="DrawerVariant.Mini" Elevation="0"
+                   Style="background:#1B2B4B;border-right:1px solid rgba(255,255,255,0.08);width:240px;">
+
+            <!-- Logo -->
+            <div style="padding:24px 20px 16px;border-bottom:1px solid rgba(255,255,255,0.08);">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div style="width:36px;height:36px;background:#F5A623;border-radius:8px;display:flex;align-items:center;justify-content:center;">
+                        <MudIcon Icon="@Icons.Material.Filled.Domain" Style="color:#1B2B4B;font-size:20px;" />
+                    </div>
+                    <div>
+                        <div style="color:white;font-weight:700;font-size:15px;">CIMS</div>
+                        <div style="color:rgba(255,255,255,0.4);font-size:10px;letter-spacing:1px;">ISO 19650 · PMBOK 7</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- User -->
+            <div style="padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.08);">
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <MudAvatar Style="background:#F5A623;color:#1B2B4B;width:30px;height:30px;font-size:11px;font-weight:700;">
+                        @UI.UserInitials
+                    </MudAvatar>
+                    <div>
+                        <div style="color:white;font-size:12px;font-weight:500;">@UI.UserFullName</div>
+                        <div style="color:rgba(255,255,255,0.4);font-size:11px;">@UI.OrgName</div>
+                    </div>
+                </div>
+                @if (UI.CurrentProject != null)
+                {
+                    <div style="margin-top:10px;padding:8px 10px;background:rgba(255,255,255,0.07);border-radius:6px;">
+                        <div style="color:rgba(255,255,255,0.4);font-size:9px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px;">Active Project</div>
+                        <div style="color:white;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">@UI.CurrentProject.Name</div>
+                    </div>
+                }
+            </div>
+
+            <!-- Nav -->
+            <div style="padding:12px 0;flex:1;">
+                <NavLabel>Main</NavLabel>
+                <SideNavItem Href="/dashboard" Icon="@Icons.Material.Filled.Dashboard" Label="Dashboard" />
+                <SideNavItem Href="/projects"  Icon="@Icons.Material.Filled.BusinessCenter" Label="Projects" />
+                <NavLabel>Project</NavLabel>
+                <SideNavItem Href="/documents" Icon="@Icons.Material.Filled.FolderOpen"  Label="Documents (CDE)" />
+                <SideNavItem Href="/rfis"      Icon="@Icons.Material.Filled.QuestionAnswer" Label="RFIs" />
+                <SideNavItem Href="/actions"   Icon="@Icons.Material.Filled.CheckCircle" Label="Actions" />
+                <SideNavItem Href="/audit"     Icon="@Icons.Material.Filled.History"     Label="Audit Trail" />
+            </div>
+
+            <!-- Logout -->
+            <div style="padding:16px 20px;border-top:1px solid rgba(255,255,255,0.08);">
+                <MudButton OnClick="Logout" FullWidth="true" StartIcon="@Icons.Material.Filled.Logout"
+                           Style="color:rgba(255,255,255,0.5);text-transform:none;justify-content:flex-start;font-size:13px;">
+                    Sign out
+                </MudButton>
+            </div>
+        </MudDrawer>
+
+        <MudMainContent Style="background:#F4F6F9;min-height:100vh;">
+            <div style="padding:32px;">@Body</div>
+        </MudMainContent>
+    </MudLayout>
+}
+
+@code {
+    private readonly MudTheme _theme = new()
+    {
+        Palette = new Palette
+        {
+            Primary       = "#1B4F8A",
+            Secondary     = "#F5A623",
+            Background    = "#F4F6F9",
+            Surface       = "#FFFFFF",
+            AppbarBackground = "#1B2B4B",
+            TextPrimary   = "#1A1F2E",
+            TextSecondary = "#64748B",
+        },
+        Typography = new Typography
+        {
+            Default = new Default { FontFamily = new[] { "Inter", "Segoe UI", "sans-serif" } }
+        }
+    };
+
+    protected override void OnInitialized() { UI.OnChange += StateHasChanged; }
+    void Logout() { UI.Logout(); Nav.NavigateTo("/"); }
+}

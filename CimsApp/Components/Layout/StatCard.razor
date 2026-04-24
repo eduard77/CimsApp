@@ -1,0 +1,21 @@
+@* StatCard.razor *@
+<MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;">
+    <MudCardContent Style="padding:20px 24px;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;">
+            <div>
+                <p style="font-size:13px;color:#64748B;margin:0 0 8px;font-weight:500;">@Label</p>
+                <p style="font-size:28px;font-weight:700;color:#1A1F2E;margin:0;">@Value</p>
+            </div>
+            <div style="@($"width:44px;height:44px;border-radius:10px;background:{Bg};display:flex;align-items:center;justify-content:center;")">
+                <MudIcon Icon="@Icon" Style="@($"color:{Color};font-size:22px;")" />
+            </div>
+        </div>
+    </MudCardContent>
+</MudCard>
+@code {
+    [Parameter] public string  Label { get; set; } = "";
+    [Parameter] public string  Value { get; set; } = "0";
+    [Parameter] public string  Icon  { get; set; } = Icons.Material.Filled.Info;
+    [Parameter] public string  Color { get; set; } = "#1B4F8A";
+    [Parameter] public string  Bg    { get; set; } = "#EBF3FF";
+}

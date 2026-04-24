@@ -1,0 +1,12 @@
+@* SideNavItem.razor *@
+@inject NavigationManager Nav
+<MudNavLink Href="@Href" Match="NavLinkMatch.Prefix"
+            Style="@(Nav.Uri.Contains(Href) ? "color:white;background:rgba(255,255,255,0.12);border-radius:8px;margin:2px 10px;padding:9px 12px;" : "color:rgba(255,255,255,0.55);border-radius:8px;margin:2px 10px;padding:9px 12px;")">
+    <MudIcon Icon="@Icon" Style="font-size:18px;margin-right:10px;" />
+    <span style="font-size:13px;font-weight:500;">@Label</span>
+</MudNavLink>
+@code {
+    [Parameter] public string Href  { get; set; } = "";
+    [Parameter] public string Icon  { get; set; } = "";
+    [Parameter] public string Label { get; set; } = "";
+}

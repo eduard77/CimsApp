@@ -1,0 +1,138 @@
+@page "/dashboard"
+@inject BlazorApiClient Api
+@inject UiStateService UI
+@inject NavigationManager Nav
+
+<div style="margin-bottom:32px;">
+    <h1 style="font-size:24px;font-weight:700;color:#1A1F2E;margin:0 0 4px;">
+        Good @_greeting, @UI.UserFullName?.Split(' ').FirstOrDefault()
+    </h1>
+    <p style="color:#64748B;margin:0;">Here's your project overview.</p>
+</div>
+
+<!-- Stat cards -->
+<MudGrid Spacing="3" Style="margin-bottom:32px;">
+    <MudItem xs="12" sm="6" lg="3">
+        <StatCard Label="Active Projects" Value="@_projects.Count(p => p.Status == ProjectStatus.Execution).ToString()" Icon="@Icons.Material.Filled.BusinessCenter" Color="#1B4F8A" Bg="#EBF3FF" />
+    </MudItem>
+    <MudItem xs="12" sm="6" lg="3">
+        <StatCard Label="Total Documents" Value="@_docCount.ToString()" Icon="@Icons.Material.Filled.Description" Color="#0F6E56" Bg="#E6F7F2" />
+    </MudItem>
+    <MudItem xs="12" sm="6" lg="3">
+        <StatCard Label="Open RFIs" Value="@_rfiCount.ToString()" Icon="@Icons.Material.Filled.QuestionAnswer" Color="#D97706" Bg="#FEF3C7" />
+    </MudItem>
+    <MudItem xs="12" sm="6" lg="3">
+        <StatCard Label="Open Actions" Value="@_actionCount.ToString()" Icon="@Icons.Material.Filled.CheckCircle" Color="#DC2626" Bg="#FEE2E2" />
+    </MudItem>
+</MudGrid>
+
+<MudGrid Spacing="3">
+    <MudItem xs="12" lg="7">
+        <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;">
+            <MudCardContent Style="padding:24px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+                    <span style="font-size:16px;font-weight:600;color:#1A1F2E;">Your Projects</span>
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small" Href="/projects" Style="text-transform:none;">View all →</MudButton>
+                </div>
+                @if (_loading) { <div style="text-align:center;padding:40px;"><MudProgressCircular Indeterminate="true" Color="Color.Primary" /></div> }
+                else if (!_projects.Any())
+                {
+                    <div style="text-align:center;padding:40px;color:#94A3B8;">
+                        <MudIcon Icon="@Icons.Material.Filled.BusinessCenter" Style="font-size:48px;margin-bottom:12px;display:block;" />
+                        <p style="margin:0;">No projects yet. <MudLink Href="/projects">Create one →</MudLink></p>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var p in _projects.Take(5))
+                    {
+                        <div @onclick="() => SelectProject(p)"
+                             style="display:flex;align-items:center;gap:16px;padding:12px;border-radius:8px;cursor:pointer;margin-bottom:4px;transition:background 0.15s;"
+                             @onmouseenter="() => _hovered=p.Id" @onmouseleave="() => _hovered=Guid.Empty"
+                             class="@(_hovered==p.Id?"bg-hover":"")">
+                            <div style="width:40px;height:40px;border-radius:10px;background:#EBF3FF;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                                <MudIcon Icon="@Icons.Material.Filled.BusinessCenter" Style="color:#1B4F8A;font-size:20px;" />
+                            </div>
+                            <div style="flex:1;">
+                                <div style="font-size:14px;font-weight:600;color:#1A1F2E;">@p.Name</div>
+                                <div style="font-size:12px;color:#94A3B8;">@p.Code · @p.AppointingParty?.Name</div>
+                            </div>
+                            <StatusBadge Status="@p.Status.ToString()" />
+                        </div>
+                    }
+                }
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    <MudItem xs="12" lg="5">
+        <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;margin-bottom:16px;">
+            <MudCardContent Style="padding:24px;">
+                <p style="font-size:16px;font-weight:600;color:#1A1F2E;margin:0 0 16px;">Quick Actions</p>
+                @foreach (var (label, href, icon) in _quickActions)
+                {
+                    <MudButton Variant="Variant.Outlined" FullWidth="true" Href="@href" StartIcon="@icon"
+                               Style="text-transform:none;justify-content:flex-start;border-radius:8px;padding:10px 16px;border-color:#E2E8F0;margin-bottom:8px;">
+                        @label
+                    </MudButton>
+                }
+            </MudCardContent>
+        </MudCard>
+
+        @if (UI.CurrentProject != null)
+        {
+            <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;">
+                <MudCardContent Style="padding:24px;">
+                    <p style="font-size:16px;font-weight:600;color:#1A1F2E;margin:0 0 16px;">CDE State — @UI.CurrentProject.Name</p>
+                    <CdeBar Label="Work in Progress" Count="@_wipCount"    Color="#94A3B8" />
+                    <CdeBar Label="Shared"           Count="@_sharedCount" Color="#3B82F6" />
+                    <CdeBar Label="Published"        Count="@_pubCount"    Color="#10B981" />
+                    <CdeBar Label="Archived"         Count="@_archCount"   Color="#F59E0B" />
+                </MudCardContent>
+            </MudCard>
+        }
+    </MudItem>
+</MudGrid>
+
+@code {
+    List<Project> _projects = [];
+    bool _loading = true;
+    int _docCount, _rfiCount, _actionCount, _wipCount, _sharedCount, _pubCount, _archCount;
+    Guid _hovered = Guid.Empty;
+
+    string _greeting => DateTime.Now.Hour < 12 ? "morning" : DateTime.Now.Hour < 17 ? "afternoon" : "evening";
+
+    (string, string, string)[] _quickActions =
+    [
+        ("New Project",         "/projects",  Icons.Material.Filled.Add),
+        ("Register Document",   "/documents", Icons.Material.Filled.UploadFile),
+        ("Raise RFI",           "/rfis",      Icons.Material.Filled.QuestionAnswer),
+        ("Add Action Item",     "/actions",   Icons.Material.Filled.CheckCircle),
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _projects = await Api.GetProjectsAsync();
+        _loading  = false;
+        if (_projects.Count > 0 && UI.CurrentProject == null)
+            UI.SetProject(_projects[0]);
+        if (UI.CurrentProject != null) await LoadProjectStats();
+    }
+
+    async Task LoadProjectStats()
+    {
+        var pid  = UI.CurrentProject!.Id;
+        var docs = await Api.GetDocumentsAsync(pid);
+        var rfis = await Api.GetRfisAsync(pid, "Open");
+        var acts = await Api.GetActionsAsync(pid, "Open");
+        _docCount    = docs.Count;
+        _rfiCount    = rfis.Count;
+        _actionCount = acts.Count;
+        _wipCount    = docs.Count(d => d.CurrentState == CdeState.WorkInProgress);
+        _sharedCount = docs.Count(d => d.CurrentState == CdeState.Shared);
+        _pubCount    = docs.Count(d => d.CurrentState == CdeState.Published);
+        _archCount   = docs.Count(d => d.CurrentState == CdeState.Archived);
+    }
+
+    void SelectProject(Project p) { UI.SetProject(p); Nav.NavigateTo("/documents"); }
+}

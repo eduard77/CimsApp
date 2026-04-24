@@ -1,0 +1,113 @@
+@page "/projects"
+@inject BlazorApiClient Api
+@inject UiStateService UI
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@rendermode RenderMode.InteractiveServer
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;">
+    <div>
+        <h1 style="font-size:22px;font-weight:700;color:#1A1F2E;margin:0 0 4px;">Projects</h1>
+        <p style="color:#64748B;margin:0;font-size:14px;">All projects you are a member of</p>
+    </div>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="() => _showCreate = true"
+               Style="text-transform:none;border-radius:8px;font-weight:600;">New Project</MudButton>
+</div>
+
+<MudTextField @bind-Value="_search" Placeholder="Search projects..." Variant="Variant.Outlined"
+              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+              Immediate="true" DebounceInterval="300" OnDebounceIntervalElapsed="LoadAsync"
+              Style="max-width:400px;margin-bottom:24px;" Margin="Margin.Dense" />
+
+@if (_loading) { <div style="text-align:center;padding:80px;"><MudProgressCircular Indeterminate="true" Color="Color.Primary" /></div> }
+else if (!_projects.Any())
+{
+    <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;padding:60px;text-align:center;">
+        <MudIcon Icon="@Icons.Material.Filled.BusinessCenter" Style="font-size:56px;color:#CBD5E1;margin-bottom:16px;display:block;" />
+        <p style="font-size:16px;color:#64748B;margin:0;">No projects found</p>
+    </MudCard>
+}
+else
+{
+    <MudGrid Spacing="3">
+        @foreach (var p in _projects)
+        {
+            <MudItem xs="12" md="6" xl="4">
+                <MudCard Elevation="0" @onclick="() => Select(p)"
+                         Style="border-radius:12px;border:1px solid #E2E8F0;cursor:pointer;transition:all 0.15s;">
+                    <MudCardContent Style="padding:24px;">
+                        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;">
+                            <div style="width:44px;height:44px;border-radius:10px;background:#EBF3FF;display:flex;align-items:center;justify-content:center;">
+                                <MudIcon Icon="@Icons.Material.Filled.BusinessCenter" Style="color:#1B4F8A;font-size:22px;" />
+                            </div>
+                            <StatusBadge Status="@p.Status.ToString()" />
+                        </div>
+                        <h3 style="font-size:15px;font-weight:600;color:#1A1F2E;margin:0 0 4px;">@p.Name</h3>
+                        <p style="font-size:12px;color:#94A3B8;margin:0 0 16px;font-family:monospace;">@p.Code</p>
+                        <div style="display:flex;gap:16px;padding-top:16px;border-top:1px solid #F1F5F9;">
+                            <div><p style="font-size:18px;font-weight:700;color:#1A1F2E;margin:0;">@p.AppointingParty?.Name</p><p style="font-size:11px;color:#94A3B8;margin:0;">Client</p></div>
+                            @if (p.BudgetValue.HasValue)
+                            {
+                                <div style="margin-left:auto;">
+                                    <p style="font-size:14px;font-weight:600;color:#1B4F8A;margin:0;">@p.Currency @p.BudgetValue?.ToString("N0")</p>
+                                    <p style="font-size:11px;color:#94A3B8;margin:0;">Budget</p>
+                                </div>
+                            }
+                        </div>
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+}
+
+<!-- Create Dialog -->
+<MudDialog @bind-Visible="_showCreate" Options='new DialogOptions{MaxWidth=MaxWidth.Small,FullWidth=true}'>
+    <TitleContent><MudText Typo="Typo.h6" Style="font-weight:600;">New Project</MudText></TitleContent>
+    <DialogContent>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+            <MudTextField @bind-Value="_f.Name"   Label="Project Name"   Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
+            <MudTextField @bind-Value="_f.Code"   Label="Project Code"   Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
+            <MudTextField @bind-Value="_f.Location" Label="Location"     Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
+            <MudTextField @bind-Value="_f.Sector" Label="Sector"         Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
+            <MudNumericField @bind-Value="_f.Budget" Label="Budget Value" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" Format="N0" />
+            <MudSelect @bind-Value="_f.OrgId" Label="Client Organisation" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense">
+                @foreach (var o in _orgs)
+                { <MudSelectItem Value="o.Id">@o.Name (@o.Code)</MudSelectItem> }
+            </MudSelect>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showCreate = false" Style="text-transform:none;">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateAsync" Disabled="_creating" Style="text-transform:none;font-weight:600;">
+            @(_creating ? "Creating..." : "Create")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    List<Project>      _projects = [];
+    List<Organisation> _orgs     = [];
+    bool   _loading = true, _showCreate = false, _creating = false;
+    string _search = "";
+    Form   _f = new();
+
+    protected override async Task OnInitializedAsync() { await LoadAsync(); _orgs = await Api.GetOrgsAsync(); }
+
+    async Task LoadAsync() { _loading = true; _projects = await Api.GetProjectsAsync(_search); _loading = false; }
+
+    void Select(Project p) { UI.SetProject(p); Nav.NavigateTo("/documents"); }
+
+    async Task CreateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_f.Name) || string.IsNullOrWhiteSpace(_f.Code) || _f.OrgId == Guid.Empty)
+        { Snackbar.Add("Name, Code and Organisation are required", Severity.Warning); return; }
+        _creating = true;
+        var result = await Api.CreateProjectAsync(new CreateProjectRequest(_f.Name, _f.Code.ToUpper(), null, _f.OrgId, null, null, _f.Location, null, "GBP", _f.Budget, _f.Sector, null, null));
+        _creating = false;
+        if (result != null) { _showCreate = false; _f = new(); Snackbar.Add("Project created", Severity.Success); await LoadAsync(); }
+        else Snackbar.Add("Failed to create project", Severity.Error);
+    }
+    class Form { public string Name = "", Code = "", Location = "", Sector = ""; public decimal? Budget; public Guid OrgId; }
+}

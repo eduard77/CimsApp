@@ -1,0 +1,15 @@
+@* CdeBar.razor *@
+<div style="margin-bottom:12px;">
+    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+        <span style="font-size:12px;color:#64748B;font-weight:500;">@Label</span>
+        <span style="font-size:12px;font-weight:600;color:#1A1F2E;">@Count</span>
+    </div>
+    <div style="height:6px;background:#F1F5F9;border-radius:3px;overflow:hidden;">
+        <div style="@($"height:100%;width:{Math.Min(100, Count * 10)}%;background:{Color};border-radius:3px;")"></div>
+    </div>
+</div>
+@code {
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public int    Count { get; set; }
+    [Parameter] public string Color { get; set; } = "#3B82F6";
+}

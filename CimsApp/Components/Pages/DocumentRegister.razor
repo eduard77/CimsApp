@@ -1,0 +1,308 @@
+@page "/documents/register"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@inject CimsApp.Services.DocumentsService DocSvc
+@inject CimsApp.Services.CdeService CdeSvc
+@inject UiStateService UI
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageHeader Title="Register Document" Subtitle="ISO 19650-2 compliant document registration" ShowButton="false" />
+
+@if (UI.CurrentProject == null) { <NoProject /> }
+else
+{
+<MudGrid Spacing="3">
+    <!-- Main form (left, 2/3 width) -->
+    <MudItem xs="12" lg="8">
+        <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;">
+            <MudCardContent Style="padding:32px;">
+
+                <!-- STEP 1 — Document identity -->
+                <SectionHeader StepNumber="1" Title="Document identity" Subtitle="Who created this and what kind is it" />
+
+                <MudGrid Spacing="3" Style="margin-bottom:32px;">
+                    <MudItem xs="12" sm="6">
+                        <FieldLabel Text="Project code" Required="true" />
+                        <MudTextField Value="@UI.CurrentProject.Code" ReadOnly="true" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense"
+                                      HelperText="From active project — cannot be changed" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <FieldLabel Text="Originator" Required="true" />
+                        <MudTextField @bind-Value="_f.Originator" Placeholder="e.g. ARCCO" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense"
+                                      MaxLength="6" HelperText="Your organisation's 3-6 letter code"
+                                      Immediate="true" />
+                    </MudItem>
+
+                    <MudItem xs="12" sm="6">
+                        <FieldLabel Text="Document type" Required="true" />
+                        <MudAutocomplete T="CodeItem" @bind-Value="_selectedType"
+                                         SearchFunc="SearchTypes" ToStringFunc="@(x => x==null ? "" : $"{x.Code} — {x.Label}")"
+                                         Variant="Variant.Outlined" Margin="Margin.Dense" CoerceValue="false"
+                                         Dense="true" ResetValueOnEmptyText="true"
+                                         Clearable="true"
+                                         HelperText="Start typing to search (e.g. 'drawing')"
+                                         OpenIcon="@Icons.Material.Filled.Search" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <FieldLabel Text="Role / discipline" />
+                        <MudSelect T="CodeItem" @bind-Value="_selectedRole" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                   ToStringFunc="@(x => x==null ? "" : $"{x.Code} — {x.Label}")" Dense="true">
+                            @foreach (var r in Iso19650Codes.Roles)
+                            { <MudSelectItem Value="r">@r.Code — @r.Label</MudSelectItem> }
+                        </MudSelect>
+                    </MudItem>
+                </MudGrid>
+
+                <!-- STEP 2 — Location -->
+                <SectionHeader StepNumber="2" Title="Location" Subtitle="Where in the project does this document belong" />
+
+                <MudGrid Spacing="3" Style="margin-bottom:32px;">
+                    <MudItem xs="12" sm="6">
+                        <FieldLabel Text="Volume / System" />
+                        <MudSelect T="CodeItem" @bind-Value="_selectedVolume" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                   ToStringFunc="@(x => x==null ? "" : $"{x.Code} — {x.Label}")" Dense="true">
+                            @foreach (var v in Iso19650Codes.Volumes)
+                            { <MudSelectItem Value="v">@v.Code — @v.Label</MudSelectItem> }
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <FieldLabel Text="Level / Location" />
+                        <MudSelect T="CodeItem" @bind-Value="_selectedLevel" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                   ToStringFunc="@(x => x==null ? "" : $"{x.Code} — {x.Label}")" Dense="true">
+                            @foreach (var lv in Iso19650Codes.Levels)
+                            { <MudSelectItem Value="lv">@lv.Code — @lv.Label</MudSelectItem> }
+                        </MudSelect>
+                    </MudItem>
+                </MudGrid>
+
+                <!-- STEP 3 — Sequential number -->
+                <SectionHeader StepNumber="3" Title="Sequential number" Subtitle="Unique number within this type and discipline" />
+
+                <MudGrid Spacing="3" Style="margin-bottom:32px;">
+                    <MudItem xs="12" sm="6">
+                        <FieldLabel Text="Number" Required="true" />
+                        <MudNumericField @bind-Value="_f.Number" Min="1" Max="9999"
+                                         Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense"
+                                         HelperText="1 - 9999 (auto zero-padded to 4 digits)" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <FieldLabel Text="Initial suitability" />
+                        <MudSelect T="CodeItem" @bind-Value="_selectedSuitability" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                   ToStringFunc="@(x => x==null ? "" : x.Label)" Dense="true">
+                            @foreach (var s in Iso19650Codes.SuitabilityCodes)
+                            { <MudSelectItem Value="s">@s.Label</MudSelectItem> }
+                        </MudSelect>
+                    </MudItem>
+                </MudGrid>
+
+                <!-- STEP 4 — Title and metadata -->
+                <SectionHeader StepNumber="4" Title="Title and metadata" Subtitle="Human-readable description" />
+
+                <MudGrid Spacing="3">
+                    <MudItem xs="12">
+                        <FieldLabel Text="Title" Required="true" />
+                        <MudTextField @bind-Value="_f.Title" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense"
+                                      Placeholder="e.g. Ground Floor General Arrangement"
+                                      Immediate="true" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <FieldLabel Text="Description" />
+                        <MudTextField @bind-Value="_f.Description" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense"
+                                      Lines="2" Placeholder="Optional longer description" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <FieldLabel Text="CDE Container" />
+                        <MudSelect T="Guid?" @bind-Value="_f.ContainerId" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Dense="true">
+                            <MudSelectItem T="Guid?" Value="null">(none)</MudSelectItem>
+                            @foreach (var c in _containers)
+                            { <MudSelectItem T="Guid?" Value="c.Id">@c.Name</MudSelectItem> }
+                        </MudSelect>
+                    </MudItem>
+                </MudGrid>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    <!-- Right panel — sticky preview + actions -->
+    <MudItem xs="12" lg="4">
+        <div style="position:sticky;top:24px;">
+            <!-- Live document number preview -->
+            <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;margin-bottom:16px;">
+                <MudCardContent Style="padding:24px;">
+                    <p style="font-size:11px;font-weight:600;color:#94A3B8;letter-spacing:1px;text-transform:uppercase;margin:0 0 10px;">Generated document number</p>
+                    <div style="background:#0F172A;border-radius:8px;padding:14px 16px;font-family:'Cascadia Code','Consolas',monospace;font-size:14px;font-weight:600;color:#60A5FA;letter-spacing:1px;word-break:break-all;">
+                        @GetPreview()
+                    </div>
+
+                    <div style="margin-top:16px;padding-top:16px;border-top:1px solid #F1F5F9;">
+                        <p style="font-size:11px;font-weight:600;color:#94A3B8;letter-spacing:1px;text-transform:uppercase;margin:0 0 10px;">Field breakdown</p>
+                        @foreach (var seg in GetSegments())
+                        {
+                            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #F8FAFC;font-size:12px;">
+                                <span style="color:#64748B;font-weight:500;">@seg.Label</span>
+                                <span style="font-family:monospace;font-weight:600;color:@(seg.Missing?"#94A3B8":"#1A1F2E");">@seg.Value</span>
+                            </div>
+                        }
+                    </div>
+                </MudCardContent>
+            </MudCard>
+
+            <!-- Validation feedback -->
+            @if (_errors.Any())
+            {
+                <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #FECACA;background:#FEF2F2;margin-bottom:16px;">
+                    <MudCardContent Style="padding:16px 20px;">
+                        <p style="font-size:12px;font-weight:600;color:#991B1B;margin:0 0 8px;">⚠ Cannot register yet</p>
+                        @foreach (var err in _errors)
+                        {
+                            <p style="font-size:12px;color:#991B1B;margin:2px 0;">• @err</p>
+                        }
+                    </MudCardContent>
+                </MudCard>
+            }
+            else
+            {
+                <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #BBF7D0;background:#F0FDF4;margin-bottom:16px;">
+                    <MudCardContent Style="padding:16px 20px;">
+                        <p style="font-size:12px;font-weight:600;color:#065F46;margin:0;">✓ Ready to register</p>
+                    </MudCardContent>
+                </MudCard>
+            }
+
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Size="Size.Large"
+                       OnClick="RegisterAsync" Disabled="_saving || _errors.Any()"
+                       StartIcon="@Icons.Material.Filled.Check"
+                       Style="text-transform:none;font-weight:600;height:48px;border-radius:10px;">
+                @(_saving ? "Registering..." : "Register Document")
+            </MudButton>
+            <MudButton Variant="Variant.Text" FullWidth="true" OnClick='() => Nav.NavigateTo("/documents")'
+                       Style="text-transform:none;margin-top:8px;">Cancel</MudButton>
+        </div>
+    </MudItem>
+</MudGrid>
+}
+
+@code {
+    Form _f = new();
+    CodeItem? _selectedType, _selectedRole, _selectedVolume, _selectedLevel, _selectedSuitability;
+    List<CdeContainer> _containers = [];
+    bool _saving = false;
+    List<string> _errors = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (UI.CurrentProject == null) return;
+        _containers = await CdeSvc.ListContainersAsync(UI.CurrentProject.Id);
+
+        // Sensible defaults
+        _selectedVolume = Iso19650Codes.Volumes.First(v => v.Code == "ZZ");
+        _selectedLevel  = Iso19650Codes.Levels.First(l => l.Code == "ZZ");
+        _selectedRole   = Iso19650Codes.Roles.First(r => r.Code == "XX");
+        _selectedSuitability = Iso19650Codes.SuitabilityCodes.First(s => s.Code == "S0");
+    }
+
+    Task<IEnumerable<CodeItem>> SearchTypes(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return Task.FromResult(Iso19650Codes.DocumentTypes.AsEnumerable());
+        var lower = value.ToLowerInvariant();
+        return Task.FromResult(Iso19650Codes.DocumentTypes
+            .Where(x => x.Code.ToLowerInvariant().Contains(lower) || x.Label.ToLowerInvariant().Contains(lower))
+            .AsEnumerable());
+    }
+
+    string GetPreview()
+    {
+        var proj  = string.IsNullOrWhiteSpace(UI.CurrentProject?.Code) ? "PROJ" : UI.CurrentProject.Code;
+        var orig  = string.IsNullOrWhiteSpace(_f.Originator) ? "ORIG" : _f.Originator.ToUpperInvariant();
+        var vol   = _selectedVolume?.Code ?? "ZZ";
+        var lv    = _selectedLevel?.Code ?? "ZZ";
+        var type  = _selectedType?.Code ?? "XX";
+        var role  = _selectedRole?.Code ?? "XX";
+        var num   = _f.Number.ToString("D4");
+        return $"{proj}-{orig}-{vol}-{lv}-{type}-{role}-{num}";
+    }
+
+    record Segment(string Label, string Value, bool Missing);
+
+    List<Segment> GetSegments() =>
+    [
+        new("Project",    UI.CurrentProject?.Code ?? "—", UI.CurrentProject == null),
+        new("Originator", string.IsNullOrWhiteSpace(_f.Originator) ? "ORIG" : _f.Originator.ToUpperInvariant(), string.IsNullOrWhiteSpace(_f.Originator)),
+        new("Volume",     _selectedVolume?.Code ?? "ZZ", false),
+        new("Level",      _selectedLevel?.Code ?? "ZZ", false),
+        new("Type",       _selectedType?.Code ?? "XX", _selectedType == null),
+        new("Role",       _selectedRole?.Code ?? "XX", false),
+        new("Number",     _f.Number.ToString("D4"), _f.Number < 1),
+    ];
+
+    bool Validate()
+    {
+        _errors.Clear();
+        if (string.IsNullOrWhiteSpace(_f.Originator))    _errors.Add("Originator is required");
+        if (_selectedType == null)                        _errors.Add("Document type is required");
+        if (_f.Number < 1)                                _errors.Add("Number must be 1 or greater");
+        if (string.IsNullOrWhiteSpace(_f.Title))          _errors.Add("Title is required");
+        return _errors.Count == 0;
+    }
+
+    protected override void OnParametersSet() => Validate();
+
+    async Task RegisterAsync()
+    {
+        if (!Validate()) { StateHasChanged(); return; }
+        _saving = true;
+        try
+        {
+            var docType = MapDocType(_selectedType!.Code);
+            var req = new CimsApp.DTOs.CreateDocumentRequest(
+                UI.CurrentProject!.Code,
+                _f.Originator.ToUpperInvariant(),
+                _selectedVolume?.Code ?? "ZZ",
+                _selectedLevel?.Code  ?? "ZZ",
+                _selectedType!.Code,
+                _selectedRole?.Code   ?? "XX",
+                _f.Number,
+                _f.Title,
+                _f.Description,
+                docType,
+                _f.ContainerId,
+                null);
+            var result = await DocSvc.CreateAsync(UI.CurrentProject!.Id, req, UI.UserId, null, null);
+            Snackbar.Add($"Document {result.DocumentNumber} registered", Severity.Success);
+            Nav.NavigateTo("/documents");
+        }
+        catch (CimsApp.Core.AppException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Unexpected error: {ex.Message}", Severity.Error);
+        }
+        finally { _saving = false; }
+    }
+
+    DocumentType MapDocType(string isoCode) => isoCode switch
+    {
+        "DR" or "PL" => DocumentType.Drawing,
+        "M3" or "M2" => DocumentType.Model,
+        "SP"         => DocumentType.Specification,
+        "SH" or "PP" or "PR" => DocumentType.Schedule,
+        "RP" or "SU" or "CA" or "CP" => DocumentType.Report,
+        "CO" or "CM" or "FN" => DocumentType.Correspondence,
+        "MI" or "AC" => DocumentType.MeetingMinutes,
+        "RI"         => DocumentType.Rfi,
+        "CT" or "EA" => DocumentType.Contract,
+        _            => DocumentType.Other,
+    };
+
+    class Form
+    {
+        public string  Originator  = "";
+        public int     Number      = 1;
+        public string  Title       = "";
+        public string? Description;
+        public Guid?   ContainerId;
+    }
+}

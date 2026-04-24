@@ -1,0 +1,10 @@
+@* PriorityBadge.razor *@
+<span style="@Style()">@Priority</span>
+@code {
+    [Parameter] public string? Priority { get; set; }
+    string Style() => Priority switch {
+        "Urgent" => "display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;background:#FEE2E2;color:#991B1B;",
+        "High"   => "display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;background:#FEF3C7;color:#92400E;",
+        "Medium" => "display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;background:#DBEAFE;color:#1D4ED8;",
+        _        => "display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;background:#F1F5F9;color:#475569;" };
+}

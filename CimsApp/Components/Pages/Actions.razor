@@ -1,0 +1,92 @@
+@page "/actions"
+@inject BlazorApiClient Api
+@inject UiStateService UI
+@inject ISnackbar Snackbar
+
+<PageHeader Title="Action Items" Subtitle="@(UI.CurrentProject?.Name ?? "Select a project")" ButtonLabel="Add Action" OnButton="() => _show = true" ShowButton="UI.CurrentProject != null" />
+
+@if (UI.CurrentProject == null) { <NoProject /> }
+else
+{
+    <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
+        @foreach (var s in new[]{"All","Open","InProgress","Closed"})
+        { <div @onclick="() => _f = s" style="@Pill(s)">@(s=="InProgress"?"In Progress":s)</div> }
+        <div @onclick="() => _overdue = !_overdue"
+             style="@($"padding:6px 14px;border-radius:20px;background:{(_overdue?"#FEE2E2":"white")};color:{(_overdue?"#991B1B":"#64748B")};cursor:pointer;font-size:12px;font-weight:600;border:1px solid {(_overdue?"#FECACA":"#E2E8F0")};user-select:none;")">
+            ⚠ Overdue
+        </div>
+    </div>
+
+    @if (_loading) { <Loading /> }
+    else
+    {
+        var shown = (_f == "All" ? _actions : _actions.Where(a => a.Status.ToString() == _f).ToList())
+            .Where(a => !_overdue || (a.DueDate < DateTime.Now && a.Status != ActionStatus.Closed && a.Status != ActionStatus.Cancelled)).ToList();
+        @if (!shown.Any()) { <EmptyState Icon="@Icons.Material.Filled.CheckCircle" Message="No actions found" /> }
+        else
+        {
+            <div style="display:flex;flex-direction:column;gap:10px;">
+                @foreach (var a in shown)
+                {
+                    var od = a.DueDate < DateTime.Now && a.Status != ActionStatus.Closed && a.Status != ActionStatus.Cancelled;
+                    <MudCard Elevation="0" Style="@($"border-radius:12px;border:1px solid {(od?"#FECACA":"#E2E8F0")};")">
+                        <MudCardContent Style="padding:16px 20px;">
+                            <div style="display:flex;align-items:flex-start;gap:16px;">
+                                <div @onclick="() => Toggle(a)"
+                                     style="@($"width:22px;height:22px;border-radius:6px;border:2px solid {(a.Status==ActionStatus.Closed?"#10B981":"#CBD5E1")};background:{(a.Status==ActionStatus.Closed?"#10B981":"white")};display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;margin-top:2px;")">
+                                    @if (a.Status == ActionStatus.Closed) { <MudIcon Icon="@Icons.Material.Filled.Check" Style="font-size:14px;color:white;" /> }
+                                </div>
+                                <div style="flex:1;">
+                                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                                        <span style="@($"font-size:14px;font-weight:600;color:{(a.Status==ActionStatus.Closed?"#94A3B8":"#1A1F2E")};text-decoration:{(a.Status==ActionStatus.Closed?"line-through":"none")}")">@a.Title</span>
+                                        <PriorityBadge Priority="@a.Priority.ToString()" />
+                                    </div>
+                                    @if (a.Description != null) { <p style="font-size:13px;color:#64748B;margin:0 0 4px;">@a.Description</p> }
+                                    <div style="display:flex;gap:12px;font-size:11px;color:#94A3B8;flex-wrap:wrap;">
+                                        @if (a.Source != null) { <span>📋 @a.Source</span> }
+                                        @if (a.Assignee != null) { <span>👤 @a.Assignee.FirstName @a.Assignee.LastName</span> }
+                                        @if (a.DueDate.HasValue) { <span style="@($"color:{(od?"#DC2626":"#94A3B8")};font-weight:{(od?"600":"400")}")">📅 @a.DueDate.Value.ToString("dd MMM yyyy")@(od?" — OVERDUE":"")</span> }
+                                    </div>
+                                </div>
+                                <StatusBadge Status="@a.Status.ToString()" />
+                            </div>
+                        </MudCardContent>
+                    </MudCard>
+                }
+            </div>
+        }
+    }
+}
+
+<MudDialog @bind-Visible="_show" Options='new DialogOptions{MaxWidth=MaxWidth.Small,FullWidth=true}'>
+    <TitleContent><MudText Typo="Typo.h6" Style="font-weight:600;">New Action Item</MudText></TitleContent>
+    <DialogContent>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+            <MudTextField @bind-Value="_nf.Title"       Label="Title"       Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
+            <MudTextField @bind-Value="_nf.Description" Label="Description" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" Lines="2" />
+            <MudTextField @bind-Value="_nf.Source"      Label="Source"      Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
+            <MudSelect @bind-Value="_nf.Priority" Label="Priority" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense">
+                <MudSelectItem Value="Priority.Low">Low</MudSelectItem>
+                <MudSelectItem Value="Priority.Medium">Medium</MudSelectItem>
+                <MudSelectItem Value="Priority.High">High</MudSelectItem>
+                <MudSelectItem Value="Priority.Urgent">Urgent</MudSelectItem>
+            </MudSelect>
+            <MudDatePicker @bind-Date="_nf.DueDate" Label="Due Date" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _show = false" Style="text-transform:none;">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateAsync" Disabled="_saving" Style="text-transform:none;font-weight:600;">@(_saving?"Adding...":"Add Action")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    List<ActionItem> _actions = []; bool _loading = true, _show = false, _saving = false, _overdue = false;
+    string _f = "All"; ActionForm _nf = new();
+    string Pill(string s) => s == _f ? "padding:6px 14px;border-radius:20px;background:#1B4F8A;color:white;cursor:pointer;font-size:12px;font-weight:600;user-select:none;display:flex;align-items:center;" : "padding:6px 14px;border-radius:20px;background:white;color:#64748B;cursor:pointer;font-size:12px;border:1px solid #E2E8F0;user-select:none;display:flex;align-items:center;";
+    protected override async Task OnInitializedAsync() { UI.OnChange += () => InvokeAsync(async () => { await Load(); StateHasChanged(); }); await Load(); }
+    async Task Load() { if (UI.CurrentProject == null) { _loading = false; return; } _loading = true; _actions = await Api.GetActionsAsync(UI.CurrentProject.Id); _loading = false; }
+    async Task Toggle(ActionItem a) { var ns = a.Status == ActionStatus.Closed ? ActionStatus.Open : ActionStatus.Closed; await Api.UpdateActionAsync(UI.CurrentProject!.Id, a.Id, new UpdateActionRequest(null, null, null, ns, null, null)); await Load(); }
+    async Task CreateAsync() { if (string.IsNullOrWhiteSpace(_nf.Title)) { Snackbar.Add("Title required", Severity.Warning); return; } _saving = true; var r = await Api.CreateActionAsync(UI.CurrentProject!.Id, new CreateActionRequest(_nf.Title, _nf.Description, _nf.Source, _nf.Priority, null, _nf.DueDate)); _saving = false; if (r != null) { _show = false; _nf = new(); Snackbar.Add("Action added", Severity.Success); await Load(); } else Snackbar.Add("Failed", Severity.Error); }
+    class ActionForm { public string Title = "", Description = "", Source = ""; public Priority Priority = Priority.Medium; public DateTime? DueDate; }
+}

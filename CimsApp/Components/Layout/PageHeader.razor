@@ -1,0 +1,19 @@
+@* PageHeader.razor *@
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;">
+    <div>
+        <h1 style="font-size:22px;font-weight:700;color:#1A1F2E;margin:0 0 4px;">@Title</h1>
+        <p style="color:#64748B;margin:0;font-size:14px;">@Subtitle</p>
+    </div>
+    @if (ShowButton)
+    {
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="OnButton" Style="text-transform:none;border-radius:8px;font-weight:600;">@ButtonLabel</MudButton>
+    }
+</div>
+@code {
+    [Parameter] public string  Title       { get; set; } = "";
+    [Parameter] public string  Subtitle    { get; set; } = "";
+    [Parameter] public string  ButtonLabel { get; set; } = "New";
+    [Parameter] public bool    ShowButton  { get; set; }
+    [Parameter] public EventCallback OnButton { get; set; }
+}

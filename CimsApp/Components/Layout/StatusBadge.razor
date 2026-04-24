@@ -1,0 +1,23 @@
+@* StatusBadge.razor *@
+<span style="@Style()">@Label()</span>
+@code {
+    [Parameter] public string? Status { get; set; }
+    string Label() => Status switch
+    {
+        "WorkInProgress" => "WIP", "Shared" => "Shared", "Published" => "Published",
+        "Archived" => "Archived", "Voided" => "Voided", "Initiation" => "Initiation",
+        "Planning" => "Planning", "Execution" => "Execution", "Monitoring" => "Monitoring",
+        "Closeout" => "Closeout", "Completed" => "Completed", "Open" => "Open",
+        "UnderReview" => "In Review", "Responded" => "Responded", "Closed" => "Closed",
+        "Draft" => "Draft", "InProgress" => "In Progress", _ => Status ?? "—"
+    };
+    string Style() { var (bg, fg) = Status switch {
+        "WorkInProgress" => ("#F1F5F9","#475569"), "Shared"    => ("#DBEAFE","#1D4ED8"),
+        "Published"      => ("#D1FAE5","#065F46"), "Archived"  => ("#FEF3C7","#92400E"),
+        "Voided"         => ("#FEE2E2","#991B1B"), "Execution" => ("#D1FAE5","#065F46"),
+        "Planning"       => ("#DBEAFE","#1D4ED8"), "Open"      => ("#FEE2E2","#991B1B"),
+        "UnderReview"    => ("#FEF3C7","#92400E"), "Responded" => ("#D1FAE5","#065F46"),
+        "Closed"         => ("#F1F5F9","#475569"), "InProgress"=> ("#DBEAFE","#1D4ED8"),
+        _                => ("#F1F5F9","#475569") };
+        return $"display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600;background:{bg};color:{fg};white-space:nowrap;"; }
+}

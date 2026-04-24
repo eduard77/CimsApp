@@ -1,0 +1,4 @@
+ClaimID,DateRaised,Type(EOT/LossExpense/Variation/Defect/Counterclaim),RaisedBy,RaisedAgainst,ContractClause,EventDate,NoticeDate(withinTimeBar?),Description,ProgrammeImpact(Days),CostImpact(£),SupportingEvidence,Status(Notified/UnderReview/Agreed/Disputed/Closed),Response,AgreedDays,AgreedAmount,AgreedDate,ClosedDate,Notes
+C-001,,EOT,,,,,,Adverse weather during roof installation,,,,Notified,,,,,
+C-002,,Variation,,,,,,Client change to finish specification Level 3,,,,UnderReview,,,,,
+C-003,,LossExpense,,,,,,Prolongation due to delayed possession of Area B,,,,Disputed,,,,,

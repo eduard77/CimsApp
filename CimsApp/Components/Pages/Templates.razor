@@ -1,0 +1,219 @@
+@page "/projects/{ProjectId:guid}/templates"
+@inject HttpClient Http
+@inject UiStateService UI
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageHeader Title="Project Templates"
+            Subtitle="PMBOK + ISO 19650 document library for this project" />
+
+@if (_loading)
+{
+    <div style="text-align:center;padding:60px;">
+        <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+    </div>
+}
+else if (!_templates.Any())
+{
+    <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;padding:48px;text-align:center;">
+        <MudIcon Icon="@Icons.Material.Filled.FolderOpen"
+                 Style="font-size:48px;color:#CBD5E1;margin-bottom:12px;display:block;" />
+        <p style="font-size:15px;color:#64748B;margin:0 0 16px;">
+            No templates found. The PMBOK template folder may not have been provisioned.
+        </p>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Refresh"
+                   OnClick="ProvisionAsync"
+                   Style="text-transform:none;">
+            Provision templates now
+        </MudButton>
+    </MudCard>
+}
+else
+{
+    @foreach (var group in _templates.GroupBy(t => GetKnowledgeArea(t.PmbokFolder)).OrderBy(g => g.Key))
+    {
+        <div style="margin-bottom:32px;">
+            <h3 style="font-size:13px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:0.06em;margin:0 0 12px;">
+                @group.Key
+            </h3>
+            <MudGrid Spacing="2">
+                @foreach (var t in group.OrderBy(x => x.FileName))
+                {
+                    <MudItem xs="12" md="6" xl="4">
+                        <MudCard Elevation="0"
+                                 @onclick="() => Open(t)"
+                                 Style="border-radius:10px;border:1px solid #E2E8F0;cursor:pointer;padding:16px;transition:all 0.15s;">
+                            <div style="display:flex;align-items:flex-start;gap:12px;">
+                                <div style="width:36px;height:36px;border-radius:8px;background:#EBF3FF;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                                    <MudIcon Icon="@GetIcon(t.FileExtension)"
+                                             Style="color:#1B4F8A;font-size:18px;" />
+                                </div>
+                                <div style="min-width:0;flex:1;">
+                                    <p style="font-size:14px;font-weight:600;color:#1A1F2E;margin:0 0 2px;">@t.Title</p>
+                                    <p style="font-size:11px;color:#94A3B8;margin:0;font-family:monospace;">
+                                        @t.FileExtension.ToUpper() · @t.RevisionCode · @t.CdeState
+                                    </p>
+                                </div>
+                                @if (t.IsEdited)
+                                {
+                                    <MudTooltip Text="Edited"><MudIcon Icon="@Icons.Material.Filled.Edit" Style="font-size:14px;color:#F59E0B;" /></MudTooltip>
+                                }
+                            </div>
+                        </MudCard>
+                    </MudItem>
+                }
+            </MudGrid>
+        </div>
+    }
+}
+
+<!-- Viewer / Editor dialog -->
+<MudDialog @bind-Visible="_showEditor" Options='new DialogOptions{MaxWidth=MaxWidth.Large,FullWidth=true}'>
+    <TitleContent>
+        <MudText Typo="Typo.h6" Style="font-weight:600;">@_activeTitle</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_contentLoading)
+        {
+            <div style="text-align:center;padding:40px;">
+                <MudProgressCircular Indeterminate="true" />
+            </div>
+        }
+        else
+        {
+            <MudTextField @bind-Value="_activeContent"
+                          Label="@_activeFileName"
+                          Variant="Variant.Outlined"
+                          Lines="24"
+                          Style="font-family:monospace;font-size:12px;" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showEditor = false" Style="text-transform:none;">Close</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync"
+                   Disabled="_saving" Style="text-transform:none;font-weight:600;">
+            @(_saving ? "Saving..." : "Save")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Parameter] public Guid ProjectId { get; set; }
+
+    List<TemplateDto> _templates = [];
+    bool _loading = true;
+    bool _showEditor = false;
+    bool _contentLoading = false;
+    bool _saving = false;
+    string _activeTitle = "", _activeFileName = "", _activeContent = "";
+    Guid _activeId;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _templates = await Http.GetFromJsonAsync<List<TemplateDto>>(
+                $"api/projects/{ProjectId}/templates") ?? new();
+        }
+        catch
+        {
+            _templates = new();
+        }
+        _loading = false;
+    }
+
+    async Task ProvisionAsync()
+    {
+        var resp = await Http.PostAsync($"api/projects/{ProjectId}/provision", null);
+        if (resp.IsSuccessStatusCode)
+        {
+            Snackbar.Add("Templates provisioned", Severity.Success);
+            await LoadAsync();
+        }
+        else
+        {
+            Snackbar.Add("Provisioning failed", Severity.Error);
+        }
+    }
+
+    async Task Open(TemplateDto t)
+    {
+        _activeId = t.Id;
+        _activeTitle = t.Title;
+        _activeFileName = t.FileName;
+        _showEditor = true;
+        _contentLoading = true;
+        _activeContent = "";
+
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ContentResponse>(
+                $"api/projects/{ProjectId}/templates/{t.Id}/content");
+            _activeContent = r?.Content ?? "";
+        }
+        catch
+        {
+            _activeContent = "Failed to load content.";
+        }
+        _contentLoading = false;
+    }
+
+    async Task SaveAsync()
+    {
+        _saving = true;
+        var resp = await Http.PutAsJsonAsync(
+            $"api/projects/{ProjectId}/templates/{_activeId}/content",
+            new { Content = _activeContent });
+        _saving = false;
+        if (resp.IsSuccessStatusCode)
+        {
+            Snackbar.Add("Saved", Severity.Success);
+            _showEditor = false;
+            await LoadAsync();
+        }
+        else Snackbar.Add("Save failed", Severity.Error);
+    }
+
+    static string GetKnowledgeArea(string folder)
+    {
+        // Take the first path segment and humanise it
+        var first = folder.Split('/').FirstOrDefault() ?? folder;
+        // e.g. "08_Risk_Management" -> "08. Risk Management"
+        var parts = first.Split('_', 2);
+        return parts.Length == 2
+            ? $"{parts[0]}. {parts[1].Replace('_', ' ')}"
+            : first.Replace('_', ' ');
+    }
+
+    static string GetIcon(string ext) => ext switch
+    {
+        "md"   => Icons.Material.Filled.Description,
+        "csv"  => Icons.Material.Filled.TableChart,
+        "xlsx" => Icons.Material.Filled.TableChart,
+        "pdf"  => Icons.Material.Filled.PictureAsPdf,
+        "docx" => Icons.Material.Filled.Article,
+        _      => Icons.Material.Filled.InsertDriveFile
+    };
+
+    class TemplateDto
+    {
+        public Guid Id { get; set; }
+        public string PmbokFolder { get; set; } = "";
+        public string FileName { get; set; } = "";
+        public string Title { get; set; } = "";
+        public string FileExtension { get; set; } = "";
+        public string CdeState { get; set; } = "";
+        public string Suitability { get; set; } = "";
+        public string RevisionCode { get; set; } = "";
+        public bool IsEdited { get; set; }
+    }
+
+    class ContentResponse
+    {
+        public string Content { get; set; } = "";
+    }
+}

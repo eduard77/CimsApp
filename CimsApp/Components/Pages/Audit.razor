@@ -1,0 +1,41 @@
+@page "/audit"
+@inject BlazorApiClient Api
+@inject UiStateService UI
+
+<PageHeader Title="Audit Trail" Subtitle="Immutable record — ISO 19650-5" ShowButton="false" />
+
+@if (UI.CurrentProject == null) { <NoProject /> }
+else if (_loading) { <Loading /> }
+else
+{
+    <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;">
+        <MudTable Items="_logs" Hover="true" Elevation="0" Dense="true">
+            <HeaderContent>
+                <MudTh Style="font-size:11px;font-weight:600;color:#94A3B8;text-transform:uppercase;padding:12px 16px;">Time</MudTh>
+                <MudTh Style="font-size:11px;font-weight:600;color:#94A3B8;text-transform:uppercase;">User</MudTh>
+                <MudTh Style="font-size:11px;font-weight:600;color:#94A3B8;text-transform:uppercase;">Action</MudTh>
+                <MudTh Style="font-size:11px;font-weight:600;color:#94A3B8;text-transform:uppercase;">Entity</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd Style="padding:12px 16px;"><span style="font-size:12px;color:#64748B;white-space:nowrap;">@context.CreatedAt.ToString("dd MMM yyyy HH:mm")</span></MudTd>
+                <MudTd>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <MudAvatar Style="width:24px;height:24px;background:#EBF3FF;color:#1B4F8A;font-size:10px;font-weight:700;">
+                            @(context.User?.FirstName?.FirstOrDefault())@(context.User?.LastName?.FirstOrDefault())
+                        </MudAvatar>
+                        <span style="font-size:12px;color:#1A1F2E;">@context.User?.FirstName @context.User?.LastName</span>
+                    </div>
+                </MudTd>
+                <MudTd><span style="@ActionStyle(context.Action)">@context.Action</span></MudTd>
+                <MudTd><span style="font-size:12px;color:#64748B;">@context.Entity</span></MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudCard>
+}
+
+@code {
+    List<AuditLog> _logs = []; bool _loading = true;
+    string ActionStyle(string a) { var (bg,fg) = a.Contains("created") ? ("#D1FAE5","#065F46") : a.Contains("transition") ? ("#DBEAFE","#1D4ED8") : ("#F1F5F9","#475569"); return $"display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-family:monospace;font-weight:600;background:{bg};color:{fg};"; }
+    protected override async Task OnInitializedAsync() { UI.OnChange += () => InvokeAsync(async () => { await Load(); StateHasChanged(); }); await Load(); }
+    async Task Load() { if (UI.CurrentProject == null) { _loading = false; return; } _loading = true; _logs = await Api.GetAuditAsync(UI.CurrentProject.Id); _loading = false; }
+}
