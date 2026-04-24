@@ -31,6 +31,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         ValidateIssuer           = true,  ValidIssuer   = builder.Configuration["Jwt:Issuer"],
         ValidateAudience         = true,  ValidAudience = builder.Configuration["Jwt:Audience"],
         ValidateLifetime         = true,  ClockSkew     = TimeSpan.Zero,
+        RoleClaimType            = CimsApp.Services.Tenancy.HttpTenantContext.GlobalRoleClaimType,
     });
 builder.Services.AddAuthorization();
 
