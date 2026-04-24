@@ -151,13 +151,14 @@ public class CimsDbContext(
              .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // ── Tenant isolation (PAFM F.1) ──────────────────────────────────
+        // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
         // AuthService use IgnoreQueryFilters() to bypass.
-        // Organisation, RefreshToken, RfiDocument, AuditLog, Notification
-        // are intentionally unfiltered — see docs/sprint-log/s0.md T-S0-03.
+        // Organisation and AuditLog remain unfiltered deliberately
+        // (anchor entity; audit-write across tenants via SuperAdmin).
         m.Entity<User>().HasQueryFilter(u => u.OrganisationId == _tenant.OrganisationId);
+        m.Entity<RefreshToken>().HasQueryFilter(x => x.User.OrganisationId == _tenant.OrganisationId);
         m.Entity<Project>().HasQueryFilter(p => p.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<ProjectMember>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<ProjectAppointment>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
@@ -165,8 +166,10 @@ public class CimsDbContext(
         m.Entity<Document>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<DocumentRevision>().HasQueryFilter(x => x.Document.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<Rfi>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<RfiDocument>().HasQueryFilter(x => x.Rfi.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<ActionItem>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<ProjectTemplate>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Notification>().HasQueryFilter(x => x.User.OrganisationId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()

@@ -17,6 +17,7 @@ public class CimsDbContextTenantFilterTests
     private static readonly Type[] TenantScoped =
     [
         typeof(User),
+        typeof(RefreshToken),
         typeof(Project),
         typeof(ProjectMember),
         typeof(ProjectAppointment),
@@ -24,17 +25,16 @@ public class CimsDbContextTenantFilterTests
         typeof(Document),
         typeof(DocumentRevision),
         typeof(Rfi),
+        typeof(RfiDocument),
         typeof(ActionItem),
         typeof(ProjectTemplate),
+        typeof(Notification),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =
     [
         typeof(Organisation),
-        typeof(RefreshToken),
-        typeof(RfiDocument),
         typeof(AuditLog),
-        typeof(Notification),
     ];
 
     private static CimsDbContext BuildContext() =>

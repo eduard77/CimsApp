@@ -51,7 +51,8 @@ public class AuthService(CimsDbContext db, IConfiguration cfg)
     {
         var principal = Validate(token, RefreshSecret) ?? throw new AppException("Invalid refresh token", 401, "INVALID_REFRESH");
         var userId = Guid.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        var stored = await db.RefreshTokens.FirstOrDefaultAsync(r => r.Token == token);
+        // Pre-auth: refresh endpoint has no access token, tenant filter bypassed.
+        var stored = await db.RefreshTokens.IgnoreQueryFilters().FirstOrDefaultAsync(r => r.Token == token);
         if (stored == null || !stored.IsActive) throw new AppException("Token revoked", 401, "TOKEN_REVOKED");
         stored.RevokedAt = DateTime.UtcNow;
         // Pre-auth (refresh endpoint has no access token): bypass User filter.
@@ -64,7 +65,9 @@ public class AuthService(CimsDbContext db, IConfiguration cfg)
 
     public async Task LogoutAsync(string token)
     {
-        var stored = await db.RefreshTokens.FirstOrDefaultAsync(r => r.Token == token);
+        // Logout accepts an opaque token without tenant context guarantees
+        // (token may outlive its access JWT). Bypass the filter here too.
+        var stored = await db.RefreshTokens.IgnoreQueryFilters().FirstOrDefaultAsync(r => r.Token == token);
         if (stored != null) { stored.RevokedAt = DateTime.UtcNow; await db.SaveChangesAsync(); }
     }
 
