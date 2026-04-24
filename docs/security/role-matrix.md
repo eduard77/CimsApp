@@ -45,7 +45,7 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 | Method | Route | Global role | Project role | Comment |
 |---|---|---|---|---|
 | GET  | `/api/v1/projects` | authenticated | — | Service filters to caller's memberships |
-| POST | `/api/v1/projects` | `OrgAdmin`, `SuperAdmin` | — | Admin-only (T-S0-08, commit `37013fc`) |
+| POST | `/api/v1/projects` | `OrgAdmin`, `SuperAdmin` | — | Admin-only (T-S0-08, commit `37013fc`). `AppointingPartyId` locked to caller's organisation; `SuperAdmin` may create under any org (audited with `project.created.superadmin_bypass`) — see ADR-0012 and commit `c83a8a9`. |
 | GET  | `/api/v1/projects/{projectId}` | authenticated | — | Service enforces membership |
 | POST | `/api/v1/projects/{projectId}/members` | authenticated | `ProjectManager+` | |
 
