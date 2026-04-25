@@ -56,7 +56,10 @@ public class AuthController(AuthService svc) : ControllerBase
 
 // ── Organisations ─────────────────────────────────────────────────────────────
 [Route("api/v1/organisations")]
-public class OrganisationsController(CimsDbContext db) : CimsControllerBase
+public class OrganisationsController(
+    CimsDbContext db,
+    InvitationService invitations,
+    CimsApp.Services.Tenancy.ITenantContext tenant) : CimsControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] string? search = null)
@@ -73,8 +76,52 @@ public class OrganisationsController(CimsDbContext db) : CimsControllerBase
         if (await db.Organisations.AnyAsync(o => o.Code == req.Code.ToUpperInvariant()))
             throw new ConflictException($"Code '{req.Code}' already exists");
         var org = new Organisation { Name = req.Name, Code = req.Code.ToUpperInvariant(), Country = req.Country };
-        db.Organisations.Add(org); await db.SaveChangesAsync();
-        return Created("", new { success = true, data = org });
+        db.Organisations.Add(org);
+        await db.SaveChangesAsync();
+        // Mint a 24-hour bootstrap invitation so the sign-up flow can
+        // continue with POST /api/v1/auth/register. The first registrant
+        // becomes the org's first OrgAdmin (set in AuthService.RegisterAsync).
+        // The plaintext token is shown ONCE in this response; only the
+        // hash is persisted, so a lost token is irrecoverable. See ADR-0011.
+        var bootstrap = await invitations.CreateAsync(
+            organisationId: org.Id,
+            createdById:    null,    // anonymous flow
+            emailBind:      null,    // registrant chooses their own email
+            expiresInDays:  1,
+            isBootstrap:    true);
+        return Created("", new
+        {
+            success = true,
+            data = new
+            {
+                organisation = org,
+                bootstrap    = new InvitationDto(bootstrap.Id, bootstrap.Token, bootstrap.ExpiresAt, true, null),
+            },
+        });
+    }
+
+    [HttpPost("{orgId:guid}/invitations")]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
+    public async Task<IActionResult> CreateInvitation(Guid orgId, CreateInvitationRequest req)
+    {
+        // OrgAdmin can only mint for their own organisation; SuperAdmin
+        // may mint for any. Mirrors ADR-0012's caller's-org-default
+        // platform-reading rule for project creation.
+        if (!tenant.IsSuperAdmin && tenant.OrganisationId != orgId)
+            throw new ForbiddenException("Cannot mint invitations for another organisation");
+
+        var inv = await invitations.CreateAsync(
+            organisationId: orgId,
+            createdById:    CurrentUserId,
+            emailBind:      req.Email,
+            expiresInDays:  req.ExpiresInDays ?? 7,
+            isBootstrap:    false);
+
+        return Created("", new
+        {
+            success = true,
+            data = new InvitationDto(inv.Id, inv.Token, inv.ExpiresAt, false, req.Email),
+        });
     }
 }
 

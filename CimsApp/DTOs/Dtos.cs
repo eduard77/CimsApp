@@ -9,6 +9,8 @@ public record AuthResponse(string AccessToken, string RefreshToken, UserSummaryD
 public record UserSummaryDto(Guid Id, string Email, string FirstName, string LastName, string? JobTitle, OrgSummaryDto Organisation);
 public record OrgSummaryDto(Guid Id, string Name, string Code);
 public record CreateOrgRequest(string Name, string Code, string? Country);
+public record CreateInvitationRequest(string? Email = null, int? ExpiresInDays = null);
+public record InvitationDto(Guid Id, string Token, DateTime ExpiresAt, bool IsBootstrap, string? Email);
 public record CreateProjectRequest(string Name, string Code, string? Description, Guid AppointingPartyId, DateTime? StartDate, DateTime? EndDate, string? Location, string? Country, string Currency, decimal? BudgetValue, string? Sector, string? Sponsor, string? EirRef);
 public record UpdateProjectRequest(string? Name, string? Description, ProjectStatus? Status, DateTime? StartDate, DateTime? EndDate, string? Location, decimal? BudgetValue, string? Sponsor, string? EirRef);
 public record AddMemberRequest(Guid UserId, UserRole Role);
