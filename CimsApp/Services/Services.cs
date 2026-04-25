@@ -1,5 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -107,6 +108,102 @@ public class AuthService(CimsDbContext db, IConfiguration cfg)
 
     private static UserSummaryDto Map(User u, Organisation o) =>
         new(u.Id, u.Email, u.FirstName, u.LastName, u.JobTitle, new OrgSummaryDto(o.Id, o.Name, o.Code));
+}
+
+// ── Invitations ───────────────────────────────────────────────────────────────
+// Single-use tokens binding a registering user to a specific organisation.
+// See ADR-0011 (planned) and CR-002. Closes SR-S0-01 by removing the
+// attacker-supplied OrganisationId from the anonymous register flow.
+public class InvitationService(CimsDbContext db)
+{
+    public sealed record CreateResult(Guid Id, string Token, DateTime ExpiresAt);
+
+    /// <summary>
+    /// Mint an invitation. Returns the plaintext token once — only the
+    /// SHA-256 hash is persisted, so a lost token cannot be recovered.
+    /// </summary>
+    public async Task<CreateResult> CreateAsync(
+        Guid organisationId,
+        Guid? createdById,
+        string? emailBind,
+        int expiresInDays,
+        bool isBootstrap = false)
+    {
+        if (expiresInDays < 1) expiresInDays = 1;
+        if (expiresInDays > 30) expiresInDays = 30;
+        // Bootstrap tokens shorten to 24h regardless — they are issued
+        // anonymously at organisation-creation time and a longer window
+        // would widen the unauthenticated attack surface unnecessarily.
+        if (isBootstrap) expiresInDays = 1;
+
+        // 32 bytes of cryptographic randomness, base64url-encoded.
+        var bytes = RandomNumberGenerator.GetBytes(32);
+        var plaintext = Convert.ToBase64String(bytes)
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+        var invitation = new Invitation
+        {
+            OrganisationId = organisationId,
+            TokenHash      = HashToken(plaintext),
+            Email          = string.IsNullOrWhiteSpace(emailBind) ? null : emailBind.Trim().ToLowerInvariant(),
+            IsBootstrap    = isBootstrap,
+            ExpiresAt      = DateTime.UtcNow.AddDays(expiresInDays),
+            CreatedById    = createdById,
+        };
+        db.Invitations.Add(invitation);
+        await db.SaveChangesAsync();
+        return new CreateResult(invitation.Id, plaintext, invitation.ExpiresAt);
+    }
+
+    /// <summary>
+    /// Validate a plaintext token and return the matching Invitation. Does
+    /// NOT mark consumed — caller marks consumption via MarkConsumedAsync
+    /// after the dependent User row is persisted, so we never end up with
+    /// a consumed invitation pointing at a User that failed to save.
+    /// </summary>
+    public async Task<Invitation> ValidateAsync(string plaintextToken, string registeringEmail)
+    {
+        if (string.IsNullOrWhiteSpace(plaintextToken))
+            throw new ValidationException(["InvitationToken is required"]);
+
+        var hash = HashToken(plaintextToken);
+        // Pre-auth: tenant context is null at register-time. Same pattern
+        // as AuthService.LoginAsync uses for User/RefreshToken lookups.
+        var inv = await db.Invitations.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(i => i.TokenHash == hash)
+            ?? throw new NotFoundException("Invitation");
+
+        if (inv.ConsumedAt != null)
+            throw new ValidationException(["Invitation has already been used"]);
+        if (inv.ExpiresAt < DateTime.UtcNow)
+            throw new ValidationException(["Invitation has expired"]);
+        if (!string.IsNullOrEmpty(inv.Email)
+            && !string.Equals(inv.Email, registeringEmail.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new ValidationException(["Invitation is bound to a different email address"]);
+
+        return inv;
+    }
+
+    /// <summary>
+    /// Atomically mark an invitation consumed. Uses an Update-where on the
+    /// non-null ConsumedAt column so a race between two concurrent
+    /// register calls cannot double-consume the same token.
+    /// </summary>
+    public async Task<bool> MarkConsumedAsync(Guid invitationId, Guid consumerUserId)
+    {
+        var rows = await db.Invitations.IgnoreQueryFilters()
+            .Where(i => i.Id == invitationId && i.ConsumedAt == null)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(i => i.ConsumedAt, DateTime.UtcNow)
+                .SetProperty(i => i.ConsumedByUserId, consumerUserId));
+        return rows == 1;
+    }
+
+    private static string HashToken(string plaintext)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(plaintext));
+        return Convert.ToHexString(bytes);
+    }
 }
 
 // ── Projects ──────────────────────────────────────────────────────────────────

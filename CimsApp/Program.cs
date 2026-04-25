@@ -62,6 +62,7 @@ builder.Services.AddHttpContextAccessor();
 // ── App Services ──────────────────────────────────────────────────────────────
 builder.Services.AddScoped<AuditService>();
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<InvitationService>();
 builder.Services.AddScoped<ProjectsService>();
 builder.Services.AddScoped<CdeService>();
 builder.Services.AddScoped<DocumentsService>();
