@@ -2,7 +2,7 @@ using CimsApp.Models;
 
 namespace CimsApp.DTOs;
 
-public record RegisterRequest(string Email, string Password, string FirstName, string LastName, string? JobTitle, Guid OrganisationId);
+public record RegisterRequest(string Email, string Password, string FirstName, string LastName, string? JobTitle, string InvitationToken);
 public record LoginRequest(string Email, string Password);
 public record RefreshRequest(string RefreshToken);
 public record AuthResponse(string AccessToken, string RefreshToken, UserSummaryDto User);

@@ -12,7 +12,7 @@ using CimsApp.Models;
 namespace CimsApp.Services;
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
-public class AuthService(CimsDbContext db, IConfiguration cfg)
+public class AuthService(CimsDbContext db, IConfiguration cfg, InvitationService invitations)
 {
     private string AccessSecret  => cfg["Jwt:AccessSecret"]!;
     private string RefreshSecret => cfg["Jwt:RefreshSecret"]!;
@@ -23,13 +23,40 @@ public class AuthService(CimsDbContext db, IConfiguration cfg)
 
     public async Task<UserSummaryDto> RegisterAsync(RegisterRequest req)
     {
+        // Closes SR-S0-01: tenant ownership of the new User is no longer
+        // attacker-supplied. The invitation token determines OrganisationId
+        // and (for bootstrap tokens minted at org-creation time) the
+        // initial GlobalRole.
+        var invitation = await invitations.ValidateAsync(req.InvitationToken, req.Email);
+
         // Pre-auth: ignore tenant filter while checking email uniqueness.
         if (await db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == req.Email))
             throw new ConflictException("Email already registered");
-        var org = await db.Organisations.FindAsync(req.OrganisationId) ?? throw new NotFoundException("Organisation");
-        var user = new User { Email = req.Email.ToLowerInvariant(), PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password), FirstName = req.FirstName, LastName = req.LastName, JobTitle = req.JobTitle, OrganisationId = req.OrganisationId };
+
+        var org = await db.Organisations.FindAsync(invitation.OrganisationId)
+            ?? throw new NotFoundException("Organisation");
+
+        var user = new User
+        {
+            Email          = req.Email.ToLowerInvariant(),
+            PasswordHash   = BCrypt.Net.BCrypt.HashPassword(req.Password),
+            FirstName      = req.FirstName,
+            LastName       = req.LastName,
+            JobTitle       = req.JobTitle,
+            OrganisationId = invitation.OrganisationId,
+            // Bootstrap tokens are issued by anonymous org-creation and the
+            // first registrant becomes the org's first OrgAdmin so they can
+            // mint further invitations. Non-bootstrap tokens never elevate.
+            GlobalRole     = invitation.IsBootstrap ? UserRole.OrgAdmin : null,
+        };
         db.Users.Add(user);
         await db.SaveChangesAsync();
+
+        // Mark consumed only after the User row actually persisted, so a
+        // failed save (FK violation, duplicate index) leaves the invitation
+        // available for retry rather than burning it.
+        await invitations.MarkConsumedAsync(invitation.Id, user.Id);
+
         return Map(user, org);
     }
 
