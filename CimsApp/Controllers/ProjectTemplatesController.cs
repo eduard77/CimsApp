@@ -1,8 +1,4 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// ADDITIONS TO YOUR EXISTING Controllers/Controllers.cs
-// Paste this AS A NEW CONTROLLER CLASS inside the same file, or in a new file.
-// ─────────────────────────────────────────────────────────────────────────────
-
+using CimsApp.Core;
 using CimsApp.Data;
 using CimsApp.Models;
 using CimsApp.Services;
@@ -12,25 +8,15 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CimsApp.Controllers;
 
-[ApiController]
 [Route("api/projects/{projectId:guid}/templates")]
-[Authorize]
-public class ProjectTemplatesController : ControllerBase
+public class ProjectTemplatesController(CimsDbContext db, IProjectProvisioningService provisioning) : CimsControllerBase
 {
-    private readonly CimsDbContext _db;
-    private readonly IProjectProvisioningService _provisioning;
-
-    public ProjectTemplatesController(CimsDbContext db, IProjectProvisioningService provisioning)
-    {
-        _db = db;
-        _provisioning = provisioning;
-    }
-
     /// <summary>List all PMBOK templates for a project, grouped by folder</summary>
     [HttpGet]
     public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
     {
-        var templates = await _db.ProjectTemplates
+        await GetProjectRoleAsync(db, projectId);
+        var templates = await db.ProjectTemplates
             .Where(t => t.ProjectId == projectId)
             .OrderBy(t => t.PmbokFolder).ThenBy(t => t.FileName)
             .Select(t => new
@@ -55,11 +41,12 @@ public class ProjectTemplatesController : ControllerBase
     [HttpGet("{templateId:guid}/content")]
     public async Task<IActionResult> GetContent(Guid projectId, Guid templateId, CancellationToken ct)
     {
-        var template = await _db.ProjectTemplates
+        await GetProjectRoleAsync(db, projectId);
+        var template = await db.ProjectTemplates
             .FirstOrDefaultAsync(t => t.Id == templateId && t.ProjectId == projectId, ct);
         if (template is null) return NotFound();
 
-        var content = await _provisioning.GetFileContentAsync(templateId, ct);
+        var content = await provisioning.GetFileContentAsync(templateId, ct);
         return Ok(new { template.Title, template.FileName, template.FileExtension, Content = content });
     }
 
@@ -67,19 +54,22 @@ public class ProjectTemplatesController : ControllerBase
     [HttpPut("{templateId:guid}/content")]
     public async Task<IActionResult> SaveContent(Guid projectId, Guid templateId, [FromBody] SaveContentRequest req, CancellationToken ct)
     {
-        var template = await _db.ProjectTemplates
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.InformationManager)) throw new ForbiddenException();
+        var template = await db.ProjectTemplates
             .FirstOrDefaultAsync(t => t.Id == templateId && t.ProjectId == projectId, ct);
         if (template is null) return NotFound();
 
-        await _provisioning.SaveFileContentAsync(templateId, req.Content, ct);
+        await provisioning.SaveFileContentAsync(templateId, req.Content, ct);
         return NoContent();
     }
 
     /// <summary>Re-provision (admin only — useful for regenerating missing files)</summary>
     [HttpPost("~/api/projects/{projectId:guid}/provision")]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
     public async Task<IActionResult> Reprovision(Guid projectId, CancellationToken ct)
     {
-        await _provisioning.ProvisionAsync(projectId, ct);
+        await provisioning.ProvisionAsync(projectId, ct);
         return Ok(new { message = "Project templates provisioned" });
     }
 }

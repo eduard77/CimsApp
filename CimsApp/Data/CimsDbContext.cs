@@ -1,10 +1,27 @@
 using Microsoft.EntityFrameworkCore;
 using CimsApp.Models;
+using CimsApp.Services.Tenancy;
 
 namespace CimsApp.Data;
 
-public class CimsDbContext(DbContextOptions<CimsDbContext> options) : DbContext(options)
+public class CimsDbContext(
+    DbContextOptions<CimsDbContext> options,
+    ITenantContext? tenant = null) : DbContext(options)
 {
+    // Null-object default keeps EF design-time (migrations, scaffolding)
+    // working without a DI-provided tenant. In production a scoped
+    // ITenantContext is always injected.
+    private readonly ITenantContext _tenant = tenant ?? NullTenantContext.Instance;
+
+    private sealed class NullTenantContext : ITenantContext
+    {
+        public static readonly NullTenantContext Instance = new();
+        public Guid? OrganisationId => null;
+        public Guid? UserId => null;
+        public UserRole? GlobalRole => null;
+        public bool IsSuperAdmin => false;
+    }
+
     public DbSet<Organisation>       Organisations       => Set<Organisation>();
     public DbSet<User>               Users               => Set<User>();
     public DbSet<RefreshToken>       RefreshTokens       => Set<RefreshToken>();
@@ -19,7 +36,8 @@ public class CimsDbContext(DbContextOptions<CimsDbContext> options) : DbContext(
     public DbSet<ActionItem>         ActionItems         => Set<ActionItem>();
     public DbSet<AuditLog>           AuditLogs           => Set<AuditLog>();
     public DbSet<Notification>       Notifications       => Set<Notification>();
-    public DbSet<ProjectTemplate> ProjectTemplates => Set<ProjectTemplate>();
+    public DbSet<ProjectTemplate>    ProjectTemplates    => Set<ProjectTemplate>();
+    public DbSet<Invitation>         Invitations         => Set<Invitation>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -135,6 +153,52 @@ public class CimsDbContext(DbContextOptions<CimsDbContext> options) : DbContext(
              .HasForeignKey(t => t.ProjectId)
              .OnDelete(DeleteBehavior.Cascade);
         });
+
+        m.Entity<Invitation>(e =>
+        {
+            e.HasIndex(i => i.TokenHash).IsUnique();
+            e.HasIndex(i => new { i.OrganisationId, i.ConsumedAt });
+            // All three FKs are NoAction to satisfy SQL Server's
+            // multi-cascade-path check (cascade on Organisation +
+            // SetNull on Users via two columns produced
+            // FK_Invitations_Users_CreatedById errors). Aligns with
+            // the dominant NoAction pattern used elsewhere in this
+            // DbContext (ProjectMember, RfiDocument, etc.). Deleting
+            // an Organisation now requires explicit invitation
+            // cleanup first — appropriate for an audit-style entity.
+            e.HasOne(i => i.Organisation).WithMany()
+             .HasForeignKey(i => i.OrganisationId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(i => i.ConsumedByUser).WithMany()
+             .HasForeignKey(i => i.ConsumedByUserId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(i => i.CreatedBy).WithMany()
+             .HasForeignKey(i => i.CreatedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
+        // Global query filter on OrganisationId. Anonymous contexts
+        // (null tenant) see nothing by design; pre-auth paths in
+        // AuthService use IgnoreQueryFilters() to bypass. Only
+        // Organisation (the tenant anchor) is unfiltered — SuperAdmin
+        // cross-tenant reads opt in via IgnoreQueryFilters() at the
+        // call site (T-S0-07).
+        m.Entity<User>().HasQueryFilter(u => u.OrganisationId == _tenant.OrganisationId);
+        m.Entity<RefreshToken>().HasQueryFilter(x => x.User.OrganisationId == _tenant.OrganisationId);
+        m.Entity<Project>().HasQueryFilter(p => p.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<ProjectMember>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<ProjectAppointment>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<CdeContainer>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Document>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<DocumentRevision>().HasQueryFilter(x => x.Document.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Rfi>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<RfiDocument>().HasQueryFilter(x => x.Rfi.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<ActionItem>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<ProjectTemplate>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Notification>().HasQueryFilter(x => x.User.OrganisationId == _tenant.OrganisationId);
+        m.Entity<AuditLog>().HasQueryFilter(x => x.User.OrganisationId == _tenant.OrganisationId);
+        // Invitations are tenant-scoped. Pre-auth consumption in
+        // InvitationService.ConsumeAsync uses IgnoreQueryFilters(), the
+        // same pattern AuthService uses for User/RefreshToken lookups.
+        m.Entity<Invitation>().HasQueryFilter(i => i.OrganisationId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()

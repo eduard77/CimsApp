@@ -1,0 +1,191 @@
+CIMS SPRINT 0 — HANDOFF FOR 2026-04-25
+=======================================
+
+Prepared at end of day 2026-04-24. Branch: sprint/s0-multi-tenant.
+Working tree clean at handoff (only .claude/ untracked).
+
+FIRST THING TOMORROW (do before anything else)
+-----------------------------------------------
+The AddInvitations migration is committed (0fcff2a) but NOT YET
+applied to your local SQL Server database. Before testing the app:
+
+    dotnet ef database update --project CimsApp
+
+Expected effect: creates the Invitations table. If the command
+errors on "table already exists", the migration history and the
+schema are out of sync — stop and check before overwriting.
+
+Then build the solution in VS to confirm everything compiles. The
+code in commits c83a8a9 and 9b40a8d added a constructor parameter
+to ProjectsService (ITenantContext) and a new DbSet<Invitation> to
+CimsDbContext. Both are DI-resolved; no app code should break.
+
+WHAT COMPLETED TODAY (for the daily log / retrospective)
+---------------------------------------------------------
+Branch now sits at commit 0fcff2a. Fifteen commits landed on
+sprint/s0-multi-tenant since the start of the day:
+
+  f41c410 fix(s0): map cims:role as JWT role claim
+  7bda674 feat(s0): ProjectTemplatesController project-membership
+  37013fc feat(s0): OrgAdmin/SuperAdmin gate on POST /projects
+  c26d451 feat(s0): TaskTeamMember minimum on doc/rfi/action writes
+  cabe6ca docs(s0): close T-S0-08 in sprint log
+  e6d2196 docs(s0): ADR-0010 two-tier role auth + role matrix
+  e26fe89 docs(s0): change register + CR-001 (ISO 19650 park)
+  8d426e3 docs(s0): backfill Day 1 SHA + retrospective drift audit
+  e5bd438 docs(s0): security review + v1.1 backlog
+  c83a8a9 fix(s0): lock project AppointingPartyId to caller's org
+  15aa5f0 docs(s0): ADR-0012 + CR-002; add T-S0-11/T-S0-12 tasks
+  9b40a8d feat(s0): Invitation entity + DbSet + tenant query filter
+  0fcff2a chore(s0): ef migration AddInvitations
+
+Sprint task status:
+
+  T-S0-01 kickoff                       DONE (6816d6a)
+  T-S0-02 ITenantContext                DONE (65ff02c)
+  T-S0-03 global query filter           DONE (3c95027)
+  T-S0-04 isolation behavioural test    BLOCKED on ADR-0009 wait
+  T-S0-04a nav-warning fixes            DONE (e878218)
+  T-S0-05 AuditLog before/after cols    DONE (f60389a)
+  T-S0-06 SaveChanges interceptor       DONE (d897444)
+  T-S0-06b interceptor behavioural test BLOCKED on ADR-0009 wait
+  T-S0-07 SuperAdmin bypass             DONE (b2a5781)
+  T-S0-08 role enforcement audit        DONE (f41c410, 7bda674,
+                                              37013fc, c26d451)
+  T-S0-09 CI pipeline                   DONE (15e8bd5)
+  T-S0-10 sprint close                  PENDING (last step)
+  T-S0-11 invitation-token registration IN PROGRESS
+                                        (1 of 5 commits landed)
+  T-S0-12 project tenancy / SuperAdmin  DONE (c83a8a9)
+
+WHERE T-S0-11 LEFT OFF
+-----------------------
+Commit 1 of 5 is in: Invitation entity + DbSet + query filter.
+Migration (AddInvitations) is committed but unapplied.
+
+Remaining commit plan for T-S0-11:
+
+  Commit 2 — InvitationService (Create/Consume) + DI wiring
+    - Add InvitationService class in CimsApp/Services/Services.cs
+      near AuthService.
+    - CreateAsync(orgId, createdById?, email?, expiry, isBootstrap)
+      returns plaintext token and persists only the SHA-256 hash.
+    - ConsumeAsync(plaintextToken, registeringEmail) validates:
+        * token hash exists (IgnoreQueryFilters — pre-auth path)
+        * not consumed
+        * not expired
+        * email bind matches if set
+      and atomically marks consumed with timestamp + userId.
+    - Register in Program.cs AddScoped<InvitationService>().
+
+  Commit 3 — invitation-token registration replaces OrganisationId
+    - DTOs/Dtos.cs: RegisterRequest drops OrganisationId, gains
+      InvitationToken (string, required).
+    - AuthService.RegisterAsync:
+        * call InvitationService.ConsumeAsync first
+        * derive OrganisationId from the consumed invitation
+        * if invitation.IsBootstrap, set user.GlobalRole = OrgAdmin
+    - AuthController untouched (passthrough).
+
+  Commit 4 — bootstrap invitation + OrgAdmin invite-create endpoint
+    - OrganisationsController.Create (anonymous) additionally mints
+      a bootstrap Invitation (IsBootstrap=true, 24h expiry, no email
+      bind) and returns the plaintext token alongside the org.
+      Response shape: { success, data: { organisation, bootstrap:
+      { token, expiresAt } } }. The plaintext is shown once; after
+      consumption or expiry it is irrecoverable.
+    - New OrganisationsController endpoint:
+        POST /api/v1/organisations/{orgId}/invitations
+          [Authorize(Roles="OrgAdmin,SuperAdmin")]
+          body: { email?, expiresInDays? (default 7, max 30) }
+          403 if caller is OrgAdmin and orgId != caller's org.
+    - New DTOs: CreateInvitationRequest, InvitationResponseDto
+      (plaintext token shown once).
+
+  Commit 5 — ADR-0011 + close SR-S0-01
+    - docs/adr/ADR-0011-invitation-token-user-provisioning.md
+    - Update docs/security/role-matrix.md with the new endpoints
+      and the changed /auth/register contract.
+    - Update docs/security/s0-review-2026-04-24.md to mark SR-S0-01
+      addressed with commit SHAs.
+    - Update docs/change-register.md CR-002 decision row with
+      SHAs covering both SR-S0-01 and SR-S0-02.
+    - Update docs/sprint-log/s0.md T-S0-11 row to Done and add a
+      session entry under ## Daily entries.
+
+DEFAULTS ALREADY AGREED (no need to re-ask)
+--------------------------------------------
+- Token: 32-byte random, base64url-encoded, returned once.
+- At rest: SHA-256 hash only; plaintext never persisted.
+- Default expiry: 7 days. Maximum: 30 days. Bootstrap: 24h.
+- Email bind: optional; if set, Register must use matching email.
+- Single-use: yes. Consumed tokens stay in DB for audit.
+- Bootstrap: first consumer of a bootstrap token auto-becomes
+  OrgAdmin globally.
+- Revocation: not this sprint (v1.1 backlog B-001).
+- Email delivery: out of scope for S0 (OrgAdmin shares token
+  out-of-band for now).
+
+WHAT TO RUN BEFORE TESTING T-S0-11
+-----------------------------------
+1. dotnet ef database update --project CimsApp      (apply migration)
+2. Build the solution in VS.
+3. In Swagger or REST client:
+    a. POST /api/v1/organisations   -> capture the bootstrap token
+    b. POST /api/v1/auth/register   -> with that token
+    c. POST /api/v1/auth/login      -> verify JWT carries cims:role=OrgAdmin
+    d. POST /api/v1/organisations/{orgId}/invitations -> mint a new invite
+    e. Register a second user with the invite -> verify no bootstrap
+       role, regular user.
+    f. Negative: POST /auth/register with a bogus token -> expect 400.
+
+AFTER ADR-0009 WAIT ELAPSES (~2026-04-25T12:42Z)
+-------------------------------------------------
+T-S0-04 and T-S0-06b become eligible. Options:
+
+  a. Re-enable the scheduled remote agent
+     (trig_01CbdDcec2Q2GQK8oidWjm3o at
+      https://claude.ai/code/routines) — it was disabled today
+     because this session moved faster than expected. Enabling it
+     again queues the behavioural tests to land automatically.
+     Check GitHub App auth first (skill flagged it as unconnected).
+
+  b. Land them manually in VS — follow the scheduled agent's
+     prompt as a checklist. Adds ~3h.
+
+If T-S0-11 is still in flight at that point, finish T-S0-11 first
+so the branch has a single coherent close.
+
+SPRINT CLOSE (T-S0-10)
+-----------------------
+After T-S0-04, T-S0-06b, and T-S0-11 land:
+
+  1. Run full test suite locally; CI green.
+  2. Complete docs/retrospectives/s0.md (all [fill] placeholders).
+  3. Mark every F.1 DoD row ticked in docs/sprint-log/s0.md.
+  4. Tag: git tag v0.0-sprint-s0
+  5. Merge sprint/s0-multi-tenant -> master via PR (never force-push).
+  6. Kickoff S1 — Cost & Commercial — in a fresh session with
+     fresh kickoff docs per PAFM-SD Ch 11.
+
+OPEN DECISIONS FLAGGED, NOT ACTIONED
+-------------------------------------
+- SR-S0-03 medium: add a one-line comment in Program.cs explaining
+  the RoleClaimType override. Trivial; left for when commit 5
+  touches that neighbourhood.
+- SR-S0-05 low: AddMemberAsync should verify added user's org
+  matches project's AppointingPartyId. Not S0-blocking.
+
+ENVIRONMENT NOTES
+------------------
+- dotnet SDK 10.0.202 is installed on this machine; dotnet-ef 10.0.6
+  generates migrations for the net8.0 project correctly. Don't use
+  the --no-build flag on `ef migrations add` — it uses a stale
+  assembly and produces empty Up/Down bodies.
+- Bash (Git Bash) forks fail on this Windows host. Use PowerShell
+  for shell commands; gh/git are fine from PowerShell.
+- The scheduled remote agent trig_01CbdDcec2Q2GQK8oidWjm3o is
+  disabled. Full deletion of routines is web-only at
+  https://claude.ai/code/routines.
+
+DONE FOR TODAY.

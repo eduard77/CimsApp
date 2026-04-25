@@ -1,5 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -11,7 +12,7 @@ using CimsApp.Models;
 namespace CimsApp.Services;
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
-public class AuthService(CimsDbContext db, IConfiguration cfg)
+public class AuthService(CimsDbContext db, IConfiguration cfg, InvitationService invitations)
 {
     private string AccessSecret  => cfg["Jwt:AccessSecret"]!;
     private string RefreshSecret => cfg["Jwt:RefreshSecret"]!;
@@ -22,18 +23,48 @@ public class AuthService(CimsDbContext db, IConfiguration cfg)
 
     public async Task<UserSummaryDto> RegisterAsync(RegisterRequest req)
     {
-        if (await db.Users.AnyAsync(u => u.Email == req.Email))
+        // Closes SR-S0-01: tenant ownership of the new User is no longer
+        // attacker-supplied. The invitation token determines OrganisationId
+        // and (for bootstrap tokens minted at org-creation time) the
+        // initial GlobalRole.
+        var invitation = await invitations.ValidateAsync(req.InvitationToken, req.Email);
+
+        // Pre-auth: ignore tenant filter while checking email uniqueness.
+        if (await db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == req.Email))
             throw new ConflictException("Email already registered");
-        var org = await db.Organisations.FindAsync(req.OrganisationId) ?? throw new NotFoundException("Organisation");
-        var user = new User { Email = req.Email.ToLowerInvariant(), PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password), FirstName = req.FirstName, LastName = req.LastName, JobTitle = req.JobTitle, OrganisationId = req.OrganisationId };
+
+        var org = await db.Organisations.FindAsync(invitation.OrganisationId)
+            ?? throw new NotFoundException("Organisation");
+
+        var user = new User
+        {
+            Email          = req.Email.ToLowerInvariant(),
+            PasswordHash   = BCrypt.Net.BCrypt.HashPassword(req.Password),
+            FirstName      = req.FirstName,
+            LastName       = req.LastName,
+            JobTitle       = req.JobTitle,
+            OrganisationId = invitation.OrganisationId,
+            // Bootstrap tokens are issued by anonymous org-creation and the
+            // first registrant becomes the org's first OrgAdmin so they can
+            // mint further invitations. Non-bootstrap tokens never elevate.
+            GlobalRole     = invitation.IsBootstrap ? UserRole.OrgAdmin : null,
+        };
         db.Users.Add(user);
         await db.SaveChangesAsync();
+
+        // Mark consumed only after the User row actually persisted, so a
+        // failed save (FK violation, duplicate index) leaves the invitation
+        // available for retry rather than burning it.
+        await invitations.MarkConsumedAsync(invitation.Id, user.Id);
+
         return Map(user, org);
     }
 
     public async Task<AuthResponse> LoginAsync(LoginRequest req, string? ua, string? ip)
     {
-        var user = await db.Users.Include(u => u.Organisation).FirstOrDefaultAsync(u => u.Email == req.Email.ToLowerInvariant() && u.IsActive)
+        // Pre-auth: tenant is not yet known. Bypass the User query filter.
+        var user = await db.Users.IgnoreQueryFilters().Include(u => u.Organisation)
+            .FirstOrDefaultAsync(u => u.Email == req.Email.ToLowerInvariant() && u.IsActive)
             ?? throw new AppException("Invalid credentials", 401, "INVALID_CREDENTIALS");
         if (!BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
             throw new AppException("Invalid credentials", 401, "INVALID_CREDENTIALS");
@@ -48,10 +79,12 @@ public class AuthService(CimsDbContext db, IConfiguration cfg)
     {
         var principal = Validate(token, RefreshSecret) ?? throw new AppException("Invalid refresh token", 401, "INVALID_REFRESH");
         var userId = Guid.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        var stored = await db.RefreshTokens.FirstOrDefaultAsync(r => r.Token == token);
+        // Pre-auth: refresh endpoint has no access token, tenant filter bypassed.
+        var stored = await db.RefreshTokens.IgnoreQueryFilters().FirstOrDefaultAsync(r => r.Token == token);
         if (stored == null || !stored.IsActive) throw new AppException("Token revoked", 401, "TOKEN_REVOKED");
         stored.RevokedAt = DateTime.UtcNow;
-        var user   = await db.Users.Include(u => u.Organisation).FirstAsync(u => u.Id == userId);
+        // Pre-auth (refresh endpoint has no access token): bypass User filter.
+        var user   = await db.Users.IgnoreQueryFilters().Include(u => u.Organisation).FirstAsync(u => u.Id == userId);
         var access = GenerateAccess(user);
         var newRef = await CreateRefreshAsync(userId, null, null);
         await db.SaveChangesAsync();
@@ -60,7 +93,9 @@ public class AuthService(CimsDbContext db, IConfiguration cfg)
 
     public async Task LogoutAsync(string token)
     {
-        var stored = await db.RefreshTokens.FirstOrDefaultAsync(r => r.Token == token);
+        // Logout accepts an opaque token without tenant context guarantees
+        // (token may outlive its access JWT). Bypass the filter here too.
+        var stored = await db.RefreshTokens.IgnoreQueryFilters().FirstOrDefaultAsync(r => r.Token == token);
         if (stored != null) { stored.RevokedAt = DateTime.UtcNow; await db.SaveChangesAsync(); }
     }
 
@@ -71,8 +106,15 @@ public class AuthService(CimsDbContext db, IConfiguration cfg)
     private string GenerateAccess(User user)
     {
         var key   = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(AccessSecret));
-        var token = new JwtSecurityToken(Issuer, Audience,
-            [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Email, user.Email)],
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new(ClaimTypes.Email, user.Email),
+            new(CimsApp.Services.Tenancy.HttpTenantContext.OrganisationClaimType, user.OrganisationId.ToString()),
+        };
+        if (user.GlobalRole is { } role)
+            claims.Add(new Claim(CimsApp.Services.Tenancy.HttpTenantContext.GlobalRoleClaimType, role.ToString()));
+        var token = new JwtSecurityToken(Issuer, Audience, claims,
             expires: DateTime.UtcNow.AddMinutes(AccessMinutes),
             signingCredentials: new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
         return new JwtSecurityTokenHandler().WriteToken(token);
@@ -95,8 +137,104 @@ public class AuthService(CimsDbContext db, IConfiguration cfg)
         new(u.Id, u.Email, u.FirstName, u.LastName, u.JobTitle, new OrgSummaryDto(o.Id, o.Name, o.Code));
 }
 
+// ── Invitations ───────────────────────────────────────────────────────────────
+// Single-use tokens binding a registering user to a specific organisation.
+// See ADR-0011 (planned) and CR-002. Closes SR-S0-01 by removing the
+// attacker-supplied OrganisationId from the anonymous register flow.
+public class InvitationService(CimsDbContext db)
+{
+    public sealed record CreateResult(Guid Id, string Token, DateTime ExpiresAt);
+
+    /// <summary>
+    /// Mint an invitation. Returns the plaintext token once — only the
+    /// SHA-256 hash is persisted, so a lost token cannot be recovered.
+    /// </summary>
+    public async Task<CreateResult> CreateAsync(
+        Guid organisationId,
+        Guid? createdById,
+        string? emailBind,
+        int expiresInDays,
+        bool isBootstrap = false)
+    {
+        if (expiresInDays < 1) expiresInDays = 1;
+        if (expiresInDays > 30) expiresInDays = 30;
+        // Bootstrap tokens shorten to 24h regardless — they are issued
+        // anonymously at organisation-creation time and a longer window
+        // would widen the unauthenticated attack surface unnecessarily.
+        if (isBootstrap) expiresInDays = 1;
+
+        // 32 bytes of cryptographic randomness, base64url-encoded.
+        var bytes = RandomNumberGenerator.GetBytes(32);
+        var plaintext = Convert.ToBase64String(bytes)
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+        var invitation = new Invitation
+        {
+            OrganisationId = organisationId,
+            TokenHash      = HashToken(plaintext),
+            Email          = string.IsNullOrWhiteSpace(emailBind) ? null : emailBind.Trim().ToLowerInvariant(),
+            IsBootstrap    = isBootstrap,
+            ExpiresAt      = DateTime.UtcNow.AddDays(expiresInDays),
+            CreatedById    = createdById,
+        };
+        db.Invitations.Add(invitation);
+        await db.SaveChangesAsync();
+        return new CreateResult(invitation.Id, plaintext, invitation.ExpiresAt);
+    }
+
+    /// <summary>
+    /// Validate a plaintext token and return the matching Invitation. Does
+    /// NOT mark consumed — caller marks consumption via MarkConsumedAsync
+    /// after the dependent User row is persisted, so we never end up with
+    /// a consumed invitation pointing at a User that failed to save.
+    /// </summary>
+    public async Task<Invitation> ValidateAsync(string plaintextToken, string registeringEmail)
+    {
+        if (string.IsNullOrWhiteSpace(plaintextToken))
+            throw new ValidationException(["InvitationToken is required"]);
+
+        var hash = HashToken(plaintextToken);
+        // Pre-auth: tenant context is null at register-time. Same pattern
+        // as AuthService.LoginAsync uses for User/RefreshToken lookups.
+        var inv = await db.Invitations.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(i => i.TokenHash == hash)
+            ?? throw new NotFoundException("Invitation");
+
+        if (inv.ConsumedAt != null)
+            throw new ValidationException(["Invitation has already been used"]);
+        if (inv.ExpiresAt < DateTime.UtcNow)
+            throw new ValidationException(["Invitation has expired"]);
+        if (!string.IsNullOrEmpty(inv.Email)
+            && !string.Equals(inv.Email, registeringEmail.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new ValidationException(["Invitation is bound to a different email address"]);
+
+        return inv;
+    }
+
+    /// <summary>
+    /// Atomically mark an invitation consumed. Uses an Update-where on the
+    /// non-null ConsumedAt column so a race between two concurrent
+    /// register calls cannot double-consume the same token.
+    /// </summary>
+    public async Task<bool> MarkConsumedAsync(Guid invitationId, Guid consumerUserId)
+    {
+        var rows = await db.Invitations.IgnoreQueryFilters()
+            .Where(i => i.Id == invitationId && i.ConsumedAt == null)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(i => i.ConsumedAt, DateTime.UtcNow)
+                .SetProperty(i => i.ConsumedByUserId, consumerUserId));
+        return rows == 1;
+    }
+
+    private static string HashToken(string plaintext)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(plaintext));
+        return Convert.ToHexString(bytes);
+    }
+}
+
 // ── Projects ──────────────────────────────────────────────────────────────────
-public class ProjectsService(CimsDbContext db, AuditService audit)
+public class ProjectsService(CimsDbContext db, AuditService audit, CimsApp.Services.Tenancy.ITenantContext tenant)
 {
     public async Task<List<Project>> ListAsync(Guid userId, string? search = null)
     {
@@ -114,10 +252,19 @@ public class ProjectsService(CimsDbContext db, AuditService audit)
 
     public async Task<Project> CreateAsync(CreateProjectRequest req, Guid userId, string? ip, string? ua)
     {
-        var p = new Project { Name = req.Name, Code = req.Code.ToUpperInvariant(), Description = req.Description, AppointingPartyId = req.AppointingPartyId, StartDate = req.StartDate, EndDate = req.EndDate, Location = req.Location, Country = req.Country, Currency = req.Currency ?? "GBP", BudgetValue = req.BudgetValue, Sector = req.Sector, Sponsor = req.Sponsor, EirRef = req.EirRef, Members = [new ProjectMember { UserId = userId, Role = UserRole.ProjectManager }] };
+        // Tenant-ownership of the new Project is determined by AppointingPartyId
+        // (see CimsDbContext query filter). Non-SuperAdmin callers are locked to
+        // their own organisation; SuperAdmin may create projects under any
+        // appointing party (platform-level bypass, audited). See ADR-0012.
+        var appointingPartyId = tenant.IsSuperAdmin
+            ? req.AppointingPartyId
+            : tenant.OrganisationId ?? throw new ForbiddenException("No tenant context");
+        if (!tenant.IsSuperAdmin && req.AppointingPartyId != appointingPartyId)
+            throw new ForbiddenException("AppointingPartyId must match the caller's organisation");
+        var p = new Project { Name = req.Name, Code = req.Code.ToUpperInvariant(), Description = req.Description, AppointingPartyId = appointingPartyId, StartDate = req.StartDate, EndDate = req.EndDate, Location = req.Location, Country = req.Country, Currency = req.Currency ?? "GBP", BudgetValue = req.BudgetValue, Sector = req.Sector, Sponsor = req.Sponsor, EirRef = req.EirRef, Members = [new ProjectMember { UserId = userId, Role = UserRole.ProjectManager }] };
         db.Projects.Add(p);
         await db.SaveChangesAsync();
-        await audit.WriteAsync(userId, "project.created", "Project", p.Id.ToString(), p.Id, ip: ip, ua: ua);
+        await audit.WriteAsync(userId, tenant.IsSuperAdmin ? "project.created.superadmin_bypass" : "project.created", "Project", p.Id.ToString(), p.Id, ip: ip, ua: ua);
         return p;
     }
 

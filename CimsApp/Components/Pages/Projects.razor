@@ -62,29 +62,34 @@ else
     </MudGrid>
 }
 
-<!-- Create Dialog -->
-<MudDialog @bind-Visible="_showCreate" Options='new DialogOptions{MaxWidth=MaxWidth.Small,FullWidth=true}'>
-    <TitleContent><MudText Typo="Typo.h6" Style="font-weight:600;">New Project</MudText></TitleContent>
-    <DialogContent>
-        <div style="display:flex;flex-direction:column;gap:12px;">
-            <MudTextField @bind-Value="_f.Name"   Label="Project Name"   Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
-            <MudTextField @bind-Value="_f.Code"   Label="Project Code"   Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
-            <MudTextField @bind-Value="_f.Location" Label="Location"     Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
-            <MudTextField @bind-Value="_f.Sector" Label="Sector"         Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
-            <MudNumericField @bind-Value="_f.Budget" Label="Budget Value" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" Format="N0" />
-            <MudSelect @bind-Value="_f.OrgId" Label="Client Organisation" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense">
-                @foreach (var o in _orgs)
-                { <MudSelectItem Value="o.Id">@o.Name (@o.Code)</MudSelectItem> }
-            </MudSelect>
-        </div>
-    </DialogContent>
-    <DialogActions>
-        <MudButton OnClick="() => _showCreate = false" Style="text-transform:none;">Cancel</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateAsync" Disabled="_creating" Style="text-transform:none;font-weight:600;">
-            @(_creating ? "Creating..." : "Create")
-        </MudButton>
-    </DialogActions>
-</MudDialog>
+@if (_showCreate)
+{
+    <MudOverlay Visible="true" DarkBackground="true" ZIndex="9999"
+                Style="display:flex;align-items:center;justify-content:center;">
+        <MudPaper Elevation="8" Class="pa-6"
+                  Style="width:500px;max-width:90vw;border-radius:12px;">
+            <MudText Typo="Typo.h6" Style="font-weight:600;margin-bottom:16px;">New Project</MudText>
+            <div style="display:flex;flex-direction:column;gap:12px;">
+                <MudTextField @bind-Value="_f.Name"   Label="Project Name"  Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
+                <MudTextField @bind-Value="_f.Code"   Label="Project Code"  Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
+                <MudTextField @bind-Value="_f.Location" Label="Location"    Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
+                <MudTextField @bind-Value="_f.Sector" Label="Sector"        Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" />
+                <MudNumericField @bind-Value="_f.Budget" Label="Budget Value" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense" Format="N0" />
+                <MudSelect @bind-Value="_f.OrgId" Label="Client Organisation" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense">
+                    @foreach (var o in _orgs)
+                    { <MudSelectItem Value="o.Id">@o.Name (@o.Code)</MudSelectItem> }
+                </MudSelect>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px;">
+                <MudButton OnClick="() => _showCreate = false" Style="text-transform:none;">Cancel</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateAsync" Disabled="_creating"
+                           Style="text-transform:none;font-weight:600;">
+                    @(_creating ? "Creating..." : "Create")
+                </MudButton>
+            </div>
+        </MudPaper>
+    </MudOverlay>
+}
 
 @code {
     List<Project>      _projects = [];
@@ -104,7 +109,15 @@ else
         if (string.IsNullOrWhiteSpace(_f.Name) || string.IsNullOrWhiteSpace(_f.Code) || _f.OrgId == Guid.Empty)
         { Snackbar.Add("Name, Code and Organisation are required", Severity.Warning); return; }
         _creating = true;
-        var result = await Api.CreateProjectAsync(new CreateProjectRequest(_f.Name, _f.Code.ToUpper(), null, _f.OrgId, null, null, _f.Location, null, "GBP", _f.Budget, _f.Sector, null, null));
+        Project? result = null;
+        try
+        {
+            result = await Api.CreateProjectAsync(new CreateProjectRequest(_f.Name, _f.Code.ToUpper(), null, _f.OrgId, null, null, _f.Location, null, "GBP", _f.Budget, _f.Sector, null, null));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"{ex.GetType().Name}: {ex.Message}", Severity.Error);
+        }
         _creating = false;
         if (result != null) { _showCreate = false; _f = new(); Snackbar.Add("Project created", Severity.Success); await LoadAsync(); }
         else Snackbar.Add("Failed to create project", Severity.Error);

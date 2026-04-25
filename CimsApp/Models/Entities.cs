@@ -33,6 +33,10 @@ public class User
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public Guid OrganisationId { get; set; }
     public Organisation Organisation { get; set; } = null!;
+    // Cross-project role: SuperAdmin or OrgAdmin. Null for regular users
+    // whose only roles live on ProjectMember. SuperAdmin is permitted
+    // cross-tenant visibility (see ADR-0003, PAFM F.1).
+    public UserRole? GlobalRole { get; set; }
     [NotMapped] public string FullName => $"{FirstName} {LastName}";
     public ICollection<ProjectMember> ProjectMemberships { get; set; } = [];
     public ICollection<RefreshToken> RefreshTokens { get; set; } = [];
@@ -253,6 +257,8 @@ public class AuditLog
     [Required] public string Entity { get; set; } = "";
     [Required] public string EntityId { get; set; } = "";
     public string? Detail { get; set; }
+    public string? BeforeValue { get; set; }
+    public string? AfterValue { get; set; }
     public string? IpAddress { get; set; }
     public string? UserAgent { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -312,5 +318,47 @@ public class ProjectTemplate
     public bool IsEdited { get; set; } = false;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Single-use token binding a registering user to a specific organisation.
+/// Closes SR-S0-01: registration can no longer accept an attacker-supplied
+/// OrganisationId. Minted by an OrgAdmin via POST /organisations/{id}/invitations
+/// or auto-issued as a bootstrap token by POST /organisations.
+/// See ADR-0011.
+/// </summary>
+public class Invitation
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>The invited organisation. On registration, the created User inherits this.</summary>
+    public Guid OrganisationId { get; set; }
+    public Organisation Organisation { get; set; } = null!;
+
+    /// <summary>SHA-256 hash of the plaintext token. The plaintext is shown
+    /// once at creation time and never persisted.</summary>
+    [Required, MaxLength(128)]
+    public string TokenHash { get; set; } = "";
+
+    /// <summary>Optional email bind — if set, Register must use this email.</summary>
+    [MaxLength(200)]
+    public string? Email { get; set; }
+
+    /// <summary>If true, the consumer of this invitation is auto-assigned
+    /// GlobalRole = OrgAdmin. Used for the first-user bootstrap on a freshly
+    /// created organisation. OrgAdmin-minted invitations are not bootstraps.</summary>
+    public bool IsBootstrap { get; set; } = false;
+
+    public DateTime ExpiresAt { get; set; }
+
+    public DateTime? ConsumedAt { get; set; }
+    public Guid? ConsumedByUserId { get; set; }
+    public User? ConsumedByUser { get; set; }
+
+    /// <summary>Null for bootstrap invitations (no user exists yet).</summary>
+    public Guid? CreatedById { get; set; }
+    public User? CreatedBy { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
