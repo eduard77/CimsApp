@@ -27,7 +27,7 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 
 | Method | Route | Global role | Project role | Comment |
 |---|---|---|---|---|
-| POST | `/api/v1/auth/register` | anonymous | — | Sign-up |
+| POST | `/api/v1/auth/register` | anonymous + invitation token | — | Sign-up. T-S0-11 closed SR-S0-01: caller-supplied `OrganisationId` removed from request, replaced with `InvitationToken`. Tenant is server-derived from the invitation. See ADR-0011. |
 | POST | `/api/v1/auth/login` | anonymous | — | Issues JWT |
 | POST | `/api/v1/auth/refresh` | anonymous | — | Refresh-token-bearer auth |
 | POST | `/api/v1/auth/logout` | anonymous | — | Revokes refresh token |
@@ -38,7 +38,8 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 | Method | Route | Global role | Project role | Comment |
 |---|---|---|---|---|
 | GET  | `/api/v1/organisations` | authenticated | — | Tenant query filter scopes the list |
-| POST | `/api/v1/organisations` | anonymous | — | Sign-up flow creates an org |
+| POST | `/api/v1/organisations` | anonymous | — | Sign-up flow creates an org **and** mints a 24h bootstrap invitation token in the response. The first registrant who consumes the bootstrap token becomes the org's first OrgAdmin. ADR-0011, commit `3839468`. |
+| POST | `/api/v1/organisations/{orgId}/invitations` | `OrgAdmin`, `SuperAdmin` | — | Mint a 7-day invitation token (max 30) for a future user. OrgAdmin can only mint for their own organisation; SuperAdmin can mint for any (mirrors ADR-0012). Body: `{ email?, expiresInDays? }`. ADR-0011, commit `3839468`. |
 
 ## Projects
 
