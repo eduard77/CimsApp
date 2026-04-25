@@ -30,6 +30,8 @@ public class CimsDbContextTenantFilterTests
         typeof(ProjectTemplate),
         typeof(Notification),
         typeof(AuditLog),
+        typeof(Invitation),
+        typeof(CostBreakdownItem),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =

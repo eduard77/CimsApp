@@ -321,6 +321,39 @@ public class ProjectTemplate
 }
 
 /// <summary>
+/// Cost Breakdown Structure (CBS) line for a Project. Hierarchical
+/// via self-referencing ParentId — a project's CBS is a tree of these
+/// rows. Tenant-scoped indirectly through Project.AppointingPartyId
+/// (query filter in CimsDbContext). Per PAFM-SD Appendix F.2 (S1 DoD).
+/// Budget at line level lands in T-S1-04 (separate property/entity);
+/// this row carries identity and structure only.
+/// </summary>
+public class CostBreakdownItem
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Null for top-level CBS lines.</summary>
+    public Guid? ParentId { get; set; }
+    public CostBreakdownItem? Parent { get; set; }
+    public ICollection<CostBreakdownItem> Children { get; set; } = [];
+
+    /// <summary>WBS-style code, project-unique. Examples: "1", "1.1", "1.2.3".</summary>
+    [Required, MaxLength(50)] public string Code { get; set; } = "";
+    [Required, MaxLength(200)] public string Name { get; set; } = "";
+    public string? Description { get; set; }
+
+    /// <summary>Sort order among siblings of the same Parent.</summary>
+    public int SortOrder { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
 /// Single-use token binding a registering user to a specific organisation.
 /// Closes SR-S0-01: registration can no longer accept an attacker-supplied
 /// OrganisationId. Minted by an OrgAdmin via POST /organisations/{id}/invitations

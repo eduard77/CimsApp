@@ -38,6 +38,7 @@ public class CimsDbContext(
     public DbSet<Notification>       Notifications       => Set<Notification>();
     public DbSet<ProjectTemplate>    ProjectTemplates    => Set<ProjectTemplate>();
     public DbSet<Invitation>         Invitations         => Set<Invitation>();
+    public DbSet<CostBreakdownItem>  CostBreakdownItems  => Set<CostBreakdownItem>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -174,6 +175,22 @@ public class CimsDbContext(
              .HasForeignKey(i => i.CreatedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<CostBreakdownItem>(e =>
+        {
+            // Code unique within a project (any depth in the tree).
+            e.HasIndex(c => new { c.ProjectId, c.Code }).IsUnique();
+            // Fast lookup of children for tree traversal.
+            e.HasIndex(c => new { c.ProjectId, c.ParentId });
+            e.HasOne(c => c.Project).WithMany()
+             .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            // Self-referencing tree: NoAction on parent so deleting a
+            // parent does not silently orphan children — service layer
+            // (T-S1-03 onwards) will handle cascade decisions
+            // explicitly.
+            e.HasOne(c => c.Parent).WithMany(c => c.Children)
+             .HasForeignKey(c => c.ParentId).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -199,6 +216,7 @@ public class CimsDbContext(
         // InvitationService.ConsumeAsync uses IgnoreQueryFilters(), the
         // same pattern AuthService uses for User/RefreshToken lookups.
         m.Entity<Invitation>().HasQueryFilter(i => i.OrganisationId == _tenant.OrganisationId);
+        m.Entity<CostBreakdownItem>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -218,6 +236,7 @@ public class CimsDbContext(
             else if (e.Entity is CdeContainer c) c.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is Rfi r)      r.UpdatedAt  = DateTime.UtcNow;
             else if (e.Entity is ActionItem a) a.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is CostBreakdownItem cbi) cbi.UpdatedAt = DateTime.UtcNow;
         }
     }
 }
