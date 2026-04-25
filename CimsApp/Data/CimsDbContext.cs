@@ -158,12 +158,20 @@ public class CimsDbContext(
         {
             e.HasIndex(i => i.TokenHash).IsUnique();
             e.HasIndex(i => new { i.OrganisationId, i.ConsumedAt });
+            // All three FKs are NoAction to satisfy SQL Server's
+            // multi-cascade-path check (cascade on Organisation +
+            // SetNull on Users via two columns produced
+            // FK_Invitations_Users_CreatedById errors). Aligns with
+            // the dominant NoAction pattern used elsewhere in this
+            // DbContext (ProjectMember, RfiDocument, etc.). Deleting
+            // an Organisation now requires explicit invitation
+            // cleanup first — appropriate for an audit-style entity.
             e.HasOne(i => i.Organisation).WithMany()
-             .HasForeignKey(i => i.OrganisationId).OnDelete(DeleteBehavior.Cascade);
+             .HasForeignKey(i => i.OrganisationId).OnDelete(DeleteBehavior.NoAction);
             e.HasOne(i => i.ConsumedByUser).WithMany()
-             .HasForeignKey(i => i.ConsumedByUserId).OnDelete(DeleteBehavior.SetNull);
+             .HasForeignKey(i => i.ConsumedByUserId).OnDelete(DeleteBehavior.NoAction);
             e.HasOne(i => i.CreatedBy).WithMany()
-             .HasForeignKey(i => i.CreatedById).OnDelete(DeleteBehavior.SetNull);
+             .HasForeignKey(i => i.CreatedById).OnDelete(DeleteBehavior.NoAction);
         });
 
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────

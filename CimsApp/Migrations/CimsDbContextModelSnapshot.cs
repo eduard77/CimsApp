@@ -973,17 +973,17 @@ namespace CimsApp.Migrations
                     b.HasOne("CimsApp.Models.User", "ConsumedByUser")
                         .WithMany()
                         .HasForeignKey("ConsumedByUserId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.NoAction);
 
                     b.HasOne("CimsApp.Models.User", "CreatedBy")
                         .WithMany()
                         .HasForeignKey("CreatedById")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.NoAction);
 
                     b.HasOne("CimsApp.Models.Organisation", "Organisation")
                         .WithMany()
                         .HasForeignKey("OrganisationId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.NoAction)
                         .IsRequired();
 
                     b.Navigation("ConsumedByUser");

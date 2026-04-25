@@ -33,20 +33,17 @@ namespace CimsApp.Migrations
                         name: "FK_Invitations_Organisations_OrganisationId",
                         column: x => x.OrganisationId,
                         principalTable: "Organisations",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        principalColumn: "Id");
                     table.ForeignKey(
                         name: "FK_Invitations_Users_ConsumedByUserId",
                         column: x => x.ConsumedByUserId,
                         principalTable: "Users",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
+                        principalColumn: "Id");
                     table.ForeignKey(
                         name: "FK_Invitations_Users_CreatedById",
                         column: x => x.CreatedById,
                         principalTable: "Users",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
+                        principalColumn: "Id");
                 });
 
             migrationBuilder.CreateIndex(
