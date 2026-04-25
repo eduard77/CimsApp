@@ -3,7 +3,6 @@
 @inject UiStateService UI
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
-@inject ILogger<Projects> Log
 @rendermode RenderMode.InteractiveServer
 
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;">
@@ -11,12 +10,9 @@
         <h1 style="font-size:22px;font-weight:700;color:#1A1F2E;margin:0 0 4px;">Projects</h1>
         <p style="color:#64748B;margin:0;font-size:14px;">All projects you are a member of</p>
     </div>
-    <div style="display:flex;align-items:center;gap:12px;">
-        <small style="color:#94A3B8;font-family:monospace;">interactive=@_interactive · clicks=@_clicks · dialog=@_showCreate</small>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-                   OnClick="OnNewProjectClick"
-                   Style="text-transform:none;border-radius:8px;font-weight:600;">New Project</MudButton>
-    </div>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="() => _showCreate = true"
+               Style="text-transform:none;border-radius:8px;font-weight:600;">New Project</MudButton>
 </div>
 
 <MudTextField @bind-Value="_search" Placeholder="Search projects..." Variant="Variant.Outlined"
@@ -66,9 +62,6 @@ else
     </MudGrid>
 }
 
-@* Create modal: render-tree controlled (@if + MudOverlay + MudPaper) instead of
-   the inline MudDialog/@bind-Visible pattern, which never showed on screen even
-   when _showCreate flipped server-side. *@
 @if (_showCreate)
 {
     <MudOverlay Visible="true" DarkBackground="true" ZIndex="9999"
@@ -88,7 +81,7 @@ else
                 </MudSelect>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px;">
-                <MudButton OnClick="OnCancelClick" Style="text-transform:none;">Cancel</MudButton>
+                <MudButton OnClick="() => _showCreate = false" Style="text-transform:none;">Cancel</MudButton>
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateAsync" Disabled="_creating"
                            Style="text-transform:none;font-weight:600;">
                     @(_creating ? "Creating..." : "Create")
@@ -105,41 +98,7 @@ else
     string _search = "";
     Form   _f = new();
 
-    int  _clicks      = 0;
-    bool _interactive = false;
-
-    protected override async Task OnInitializedAsync()
-    {
-        Log.LogInformation("[Projects] OnInitializedAsync (IsInteractive will flip in OnAfterRender)");
-        await LoadAsync();
-        _orgs = await Api.GetOrgsAsync();
-        Log.LogInformation("[Projects] OnInitializedAsync done. projects={Count} orgs={OrgCount}", _projects.Count, _orgs.Count);
-    }
-
-    protected override void OnAfterRender(bool firstRender)
-    {
-        if (firstRender)
-        {
-            // Reached only when the component is rendered interactively.
-            // If you never see this log, the page is still static SSR.
-            _interactive = true;
-            Log.LogInformation("[Projects] OnAfterRender firstRender=true — interactive circuit attached");
-            StateHasChanged();
-        }
-    }
-
-    void OnNewProjectClick()
-    {
-        _clicks++;
-        _showCreate = true;
-        Log.LogInformation("[Projects] OnNewProjectClick clicks={Clicks} _showCreate={Show}", _clicks, _showCreate);
-    }
-
-    void OnCancelClick()
-    {
-        _showCreate = false;
-        Log.LogInformation("[Projects] OnCancelClick _showCreate={Show}", _showCreate);
-    }
+    protected override async Task OnInitializedAsync() { await LoadAsync(); _orgs = await Api.GetOrgsAsync(); }
 
     async Task LoadAsync() { _loading = true; _projects = await Api.GetProjectsAsync(_search); _loading = false; }
 
@@ -147,28 +106,21 @@ else
 
     async Task CreateAsync()
     {
-        Log.LogInformation("[Projects] CreateAsync entered. Name='{Name}' Code='{Code}' OrgId={OrgId}", _f.Name, _f.Code, _f.OrgId);
         if (string.IsNullOrWhiteSpace(_f.Name) || string.IsNullOrWhiteSpace(_f.Code) || _f.OrgId == Guid.Empty)
-        {
-            Log.LogWarning("[Projects] CreateAsync validation failed");
-            Snackbar.Add("Name, Code and Organisation are required", Severity.Warning);
-            return;
-        }
+        { Snackbar.Add("Name, Code and Organisation are required", Severity.Warning); return; }
         _creating = true;
         Project? result = null;
         try
         {
             result = await Api.CreateProjectAsync(new CreateProjectRequest(_f.Name, _f.Code.ToUpper(), null, _f.OrgId, null, null, _f.Location, null, "GBP", _f.Budget, _f.Sector, null, null));
-            Log.LogInformation("[Projects] CreateProjectAsync returned. resultIsNull={IsNull}", result is null);
         }
         catch (Exception ex)
         {
-            Log.LogError(ex, "[Projects] CreateProjectAsync threw");
-            Snackbar.Add($"Create threw: {ex.GetType().Name}: {ex.Message}", Severity.Error);
+            Snackbar.Add($"{ex.GetType().Name}: {ex.Message}", Severity.Error);
         }
         _creating = false;
         if (result != null) { _showCreate = false; _f = new(); Snackbar.Add("Project created", Severity.Success); await LoadAsync(); }
-        else Snackbar.Add("Failed to create project (see server log)", Severity.Error);
+        else Snackbar.Add("Failed to create project", Severity.Error);
     }
     class Form { public string Name = "", Code = "", Location = "", Sector = ""; public decimal? Budget; public Guid OrgId; }
 }
