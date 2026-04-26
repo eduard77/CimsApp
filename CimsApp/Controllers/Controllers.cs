@@ -169,6 +169,25 @@ public class CdeController(CdeService svc, CimsDbContext db) : CimsControllerBas
     }
 }
 
+// ── Cost & Commercial ─────────────────────────────────────────────────────────
+[Route("api/v1/projects/{projectId:guid}/cbs")]
+public class CostController(CostService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpPost("import")]
+    public async Task<IActionResult> Import(Guid projectId, IFormFile file, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        if (file is null || file.Length == 0)
+            throw new ValidationException(["file is required"]);
+        await using var stream = file.OpenReadStream();
+        var result = await svc.ImportCbsAsync(projectId, stream,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = result });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

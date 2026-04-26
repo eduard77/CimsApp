@@ -57,6 +57,12 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 | GET  | `/api/v1/projects/{projectId}/cde/containers` | authenticated | membership | |
 | POST | `/api/v1/projects/{projectId}/cde/containers` | authenticated | `InformationManager+` | |
 
+## Cost & Commercial
+
+| Method | Route | Global role | Project role | Comment |
+|---|---|---|---|---|
+| POST | `/api/v1/projects/{projectId}/cbs/import` | authenticated | `ProjectManager+` | T-S1-03. Multipart `file` (CSV). Header: `Code,Name,ParentCode,Description,SortOrder`. Import-into-empty only — re-import / merge deferred. Audit: `cbs.imported`. |
+
 ## Documents
 
 | Method | Route | Global role | Project role | Comment |
