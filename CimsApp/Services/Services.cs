@@ -277,6 +277,145 @@ public class ProjectsService(CimsDbContext db, AuditService audit, CimsApp.Servi
     }
 }
 
+// ── Cost & Commercial ─────────────────────────────────────────────────────────
+// PAFM-SD Appendix F.2 (S1 module). T-S1-03 ships CSV import on top
+// of the CostBreakdownItem entity (T-S1-02). Budget at line, EVM,
+// commitments, variations etc. follow in T-S1-04..09.
+public class CostService(CimsDbContext db, AuditService audit)
+{
+    public sealed record ImportResult(int RowsImported);
+
+    /// <summary>
+    /// Import a CBS (Cost Breakdown Structure) from CSV into a project
+    /// that does not yet have CBS rows. Header columns:
+    /// Code, Name, ParentCode, Description, SortOrder.
+    /// Code and Name are required; ParentCode is empty for top-level
+    /// rows and otherwise must match a Code that appeared earlier in
+    /// the file (forward references are rejected to keep import order
+    /// = tree-depth order).
+    /// </summary>
+    public async Task<ImportResult> ImportCbsAsync(
+        Guid projectId, Stream csvStream, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        // Project must exist in the caller's tenant scope. The query
+        // filter handles cross-tenant attempts — they 404 here.
+        var project = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        // V1.0 import-into-empty only. Re-import / replace semantics
+        // deferred (would need a separate clear endpoint or merge
+        // logic — out of T-S1-03 scope).
+        if (await db.CostBreakdownItems.AnyAsync(c => c.ProjectId == projectId, ct))
+            throw new ConflictException("Project already has CBS rows. Clear them before re-importing.");
+
+        var rows = ParseCsv(csvStream);
+        if (rows.Count == 0) throw new ValidationException(["CSV contains no data rows"]);
+
+        // Build code -> id map as we insert so ParentCode lookups
+        // resolve in O(1). Forward-reference rejection keeps this
+        // safe — a row's ParentCode must be in the map already.
+        var codeToId = new Dictionary<string, Guid>(StringComparer.Ordinal);
+        var errors = new List<string>();
+        var entities = new List<CostBreakdownItem>(rows.Count);
+
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var row = rows[i];
+            var lineNo = i + 2; // header is line 1, first data row is line 2
+            if (codeToId.ContainsKey(row.Code))
+            {
+                errors.Add($"Line {lineNo}: duplicate Code '{row.Code}'");
+                continue;
+            }
+            Guid? parentId = null;
+            if (!string.IsNullOrEmpty(row.ParentCode))
+            {
+                if (!codeToId.TryGetValue(row.ParentCode, out var pid))
+                {
+                    errors.Add($"Line {lineNo}: ParentCode '{row.ParentCode}' not found earlier in file");
+                    continue;
+                }
+                parentId = pid;
+            }
+            var entity = new CostBreakdownItem
+            {
+                ProjectId   = projectId,
+                ParentId    = parentId,
+                Code        = row.Code,
+                Name        = row.Name,
+                Description = row.Description,
+                SortOrder   = row.SortOrder,
+            };
+            codeToId[row.Code] = entity.Id;
+            entities.Add(entity);
+        }
+
+        if (errors.Count > 0) throw new ValidationException(errors);
+
+        db.CostBreakdownItems.AddRange(entities);
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "cbs.imported", "CostBreakdownItem", projectId.ToString(), projectId,
+            detail: new { rowCount = entities.Count }, ip: ip, ua: ua);
+
+        return new ImportResult(entities.Count);
+    }
+
+    private sealed record CsvRow(string Code, string Name, string? ParentCode, string? Description, int SortOrder);
+
+    private static List<CsvRow> ParseCsv(Stream stream)
+    {
+        using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
+        var lines = new List<string>();
+        while (reader.ReadLine() is { } line)
+        {
+            if (!string.IsNullOrWhiteSpace(line)) lines.Add(line);
+        }
+        if (lines.Count == 0) throw new ValidationException(["CSV is empty"]);
+
+        // Header validation: at minimum Code,Name,ParentCode,Description,SortOrder.
+        var header = lines[0].Split(',');
+        var expected = new[] { "Code", "Name", "ParentCode", "Description", "SortOrder" };
+        if (header.Length < expected.Length || !header.Take(expected.Length).Select(h => h.Trim())
+                .SequenceEqual(expected, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new ValidationException([$"CSV header must be: {string.Join(",", expected)}"]);
+        }
+
+        var rows = new List<CsvRow>();
+        for (int i = 1; i < lines.Count; i++)
+        {
+            var lineNo = i + 1;
+            var fields = lines[i].Split(',');
+            if (fields.Length < expected.Length)
+                throw new ValidationException([$"Line {lineNo}: expected {expected.Length} columns, found {fields.Length}"]);
+
+            var code = fields[0].Trim();
+            var name = fields[1].Trim();
+            var parentCode = string.IsNullOrWhiteSpace(fields[2]) ? null : fields[2].Trim();
+            var description = string.IsNullOrWhiteSpace(fields[3]) ? null : fields[3].Trim();
+            var sortOrderRaw = fields[4].Trim();
+
+            if (string.IsNullOrEmpty(code))
+                throw new ValidationException([$"Line {lineNo}: Code is required"]);
+            if (string.IsNullOrEmpty(name))
+                throw new ValidationException([$"Line {lineNo}: Name is required"]);
+            if (code.Length > 50)
+                throw new ValidationException([$"Line {lineNo}: Code exceeds 50 characters"]);
+            if (name.Length > 200)
+                throw new ValidationException([$"Line {lineNo}: Name exceeds 200 characters"]);
+
+            var sortOrder = 0;
+            if (!string.IsNullOrEmpty(sortOrderRaw) && !int.TryParse(sortOrderRaw, out sortOrder))
+                throw new ValidationException([$"Line {lineNo}: SortOrder '{sortOrderRaw}' is not a valid integer"]);
+
+            rows.Add(new CsvRow(code, name, parentCode, description, sortOrder));
+        }
+        return rows;
+    }
+}
+
 // ── CDE ───────────────────────────────────────────────────────────────────────
 public class CdeService(CimsDbContext db, AuditService audit)
 {

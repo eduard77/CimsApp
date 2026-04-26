@@ -64,6 +64,7 @@ builder.Services.AddScoped<AuditService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<InvitationService>();
 builder.Services.AddScoped<ProjectsService>();
+builder.Services.AddScoped<CostService>();
 builder.Services.AddScoped<CdeService>();
 builder.Services.AddScoped<DocumentsService>();
 builder.Services.AddScoped<RfiService>();
