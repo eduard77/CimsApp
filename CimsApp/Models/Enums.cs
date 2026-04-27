@@ -9,3 +9,4 @@ public enum RfiStatus { Draft, Open, UnderReview, Responded, Closed, Cancelled }
 public enum Priority { Low, Medium, High, Urgent }
 public enum ActionStatus { Open, InProgress, Closed, Cancelled }
 public enum CommitmentType { PO, Subcontract }
+public enum VariationState { Raised, Approved, Rejected }

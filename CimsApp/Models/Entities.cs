@@ -357,6 +357,61 @@ public class CostBreakdownItem
 }
 
 /// <summary>
+/// A change-order / variation against the project's contracted scope
+/// (T-S1-08, F.2 sixth bullet). v1.0 implements the **core 3-state
+/// machine** — Raised → Approved or Raised → Rejected — per CR-003.
+/// The full PMBOK / NEC4 6-state workflow (assess / instruct / value
+/// / agree) is deferred to v1.1 backlog item B-016.
+///
+/// Approval / rejection records the decision; it does **not**
+/// automatically integrate the cost / schedule impact into the
+/// project baseline. Manual data entry on the affected CBS lines /
+/// commitments is expected. Auto-integration is intentionally out of
+/// T-S1-08 scope.
+/// </summary>
+public class Variation
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Project-scoped sequential number, e.g. "VAR-0001".</summary>
+    [Required, MaxLength(20)] public string VariationNumber { get; set; } = "";
+
+    [Required, MaxLength(500)] public string Title { get; set; } = "";
+    public string? Description { get; set; }
+    public string? Reason { get; set; }
+
+    public VariationState State { get; set; } = VariationState.Raised;
+
+    /// <summary>Positive = adds cost; negative = omission saving.
+    /// Currency follows Project.Currency. Optional — not all
+    /// variations have a measurable cost impact at raise time.</summary>
+    public decimal? EstimatedCostImpact { get; set; }
+
+    /// <summary>Positive = extension of time; negative = acceleration.
+    /// Optional.</summary>
+    public int? EstimatedTimeImpactDays { get; set; }
+
+    /// <summary>Optional link to a specific CBS line if the variation
+    /// targets one. Project-wide variations leave this null.</summary>
+    public Guid? CostBreakdownItemId { get; set; }
+    public CostBreakdownItem? CostBreakdownItem { get; set; }
+
+    public Guid RaisedById { get; set; }
+    public User RaisedBy { get; set; } = null!;
+
+    public Guid? DecidedById { get; set; }
+    public User? DecidedBy { get; set; }
+    public DateTime? DecidedAt { get; set; }
+    public string? DecisionNote { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
 /// A reporting / accounting period for a project (T-S1-06). Typically
 /// monthly but the entity does not enforce a calendar — pick whatever
 /// `[StartDate, EndDate]` window the project's commercial cycle uses.

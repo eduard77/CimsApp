@@ -42,6 +42,7 @@ public class CimsDbContext(
     public DbSet<Commitment>         Commitments         => Set<Commitment>();
     public DbSet<CostPeriod>         CostPeriods         => Set<CostPeriod>();
     public DbSet<ActualCost>         ActualCosts         => Set<ActualCost>();
+    public DbSet<Variation>          Variations          => Set<Variation>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -235,6 +236,26 @@ public class CimsDbContext(
              .HasForeignKey(a => a.PeriodId).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<Variation>(e =>
+        {
+            // Project-scoped sequential number must be unique per project.
+            e.HasIndex(v => new { v.ProjectId, v.VariationNumber }).IsUnique();
+            e.Property(v => v.EstimatedCostImpact).HasPrecision(18, 2);
+            // All four FKs NoAction for the same multi-cascade-path
+            // reasoning that drives the Invitation entity's config:
+            // Project, RaisedBy, DecidedBy, and CostBreakdownItem each
+            // ultimately resolve to Organisation via Project, and SQL
+            // Server forbids multiple cascade paths to the same root.
+            e.HasOne(v => v.Project).WithMany()
+             .HasForeignKey(v => v.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(v => v.CostBreakdownItem).WithMany()
+             .HasForeignKey(v => v.CostBreakdownItemId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(v => v.RaisedBy).WithMany()
+             .HasForeignKey(v => v.RaisedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(v => v.DecidedBy).WithMany()
+             .HasForeignKey(v => v.DecidedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -264,6 +285,7 @@ public class CimsDbContext(
         m.Entity<Commitment>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<CostPeriod>().HasQueryFilter(p => p.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<ActualCost>().HasQueryFilter(a => a.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Variation>().HasQueryFilter(v => v.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()

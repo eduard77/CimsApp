@@ -1045,6 +1045,76 @@ namespace CimsApp.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("CimsApp.Models.Variation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CostBreakdownItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("DecidedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("DecidedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DecisionNote")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal?>("EstimatedCostImpact")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int?>("EstimatedTimeImpactDays")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("RaisedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("State")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("VariationNumber")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CostBreakdownItemId");
+
+                    b.HasIndex("DecidedById");
+
+                    b.HasIndex("RaisedById");
+
+                    b.HasIndex("ProjectId", "VariationNumber")
+                        .IsUnique();
+
+                    b.ToTable("Variations");
+                });
+
             modelBuilder.Entity("CimsApp.Models.ActionItem", b =>
                 {
                     b.HasOne("CimsApp.Models.User", "Assignee")
@@ -1373,6 +1443,39 @@ namespace CimsApp.Migrations
                         .IsRequired();
 
                     b.Navigation("Organisation");
+                });
+
+            modelBuilder.Entity("CimsApp.Models.Variation", b =>
+                {
+                    b.HasOne("CimsApp.Models.CostBreakdownItem", "CostBreakdownItem")
+                        .WithMany()
+                        .HasForeignKey("CostBreakdownItemId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("CimsApp.Models.User", "DecidedBy")
+                        .WithMany()
+                        .HasForeignKey("DecidedById")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("CimsApp.Models.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("CimsApp.Models.User", "RaisedBy")
+                        .WithMany()
+                        .HasForeignKey("RaisedById")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("CostBreakdownItem");
+
+                    b.Navigation("DecidedBy");
+
+                    b.Navigation("Project");
+
+                    b.Navigation("RaisedBy");
                 });
 
             modelBuilder.Entity("CimsApp.Models.CdeContainer", b =>
