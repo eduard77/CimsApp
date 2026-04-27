@@ -169,6 +169,218 @@ public class CdeController(CdeService svc, CimsDbContext db) : CimsControllerBas
     }
 }
 
+// ── Cost & Commercial ─────────────────────────────────────────────────────────
+[Route("api/v1/projects/{projectId:guid}/cbs")]
+public class CostController(CostService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpPost("import")]
+    public async Task<IActionResult> Import(Guid projectId, IFormFile file, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        if (file is null || file.Length == 0)
+            throw new ValidationException(["file is required"]);
+        await using var stream = file.OpenReadStream();
+        var result = await svc.ImportCbsAsync(projectId, stream,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = result });
+    }
+
+    [HttpPut("{itemId:guid}/budget")]
+    public async Task<IActionResult> SetLineBudget(
+        Guid projectId, Guid itemId, SetLineBudgetRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.SetLineBudgetAsync(projectId, itemId, req.Budget,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
+
+    [HttpGet("rollup")]
+    public async Task<IActionResult> Rollup(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.GetCbsRollupAsync(projectId, ct) });
+    }
+}
+
+[Route("api/v1/projects/{projectId:guid}/commitments")]
+public class CommitmentsController(CostService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpPost]
+    public async Task<IActionResult> Create(
+        Guid projectId, CreateCommitmentRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var c = await svc.CreateCommitmentAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = c });
+    }
+}
+
+[Route("api/v1/projects/{projectId:guid}/cost-periods")]
+public class CostPeriodsController(CostService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpPost]
+    public async Task<IActionResult> Create(
+        Guid projectId, CreatePeriodRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var p = await svc.CreatePeriodAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = p });
+    }
+
+    [HttpPost("{periodId:guid}/close")]
+    public async Task<IActionResult> Close(
+        Guid projectId, Guid periodId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.ClosePeriodAsync(projectId, periodId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
+
+    [HttpPut("{periodId:guid}/baseline")]
+    public async Task<IActionResult> SetBaseline(
+        Guid projectId, Guid periodId, SetPeriodBaselineRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.SetPeriodBaselineAsync(projectId, periodId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
+}
+
+[Route("api/v1/projects/{projectId:guid}/cashflow")]
+public class CashflowController(CostService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> Get(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetCashflowAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+}
+
+[Route("api/v1/projects/{projectId:guid}/actuals")]
+public class ActualsController(CostService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpPost]
+    public async Task<IActionResult> Record(
+        Guid projectId, RecordActualRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var a = await svc.RecordActualAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = a });
+    }
+}
+
+[Route("api/v1/projects/{projectId:guid}/payment-certificates")]
+public class PaymentCertificatesController(PaymentCertificatesService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpPost]
+    public async Task<IActionResult> CreateDraft(
+        Guid projectId, CreatePaymentCertificateDraftRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var dto = await svc.CreateDraftAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = dto });
+    }
+
+    [HttpPut("{certificateId:guid}")]
+    public async Task<IActionResult> UpdateDraft(
+        Guid projectId, Guid certificateId,
+        UpdatePaymentCertificateDraftRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var dto = await svc.UpdateDraftAsync(projectId, certificateId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    [HttpPost("{certificateId:guid}/issue")]
+    public async Task<IActionResult> Issue(
+        Guid projectId, Guid certificateId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var dto = await svc.IssueAsync(projectId, certificateId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    [HttpGet("{certificateId:guid}")]
+    public async Task<IActionResult> Get(
+        Guid projectId, Guid certificateId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetAsync(projectId, certificateId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+}
+
+[Route("api/v1/projects/{projectId:guid}/variations")]
+public class VariationsController(VariationsService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpPost]
+    public async Task<IActionResult> Raise(
+        Guid projectId, RaiseVariationRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var v = await svc.RaiseAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = v });
+    }
+
+    [HttpPost("{variationId:guid}/approve")]
+    public async Task<IActionResult> Approve(
+        Guid projectId, Guid variationId, VariationDecisionRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.ApproveAsync(projectId, variationId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
+
+    [HttpPost("{variationId:guid}/reject")]
+    public async Task<IActionResult> Reject(
+        Guid projectId, Guid variationId, VariationDecisionRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.RejectAsync(projectId, variationId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

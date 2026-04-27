@@ -38,6 +38,12 @@ public class CimsDbContext(
     public DbSet<Notification>       Notifications       => Set<Notification>();
     public DbSet<ProjectTemplate>    ProjectTemplates    => Set<ProjectTemplate>();
     public DbSet<Invitation>         Invitations         => Set<Invitation>();
+    public DbSet<CostBreakdownItem>  CostBreakdownItems  => Set<CostBreakdownItem>();
+    public DbSet<Commitment>         Commitments         => Set<Commitment>();
+    public DbSet<CostPeriod>         CostPeriods         => Set<CostPeriod>();
+    public DbSet<ActualCost>         ActualCosts         => Set<ActualCost>();
+    public DbSet<Variation>          Variations          => Set<Variation>();
+    public DbSet<PaymentCertificate> PaymentCertificates => Set<PaymentCertificate>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -174,6 +180,105 @@ public class CimsDbContext(
              .HasForeignKey(i => i.CreatedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<CostBreakdownItem>(e =>
+        {
+            // Code unique within a project (any depth in the tree).
+            e.HasIndex(c => new { c.ProjectId, c.Code }).IsUnique();
+            // Fast lookup of children for tree traversal.
+            e.HasIndex(c => new { c.ProjectId, c.ParentId });
+            e.HasOne(c => c.Project).WithMany()
+             .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            // Self-referencing tree: NoAction on parent so deleting a
+            // parent does not silently orphan children — service layer
+            // (T-S1-03 onwards) will handle cascade decisions
+            // explicitly.
+            e.HasOne(c => c.Parent).WithMany(c => c.Children)
+             .HasForeignKey(c => c.ParentId).OnDelete(DeleteBehavior.NoAction);
+            // T-S1-04. decimal(18,2) per kickoff spec; Project.BudgetValue
+            // uses (15,2) but per-line CBS budgets aggregate independently
+            // and 18 digits of precision keeps headroom for very large
+            // works.
+            e.Property(c => c.Budget).HasPrecision(18, 2);
+        });
+
+        m.Entity<Commitment>(e =>
+        {
+            // Rollup queries group by CostBreakdownItemId — index that.
+            // Project-level filtering is covered by the per-project
+            // (ProjectId, CostBreakdownItemId) shape of the index.
+            e.HasIndex(c => new { c.ProjectId, c.CostBreakdownItemId });
+            e.Property(c => c.Amount).HasPrecision(18, 2);
+            e.HasOne(c => c.Project).WithMany()
+             .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.CostBreakdownItem).WithMany()
+             .HasForeignKey(c => c.CostBreakdownItemId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<CostPeriod>(e =>
+        {
+            e.HasIndex(p => new { p.ProjectId, p.StartDate });
+            e.Property(p => p.PlannedCashflow).HasPrecision(18, 2);
+            e.HasOne(p => p.Project).WithMany()
+             .HasForeignKey(p => p.ProjectId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<ActualCost>(e =>
+        {
+            // Two indices for the two natural rollup directions: per
+            // CBS line (the standard committed/actual rollup) and per
+            // period (cashflow / reporting at T-S1-11).
+            e.HasIndex(a => new { a.ProjectId, a.CostBreakdownItemId });
+            e.HasIndex(a => new { a.ProjectId, a.PeriodId });
+            e.Property(a => a.Amount).HasPrecision(18, 2);
+            e.HasOne(a => a.Project).WithMany()
+             .HasForeignKey(a => a.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(a => a.CostBreakdownItem).WithMany()
+             .HasForeignKey(a => a.CostBreakdownItemId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(a => a.Period).WithMany(p => p.Actuals)
+             .HasForeignKey(a => a.PeriodId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<PaymentCertificate>(e =>
+        {
+            // One certificate per period (any state). Two parallel
+            // drafts on the same period would race the cumulative
+            // chain — disallow at the storage layer.
+            e.HasIndex(c => new { c.ProjectId, c.PeriodId }).IsUnique();
+            e.HasIndex(c => new { c.ProjectId, c.CertificateNumber }).IsUnique();
+            e.Property(c => c.CumulativeValuation).HasPrecision(18, 2);
+            e.Property(c => c.CumulativeMaterialsOnSite).HasPrecision(18, 2);
+            e.Property(c => c.IncludedVariationsAmount).HasPrecision(18, 2);
+            e.Property(c => c.RetentionPercent).HasPrecision(5, 2);
+            // NoAction across all FKs — same multi-cascade-path
+            // reasoning that drives Variation / Invitation.
+            e.HasOne(c => c.Project).WithMany()
+             .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.Period).WithMany()
+             .HasForeignKey(c => c.PeriodId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.IssuedBy).WithMany()
+             .HasForeignKey(c => c.IssuedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<Variation>(e =>
+        {
+            // Project-scoped sequential number must be unique per project.
+            e.HasIndex(v => new { v.ProjectId, v.VariationNumber }).IsUnique();
+            e.Property(v => v.EstimatedCostImpact).HasPrecision(18, 2);
+            // All four FKs NoAction for the same multi-cascade-path
+            // reasoning that drives the Invitation entity's config:
+            // Project, RaisedBy, DecidedBy, and CostBreakdownItem each
+            // ultimately resolve to Organisation via Project, and SQL
+            // Server forbids multiple cascade paths to the same root.
+            e.HasOne(v => v.Project).WithMany()
+             .HasForeignKey(v => v.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(v => v.CostBreakdownItem).WithMany()
+             .HasForeignKey(v => v.CostBreakdownItemId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(v => v.RaisedBy).WithMany()
+             .HasForeignKey(v => v.RaisedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(v => v.DecidedBy).WithMany()
+             .HasForeignKey(v => v.DecidedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -199,6 +304,12 @@ public class CimsDbContext(
         // InvitationService.ConsumeAsync uses IgnoreQueryFilters(), the
         // same pattern AuthService uses for User/RefreshToken lookups.
         m.Entity<Invitation>().HasQueryFilter(i => i.OrganisationId == _tenant.OrganisationId);
+        m.Entity<CostBreakdownItem>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Commitment>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<CostPeriod>().HasQueryFilter(p => p.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<ActualCost>().HasQueryFilter(a => a.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Variation>().HasQueryFilter(v => v.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<PaymentCertificate>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -218,6 +329,7 @@ public class CimsDbContext(
             else if (e.Entity is CdeContainer c) c.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is Rfi r)      r.UpdatedAt  = DateTime.UtcNow;
             else if (e.Entity is ActionItem a) a.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is CostBreakdownItem cbi) cbi.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

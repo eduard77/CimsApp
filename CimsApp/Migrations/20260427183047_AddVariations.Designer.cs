@@ -4,6 +4,7 @@ using CimsApp.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CimsApp.Migrations
 {
     [DbContext(typeof(CimsDbContext))]
-    partial class CimsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260427183047_AddVariations")]
+    partial class AddVariations
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -356,10 +359,6 @@ namespace CimsApp.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
-                    b.Property<decimal?>("PlannedCashflow")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uniqueidentifier");
 
@@ -666,69 +665,6 @@ namespace CimsApp.Migrations
                         .IsUnique();
 
                     b.ToTable("Organisations");
-                });
-
-            modelBuilder.Entity("CimsApp.Models.PaymentCertificate", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("CertificateNumber")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<decimal>("CumulativeMaterialsOnSite")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal>("CumulativeValuation")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal?>("IncludedVariationsAmount")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<DateTime?>("IssuedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("IssuedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("PeriodId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("RetentionPercent")
-                        .HasPrecision(5, 2)
-                        .HasColumnType("decimal(5,2)");
-
-                    b.Property<int>("State")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("IssuedById");
-
-                    b.HasIndex("PeriodId");
-
-                    b.HasIndex("ProjectId", "CertificateNumber")
-                        .IsUnique();
-
-                    b.HasIndex("ProjectId", "PeriodId")
-                        .IsUnique();
-
-                    b.ToTable("PaymentCertificates");
                 });
 
             modelBuilder.Entity("CimsApp.Models.Project", b =>
@@ -1398,32 +1334,6 @@ namespace CimsApp.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("CimsApp.Models.PaymentCertificate", b =>
-                {
-                    b.HasOne("CimsApp.Models.User", "IssuedBy")
-                        .WithMany()
-                        .HasForeignKey("IssuedById")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("CimsApp.Models.CostPeriod", "Period")
-                        .WithMany()
-                        .HasForeignKey("PeriodId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.Project", "Project")
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.Navigation("IssuedBy");
-
-                    b.Navigation("Period");
-
-                    b.Navigation("Project");
                 });
 
             modelBuilder.Entity("CimsApp.Models.Project", b =>

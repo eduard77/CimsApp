@@ -1,0 +1,190 @@
+CIMS SPRINT 1 — HANDOFF FOR LAPTOP SESSION
+============================================
+
+Prepared 2026-04-26. Branch: sprint/s1-cost-commercial.
+Working tree clean at handoff (only .claude/ untracked).
+Pushed to origin and ready to pull.
+
+FIRST THING ON THE LAPTOP (do before anything else)
+----------------------------------------------------
+1. git fetch
+   git checkout sprint/s1-cost-commercial
+   (the branch is on origin; this is a fresh checkout for the
+    laptop)
+
+2. Apply the AddCostBreakdownItems migration to the laptop's
+   local SQL Server. The branch has the migration committed
+   (be2eecf) but each machine's DB needs `database update`
+   independently:
+
+     dotnet ef database update --project CimsApp
+
+   Expected effect: creates the CostBreakdownItems table.
+
+3. Build + run the test suite to confirm parity:
+
+     dotnet build CimsApp.sln
+     dotnet test  CimsApp.sln
+
+   Expect 49 / 49 green at b0ab2fb. If anything fails, stop and
+   compare to the build output recorded in the commit-body trail
+   on this branch.
+
+4. Promote the existing user to SuperAdmin so the role-gated
+   endpoints work in manual smoke tests:
+
+     UPDATE Users SET GlobalRole = 0
+     WHERE Email = 'eduard.szigeti@genera-systems.com';
+
+   (UserRole.SuperAdmin = 0; see CimsApp/Models/Enums.cs.)
+   Then log out and back in to refresh the JWT's cims:role
+   claim. Required because the Users.GlobalRole column was
+   added by S0 commit b2a5781 and existing rows default null.
+
+WHAT LANDED THIS SESSION (2026-04-26)
+--------------------------------------
+Branch is at b0ab2fb. Seven commits ahead of master since the
+S0 PR (43e55c6) merged:
+
+  b0ab2fb feat(s1): CostService.ImportCbsAsync — CSV import service + DI
+  ae9dea4 test(s1): T-S1-02 CostBreakdownItem tenant filter behavioural test
+  be2eecf chore(s1): ef migration AddCostBreakdownItems
+  ba2227c feat(s1): CostBreakdownItem entity + DbContext + tenant query filter
+  82000fb docs(s1): CR-003 cut S1 scope to fit capacity (Option A)
+  61716ec docs(s1): backfill F.2 module DoD + task decomposition; surface capacity gap
+  6c44a32 chore(s1): sprint kickoff scaffold — awaiting PAFM Appendix F.2 paste
+
+Sprint task status:
+
+  T-S1-01 sprint kickoff                  DONE (6c44a32, 61716ec, 82000fb)
+  T-S1-02 CBS entity + filter + test      DONE (ba2227c, be2eecf, ae9dea4)
+  T-S1-03 CSV import                      IN PROGRESS — service + DI in
+                                          b0ab2fb; controller + tests +
+                                          sprint-log Day-2 still to do
+  T-S1-04 budget at line                  PENDING
+  T-S1-05 commitments (POs / subcontracts) PENDING
+  T-S1-06 actuals + periods               PENDING
+  T-S1-07 EVM core (PV/EV/AC/CPI/SPI/EAC/TCPI) PENDING
+  T-S1-08 variations 3-state machine      PENDING (trimmed by CR-003)
+  T-S1-09 payment certificate             PENDING
+  T-S1-10 Construction Act notices        DEFERRED → B-014 (CR-003)
+  T-S1-11 cashflow S-curve                PENDING
+  T-S1-12 final account schedule          DEFERRED → B-015 (CR-003)
+  T-S1-13 tenant filter test sweep        PENDING
+  T-S1-14 MudBlazor 7 upgrade             DEFERRED → B-013 (CR-003)
+  T-S1-15 sprint close                    PENDING
+
+WHERE T-S1-03 LEFT OFF
+-----------------------
+b0ab2fb landed the service-layer half. Three pieces remain:
+
+  Piece 1 — Controller endpoint
+    Add a CostController (new class, can sit in Controllers.cs
+    near the other project-scoped controllers) with one action:
+
+      [Route("api/v1/projects/{projectId:guid}/cbs")]
+      public class CostController(CostService svc, CimsDbContext db)
+          : CimsControllerBase
+      {
+          [HttpPost("import")]
+          public async Task<IActionResult> Import(
+              Guid projectId, IFormFile file, CancellationToken ct)
+          {
+              var role = await GetProjectRoleAsync(db, projectId);
+              if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+                  throw new ForbiddenException();
+              if (file is null || file.Length == 0)
+                  throw new ValidationException(new[] { "file is required" });
+              await using var stream = file.OpenReadStream();
+              var result = await svc.ImportCbsAsync(projectId, stream,
+                  CurrentUserId, ClientIp, ClientAgent, ct);
+              return Ok(new { success = true, data = result });
+          }
+      }
+
+    Update docs/security/role-matrix.md with the new endpoint.
+
+  Piece 2 — Behavioural tests
+    File: CimsApp.Tests/Services/Cost/CostServiceTests.cs (new
+    folder). Use the in-memory provider (already a test
+    dependency since 0567adf, ADR-0009) and the StubTenantContext
+    test double from S0.
+
+    Scenarios to cover:
+      a. Happy path — valid CSV with a 3-row tree imports the
+         right number of rows; ParentId edges resolved correctly;
+         cbs.imported audit log entry created.
+      b. Empty file -> ValidationException "CSV is empty" /
+         "CSV contains no data rows".
+      c. Header mismatch -> ValidationException "CSV header must
+         be: Code,Name,ParentCode,Description,SortOrder".
+      d. Forward reference -> "Line N: ParentCode 'X' not found
+         earlier in file" (verifies the order constraint).
+      e. Duplicate Code -> "Line N: duplicate Code 'X'".
+      f. SortOrder non-integer -> "Line N: SortOrder 'foo' is
+         not a valid integer".
+      g. Project already has CBS rows -> ConflictException.
+      h. Cross-tenant project lookup 404s rather than leaking
+         existence (use two stub tenants like in
+         CimsDbContextIsolationTests / CostBreakdownItemFilterTests).
+
+  Piece 3 — Sprint log
+    Append a Day 2 entry under ## Daily entries in
+    docs/sprint-log/s1.md covering:
+      - T-S1-02 closed with SHAs ba2227c, be2eecf, ae9dea4.
+      - T-S1-03 service-layer landing (b0ab2fb) and the
+        controller / tests pieces still pending.
+      - Any new ADR (none expected at this stage; if cost
+        modelling decisions surface they belong in ADR-0013).
+    Mark T-S1-02 done in the task table.
+    Tick the F.2 line "CBS hierarchical structure; import from
+    CSV" once Piece 1 + 2 are committed.
+
+DECISIONS TO HOLD
+------------------
+- S0 retro velocity flag stands: do not assume the 49h-in-2-days
+  cadence carries to S1. CR-003 already trimmed scope to keep
+  S1 honest.
+- All Cost-domain entities must be tenant-scoped through Project
+  (the AppointingPartyId path used by every other CBS-adjacent
+  query filter). Don't introduce new tenant-routing patterns.
+- All Cost-domain writes pass through the AuditInterceptor
+  automatically (the interceptor scoops every tenant-scoped
+  EF entry on SaveChanges). Don't manually add audit calls
+  except for batch / cross-cutting actions like cbs.imported.
+- v1.0 import-into-empty only on T-S1-03. Re-import / merge /
+  replace semantics deferred — open a separate task or v1.1
+  backlog item if business pressure surfaces.
+
+V1.0 BACKLOG REMINDERS
+-----------------------
+- B-013 MudBlazor 7 upgrade — pre-existing Palette warning is
+  not blocking, defer.
+- B-014 Construction Act payment / pay-less notices — only
+  compliance-shaped cut. Re-evaluate before any external
+  customer onboarding.
+- B-015 Final account schedule — late-stage feature. Bring
+  back when a pilot project nears practical completion.
+- B-016 Variations workflow full 6 states (assess / instruct /
+  value / agree) — process polish on top of the core 3-state
+  machine T-S1-08 will deliver.
+
+ENVIRONMENT NOTES
+------------------
+- This machine: dotnet SDK 10.0.202, dotnet-ef 10.0.6
+  generates valid migrations for the net8.0 project. Don't use
+  the --no-build flag on `dotnet ef migrations add` — it uses
+  a stale assembly and produces empty Up/Down bodies (lost
+  ~30 minutes on this in S0; lesson stays).
+- This machine: bash (Git Bash) forks fail on this Windows
+  host. Use PowerShell for all shell work; gh / git work fine
+  from PowerShell. The laptop may not have this issue —
+  verify by running a single `git status` in bash before
+  assuming the workaround is needed there.
+- The S0 retrospective notes-for-next-sprint mentioned the
+  scheduled remote agent trig_01CbdDcec2Q2GQK8oidWjm3o is
+  still disabled at https://claude.ai/code/routines. Its
+  purpose is served. Delete or leave; no further effect on
+  S1.
+
+DONE FOR THIS MACHINE.

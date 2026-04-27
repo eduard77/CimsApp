@@ -30,6 +30,14 @@ public class CimsDbContextTenantFilterTests
         typeof(ProjectTemplate),
         typeof(Notification),
         typeof(AuditLog),
+        typeof(Invitation),
+        typeof(CostBreakdownItem),
+        // S1 cost-domain additions (T-S1-13 sweep).
+        typeof(Commitment),
+        typeof(CostPeriod),
+        typeof(ActualCost),
+        typeof(Variation),
+        typeof(PaymentCertificate),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =

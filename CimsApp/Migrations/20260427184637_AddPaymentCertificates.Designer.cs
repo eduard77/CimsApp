@@ -4,6 +4,7 @@ using CimsApp.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CimsApp.Migrations
 {
     [DbContext(typeof(CimsDbContext))]
-    partial class CimsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260427184637_AddPaymentCertificates")]
+    partial class AddPaymentCertificates
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -355,10 +358,6 @@ namespace CimsApp.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
-
-                    b.Property<decimal?>("PlannedCashflow")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uniqueidentifier");

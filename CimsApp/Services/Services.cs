@@ -277,6 +277,892 @@ public class ProjectsService(CimsDbContext db, AuditService audit, CimsApp.Servi
     }
 }
 
+// ── Cost & Commercial ─────────────────────────────────────────────────────────
+// PAFM-SD Appendix F.2 (S1 module). T-S1-03 ships CSV import on top
+// of the CostBreakdownItem entity (T-S1-02). Budget at line, EVM,
+// commitments, variations etc. follow in T-S1-04..09.
+public class CostService(CimsDbContext db, AuditService audit)
+{
+    public sealed record ImportResult(int RowsImported);
+
+    /// <summary>
+    /// Import a CBS (Cost Breakdown Structure) from CSV into a project
+    /// that does not yet have CBS rows. Header columns:
+    /// Code, Name, ParentCode, Description, SortOrder.
+    /// Code and Name are required; ParentCode is empty for top-level
+    /// rows and otherwise must match a Code that appeared earlier in
+    /// the file (forward references are rejected to keep import order
+    /// = tree-depth order).
+    /// </summary>
+    public async Task<ImportResult> ImportCbsAsync(
+        Guid projectId, Stream csvStream, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        // Project must exist in the caller's tenant scope. The query
+        // filter handles cross-tenant attempts — they 404 here.
+        var project = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        // V1.0 import-into-empty only. Re-import / replace semantics
+        // deferred (would need a separate clear endpoint or merge
+        // logic — out of T-S1-03 scope).
+        if (await db.CostBreakdownItems.AnyAsync(c => c.ProjectId == projectId, ct))
+            throw new ConflictException("Project already has CBS rows. Clear them before re-importing.");
+
+        var rows = ParseCsv(csvStream);
+        if (rows.Count == 0) throw new ValidationException(["CSV contains no data rows"]);
+
+        // Build code -> id map as we insert so ParentCode lookups
+        // resolve in O(1). Forward-reference rejection keeps this
+        // safe — a row's ParentCode must be in the map already.
+        var codeToId = new Dictionary<string, Guid>(StringComparer.Ordinal);
+        var errors = new List<string>();
+        var entities = new List<CostBreakdownItem>(rows.Count);
+
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var row = rows[i];
+            var lineNo = i + 2; // header is line 1, first data row is line 2
+            if (codeToId.ContainsKey(row.Code))
+            {
+                errors.Add($"Line {lineNo}: duplicate Code '{row.Code}'");
+                continue;
+            }
+            Guid? parentId = null;
+            if (!string.IsNullOrEmpty(row.ParentCode))
+            {
+                if (!codeToId.TryGetValue(row.ParentCode, out var pid))
+                {
+                    errors.Add($"Line {lineNo}: ParentCode '{row.ParentCode}' not found earlier in file");
+                    continue;
+                }
+                parentId = pid;
+            }
+            var entity = new CostBreakdownItem
+            {
+                ProjectId   = projectId,
+                ParentId    = parentId,
+                Code        = row.Code,
+                Name        = row.Name,
+                Description = row.Description,
+                SortOrder   = row.SortOrder,
+            };
+            codeToId[row.Code] = entity.Id;
+            entities.Add(entity);
+        }
+
+        if (errors.Count > 0) throw new ValidationException(errors);
+
+        db.CostBreakdownItems.AddRange(entities);
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "cbs.imported", "CostBreakdownItem", projectId.ToString(), projectId,
+            detail: new { rowCount = entities.Count }, ip: ip, ua: ua);
+
+        return new ImportResult(entities.Count);
+    }
+
+    /// <summary>
+    /// Set (or clear, with budget == null) the planned budget on a single
+    /// CBS line. T-S1-04, F.2 "Budget set at CBS line level". Currency is
+    /// implied by Project.Currency — the line carries the amount only.
+    /// </summary>
+    public async Task SetLineBudgetAsync(
+        Guid projectId, Guid itemId, decimal? budget, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (budget.HasValue && budget.Value < 0m)
+            throw new ValidationException(["Budget must be zero or greater"]);
+
+        // Single query enforces both tenant scope (via the CBS query
+        // filter through Project.AppointingPartyId) and project membership
+        // of the line. Cross-tenant or wrong-project itemIds 404.
+        var item = await db.CostBreakdownItems
+            .FirstOrDefaultAsync(c => c.Id == itemId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CBS line");
+
+        var previous = item.Budget;
+        item.Budget = budget;
+        await db.SaveChangesAsync(ct);
+
+        // Per-row Update audit is captured automatically by AuditInterceptor;
+        // the explicit cbs.line_budget_set entry below carries the
+        // before/after pair as a structured detail for cost-domain
+        // reporting (separate from the field-level audit).
+        await audit.WriteAsync(actorId, "cbs.line_budget_set", "CostBreakdownItem",
+            itemId.ToString(), projectId,
+            detail: new { previous, current = budget }, ip: ip, ua: ua);
+    }
+
+    /// <summary>
+    /// Record a monetary commitment (PO or subcontract) against a CBS
+    /// line. T-S1-05, F.2 "Commitments (POs, subcontracts) tracked".
+    /// Currency is implied by Project.Currency; the line carries the
+    /// amount only.
+    /// </summary>
+    public async Task<Commitment> CreateCommitmentAsync(
+        Guid projectId, CreateCommitmentRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (req.Amount <= 0m)
+            throw new ValidationException(["Amount must be greater than zero"]);
+        if (string.IsNullOrWhiteSpace(req.Reference))
+            throw new ValidationException(["Reference is required"]);
+        if (string.IsNullOrWhiteSpace(req.Counterparty))
+            throw new ValidationException(["Counterparty is required"]);
+
+        // (Id, ProjectId) tuple lookup enforces both the CBS query filter
+        // (tenant scope) AND that the line actually belongs to the
+        // project the caller named in the URL — same pattern as
+        // SetLineBudgetAsync.
+        var line = await db.CostBreakdownItems
+            .FirstOrDefaultAsync(c => c.Id == req.CostBreakdownItemId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CBS line");
+
+        var commitment = new Commitment
+        {
+            ProjectId           = projectId,
+            CostBreakdownItemId = line.Id,
+            Type                = req.Type,
+            Reference           = req.Reference.Trim(),
+            Counterparty        = req.Counterparty.Trim(),
+            Amount              = req.Amount,
+            Description         = req.Description,
+        };
+        db.Commitments.Add(commitment);
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "commitment.created", "Commitment",
+            commitment.Id.ToString(), projectId,
+            detail: new
+            {
+                cbsLineId = line.Id,
+                type      = req.Type.ToString(),
+                amount    = req.Amount,
+                reference = commitment.Reference,
+            }, ip: ip, ua: ua);
+        return commitment;
+    }
+
+    /// <summary>
+    /// Per-line committed-vs-budget rollup for a project's CBS. T-S1-05,
+    /// F.2 "committed-vs-budget rollup". Returns one row per CBS line
+    /// (flat, ordered by Code) carrying the line's Budget, the SUM of
+    /// commitment Amounts on that line, and the variance
+    /// (Budget - Committed) when Budget is set.
+    ///
+    /// Tree aggregation (parent rolls up children) is intentionally NOT
+    /// done here — that semantic belongs in the EVM PV calculation
+    /// (T-S1-07) where it has to make explicit decisions about whether
+    /// budgets are placed at leaves or at parents. v1.0 callers
+    /// (UI, EVM) build the tree on top of this flat result.
+    /// </summary>
+    public async Task<List<CbsLineRollupDto>> GetCbsRollupAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        // Tenant scope: the project lookup uses the Project query filter,
+        // so a cross-tenant projectId 404s before any CBS / Commitment
+        // query runs. Lines and commitments share the same filter.
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var lines = await db.CostBreakdownItems
+            .Where(c => c.ProjectId == projectId)
+            .OrderBy(c => c.Code)
+            .ToListAsync(ct);
+
+        var commitmentSums = await db.Commitments
+            .Where(c => c.ProjectId == projectId)
+            .GroupBy(c => c.CostBreakdownItemId)
+            .Select(g => new { ItemId = g.Key, Total = g.Sum(c => c.Amount) })
+            .ToListAsync(ct);
+        var commByItem = commitmentSums.ToDictionary(x => x.ItemId, x => x.Total);
+
+        // Actuals are summed across all periods (open and closed) — the
+        // rollup reflects everything that has actually been spent against
+        // the line. Per-period breakdown belongs to the cashflow report
+        // (T-S1-11), not the cost rollup.
+        var actualSums = await db.ActualCosts
+            .Where(a => a.ProjectId == projectId)
+            .GroupBy(a => a.CostBreakdownItemId)
+            .Select(g => new { ItemId = g.Key, Total = g.Sum(a => a.Amount) })
+            .ToListAsync(ct);
+        var actByItem = actualSums.ToDictionary(x => x.ItemId, x => x.Total);
+
+        return lines.Select(l =>
+        {
+            var committed = commByItem.TryGetValue(l.Id, out var c) ? c : 0m;
+            var actual    = actByItem.TryGetValue(l.Id, out var a) ? a : 0m;
+            var variance  = l.Budget.HasValue ? (decimal?)(l.Budget.Value - committed) : null;
+            return new CbsLineRollupDto(l.Id, l.Code, l.Name, l.ParentId,
+                l.Budget, committed, actual, variance);
+        }).ToList();
+    }
+
+    /// <summary>
+    /// Open a new CostPeriod on the project. v1.0 requires
+    /// `StartDate &lt; EndDate` and a non-empty Label; period overlap
+    /// with existing periods is intentionally NOT enforced — the
+    /// project may legitimately want overlapping windows (months
+    /// alongside quarters, or contractual periods alongside
+    /// reporting months). T-S1-06.
+    /// </summary>
+    public async Task<CostPeriod> CreatePeriodAsync(
+        Guid projectId, CreatePeriodRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Label))
+            throw new ValidationException(["Label is required"]);
+        if (req.StartDate >= req.EndDate)
+            throw new ValidationException(["StartDate must be before EndDate"]);
+        if (req.PlannedCashflow is < 0m)
+            throw new ValidationException(["PlannedCashflow must be zero or greater"]);
+
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var period = new CostPeriod
+        {
+            ProjectId       = projectId,
+            Label           = req.Label.Trim(),
+            StartDate       = req.StartDate,
+            EndDate         = req.EndDate,
+            PlannedCashflow = req.PlannedCashflow,
+        };
+        db.CostPeriods.Add(period);
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "cost_period.opened", "CostPeriod",
+            period.Id.ToString(), projectId,
+            detail: new { label = period.Label, period.StartDate, period.EndDate, period.PlannedCashflow },
+            ip: ip, ua: ua);
+        return period;
+    }
+
+    /// <summary>
+    /// Set or clear the planned-cashflow baseline on an existing
+    /// CostPeriod. T-S1-11. Allowed on both Open and Closed periods —
+    /// baselines often get refined after the period closes (a re-baseline
+    /// is a forecast adjustment, not an actual mutation).
+    /// </summary>
+    public async Task SetPeriodBaselineAsync(
+        Guid projectId, Guid periodId, SetPeriodBaselineRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (req.PlannedCashflow is < 0m)
+            throw new ValidationException(["PlannedCashflow must be zero or greater"]);
+
+        var period = await db.CostPeriods
+            .FirstOrDefaultAsync(p => p.Id == periodId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CostPeriod");
+
+        var previous = period.PlannedCashflow;
+        period.PlannedCashflow = req.PlannedCashflow;
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "cost_period.baseline_set", "CostPeriod",
+            period.Id.ToString(), projectId,
+            detail: new { period.Label, previous, current = req.PlannedCashflow },
+            ip: ip, ua: ua);
+    }
+
+    /// <summary>
+    /// Close a CostPeriod. Once closed, RecordActualAsync rejects any
+    /// further actuals targeting it; the close is a one-way integrity
+    /// boundary in v1.0 (re-open deferred — out-of-period correction
+    /// goes to the next open period). Closing an already-closed period
+    /// is rejected with ConflictException so the operator notices.
+    /// </summary>
+    public async Task ClosePeriodAsync(
+        Guid projectId, Guid periodId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var period = await db.CostPeriods
+            .FirstOrDefaultAsync(p => p.Id == periodId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CostPeriod");
+        if (period.IsClosed)
+            throw new ConflictException("Period is already closed");
+
+        period.IsClosed   = true;
+        period.ClosedAt   = DateTime.UtcNow;
+        period.ClosedById = actorId;
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "cost_period.closed", "CostPeriod",
+            period.Id.ToString(), projectId,
+            detail: new { label = period.Label }, ip: ip, ua: ua);
+    }
+
+    /// <summary>
+    /// Record an actual cost against a CBS line in a specific
+    /// CostPeriod. Validates `Amount &gt; 0`, the line belongs to the
+    /// project (tenant + cross-project guard pattern shared with
+    /// SetLineBudget / CreateCommitment), and the target period is open
+    /// AND belongs to the same project. Closed periods reject writes.
+    /// T-S1-06.
+    /// </summary>
+    public async Task<ActualCost> RecordActualAsync(
+        Guid projectId, RecordActualRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (req.Amount <= 0m)
+            throw new ValidationException(["Amount must be greater than zero"]);
+
+        var line = await db.CostBreakdownItems
+            .FirstOrDefaultAsync(c => c.Id == req.CostBreakdownItemId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CBS line");
+
+        var period = await db.CostPeriods
+            .FirstOrDefaultAsync(p => p.Id == req.PeriodId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CostPeriod");
+        if (period.IsClosed)
+            throw new ConflictException("Period is closed; record actuals against an open period instead");
+
+        var actual = new ActualCost
+        {
+            ProjectId           = projectId,
+            CostBreakdownItemId = line.Id,
+            PeriodId            = period.Id,
+            Amount              = req.Amount,
+            Reference           = req.Reference,
+            Description         = req.Description,
+        };
+        db.ActualCosts.Add(actual);
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "actual_cost.recorded", "ActualCost",
+            actual.Id.ToString(), projectId,
+            detail: new
+            {
+                cbsLineId = line.Id,
+                periodId  = period.Id,
+                amount    = req.Amount,
+                reference = req.Reference,
+            }, ip: ip, ua: ua);
+        return actual;
+    }
+
+    /// <summary>
+    /// Project-level cashflow S-curve (T-S1-11). One point per
+    /// CostPeriod, ordered by StartDate. For each point:
+    ///   BaselinePlanned     = the period's manual PlannedCashflow (nullable).
+    ///   CumulativeBaseline  = running total of PlannedCashflow values
+    ///                         (null treated as 0 — periods without a baseline
+    ///                         simply don't add to the total).
+    ///   Actual              = sum of ActualCost.Amount for the period.
+    ///   CumulativeActual    = running total of Actual.
+    ///   Forecast            = CumulativeActual for periods up to and
+    ///                         including the latest period that has any
+    ///                         actuals; for later periods,
+    ///                         CumulativeActual_latest +
+    ///                           (CumulativeBaseline_thisPeriod −
+    ///                            CumulativeBaseline_atLatestActualPeriod).
+    ///                         Null when no baseline AND no actuals exist.
+    /// Per-CBS-line cashflow breakdown is deferred (v1.0 is project-level
+    /// only; the consumer composes per-line views from the rollup if needed).
+    /// </summary>
+    public async Task<CashflowDto> GetCashflowAsync(Guid projectId, CancellationToken ct = default)
+    {
+        var project = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var periods = await db.CostPeriods
+            .Where(p => p.ProjectId == projectId)
+            .OrderBy(p => p.StartDate).ThenBy(p => p.Id)
+            .ToListAsync(ct);
+
+        // Group ActualCost by PeriodId so we can join in-memory; the
+        // (ProjectId, PeriodId) index on ActualCost (T-S1-06) makes this
+        // a single index seek per project.
+        var actualSums = await db.ActualCosts
+            .Where(a => a.ProjectId == projectId)
+            .GroupBy(a => a.PeriodId)
+            .Select(g => new { PeriodId = g.Key, Total = g.Sum(a => a.Amount) })
+            .ToListAsync(ct);
+        var actualByPeriod = actualSums.ToDictionary(x => x.PeriodId, x => x.Total);
+
+        var points = new List<CashflowPeriodPoint>(periods.Count);
+        decimal cumBaseline = 0m;
+        decimal cumActual   = 0m;
+        var snapshots = new (decimal cumBaseline, decimal cumActual, bool hasActuals)[periods.Count];
+
+        // Pass 1 — accumulate cumulative totals; record per-period
+        // snapshots so the forecast pass can reference the latest
+        // actual period.
+        for (var i = 0; i < periods.Count; i++)
+        {
+            var p          = periods[i];
+            var actual     = actualByPeriod.TryGetValue(p.Id, out var a) ? a : 0m;
+            cumBaseline   += p.PlannedCashflow ?? 0m;
+            cumActual     += actual;
+            snapshots[i]   = (cumBaseline, cumActual, hasActuals: actual != 0m);
+        }
+
+        // Latest period index that has any actuals; -1 if none.
+        var latestActualIdx = -1;
+        for (var i = periods.Count - 1; i >= 0; i--)
+            if (snapshots[i].hasActuals) { latestActualIdx = i; break; }
+
+        var latestActualValue   = latestActualIdx >= 0 ? snapshots[latestActualIdx].cumActual   : 0m;
+        var latestActualBaseline = latestActualIdx >= 0 ? snapshots[latestActualIdx].cumBaseline : 0m;
+
+        for (var i = 0; i < periods.Count; i++)
+        {
+            var p   = periods[i];
+            var s   = snapshots[i];
+            var act = actualByPeriod.TryGetValue(p.Id, out var v) ? v : 0m;
+
+            decimal? forecast;
+            if (i <= latestActualIdx)
+            {
+                // Past or current: forecast = what actually happened cumulatively.
+                forecast = s.cumActual;
+            }
+            else if (p.PlannedCashflow.HasValue || s.cumBaseline > 0m)
+            {
+                // Future: project from the latest actual at the
+                // baseline rate.
+                forecast = latestActualValue + (s.cumBaseline - latestActualBaseline);
+            }
+            else if (latestActualIdx >= 0)
+            {
+                // Future with no baseline at all: hold the latest
+                // actual flat (no signal otherwise).
+                forecast = latestActualValue;
+            }
+            else
+            {
+                // No baseline data and no actuals — no projection.
+                forecast = null;
+            }
+
+            points.Add(new CashflowPeriodPoint(
+                PeriodId:           p.Id,
+                Label:              p.Label,
+                StartDate:          p.StartDate,
+                EndDate:            p.EndDate,
+                IsClosed:           p.IsClosed,
+                BaselinePlanned:    p.PlannedCashflow,
+                CumulativeBaseline: s.cumBaseline,
+                Actual:             act,
+                CumulativeActual:   s.cumActual,
+                Forecast:           forecast));
+        }
+
+        return new CashflowDto(project.Currency, points);
+    }
+
+    private sealed record CsvRow(string Code, string Name, string? ParentCode, string? Description, int SortOrder);
+
+    private static List<CsvRow> ParseCsv(Stream stream)
+    {
+        using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
+        var lines = new List<string>();
+        while (reader.ReadLine() is { } line)
+        {
+            if (!string.IsNullOrWhiteSpace(line)) lines.Add(line);
+        }
+        if (lines.Count == 0) throw new ValidationException(["CSV is empty"]);
+
+        // Header validation: at minimum Code,Name,ParentCode,Description,SortOrder.
+        var header = lines[0].Split(',');
+        var expected = new[] { "Code", "Name", "ParentCode", "Description", "SortOrder" };
+        if (header.Length < expected.Length || !header.Take(expected.Length).Select(h => h.Trim())
+                .SequenceEqual(expected, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new ValidationException([$"CSV header must be: {string.Join(",", expected)}"]);
+        }
+
+        var rows = new List<CsvRow>();
+        for (int i = 1; i < lines.Count; i++)
+        {
+            var lineNo = i + 1;
+            var fields = lines[i].Split(',');
+            if (fields.Length < expected.Length)
+                throw new ValidationException([$"Line {lineNo}: expected {expected.Length} columns, found {fields.Length}"]);
+
+            var code = fields[0].Trim();
+            var name = fields[1].Trim();
+            var parentCode = string.IsNullOrWhiteSpace(fields[2]) ? null : fields[2].Trim();
+            var description = string.IsNullOrWhiteSpace(fields[3]) ? null : fields[3].Trim();
+            var sortOrderRaw = fields[4].Trim();
+
+            if (string.IsNullOrEmpty(code))
+                throw new ValidationException([$"Line {lineNo}: Code is required"]);
+            if (string.IsNullOrEmpty(name))
+                throw new ValidationException([$"Line {lineNo}: Name is required"]);
+            if (code.Length > 50)
+                throw new ValidationException([$"Line {lineNo}: Code exceeds 50 characters"]);
+            if (name.Length > 200)
+                throw new ValidationException([$"Line {lineNo}: Name exceeds 200 characters"]);
+
+            var sortOrder = 0;
+            if (!string.IsNullOrEmpty(sortOrderRaw) && !int.TryParse(sortOrderRaw, out sortOrder))
+                throw new ValidationException([$"Line {lineNo}: SortOrder '{sortOrderRaw}' is not a valid integer"]);
+
+            rows.Add(new CsvRow(code, name, parentCode, description, sortOrder));
+        }
+        return rows;
+    }
+}
+
+// ── Payment Certificates ──────────────────────────────────────────────────────
+// PAFM-SD Appendix F.2 seventh bullet (S1). T-S1-09. NEC4 cumulative
+// semantics per ADR-0013 — JCT and Construction Act notice flows
+// (B-014) deferred to v1.1.
+//
+// Calculation (NEC4 / ADR-0013):
+//   CumulativeGross    = Valuation + IncludedVariations + Materials
+//   RetentionBase      = Valuation + IncludedVariations  (materials excluded)
+//   RetentionAmount    = RetentionBase × (RetentionPercent / 100)
+//   CumulativeNet      = CumulativeGross − RetentionAmount
+//   PreviouslyCertified = Σ AmountDue from prior Issued certs
+//   AmountDue          = CumulativeNet − PreviouslyCertified
+//
+// `IncludedVariationsAmount` is null while a certificate is Draft —
+// the service computes a live preview on read. At issue time, it
+// snapshots the sum of EstimatedCostImpact on Approved Variations
+// (so a variation approved AFTER issue lands in the next certificate).
+public class PaymentCertificatesService(CimsDbContext db, AuditService audit)
+{
+    public async Task<PaymentCertificateDto> CreateDraftAsync(
+        Guid projectId, CreatePaymentCertificateDraftRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        ValidateInputs(req.CumulativeValuation, req.CumulativeMaterialsOnSite, req.RetentionPercent);
+
+        // Period must exist in this project and tenant scope.
+        _ = await db.CostPeriods
+            .FirstOrDefaultAsync(p => p.Id == req.PeriodId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CostPeriod");
+
+        // One certificate per period — Draft or Issued. Two parallel
+        // drafts on the same period would race the cumulative chain.
+        if (await db.PaymentCertificates.AnyAsync(
+                c => c.ProjectId == projectId && c.PeriodId == req.PeriodId, ct))
+            throw new ConflictException("A payment certificate already exists for this period");
+
+        var count = await db.PaymentCertificates
+            .CountAsync(c => c.ProjectId == projectId, ct);
+
+        var cert = new PaymentCertificate
+        {
+            ProjectId                 = projectId,
+            PeriodId                  = req.PeriodId,
+            CertificateNumber         = $"PC-{(count + 1):D4}",
+            State                     = PaymentCertificateState.Draft,
+            CumulativeValuation       = req.CumulativeValuation,
+            CumulativeMaterialsOnSite = req.CumulativeMaterialsOnSite,
+            RetentionPercent          = req.RetentionPercent,
+            IncludedVariationsAmount  = null,
+        };
+        db.PaymentCertificates.Add(cert);
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "payment_certificate.draft_created",
+            "PaymentCertificate", cert.Id.ToString(), projectId,
+            detail: new
+            {
+                number             = cert.CertificateNumber,
+                periodId           = cert.PeriodId,
+                valuation          = cert.CumulativeValuation,
+                materialsOnSite    = cert.CumulativeMaterialsOnSite,
+                retentionPercent   = cert.RetentionPercent,
+            }, ip: ip, ua: ua);
+
+        return await BuildDtoAsync(cert, ct);
+    }
+
+    public async Task<PaymentCertificateDto> UpdateDraftAsync(
+        Guid projectId, Guid certificateId, UpdatePaymentCertificateDraftRequest req,
+        Guid actorId, string? ip = null, string? ua = null,
+        CancellationToken ct = default)
+    {
+        ValidateInputs(req.CumulativeValuation, req.CumulativeMaterialsOnSite, req.RetentionPercent);
+
+        var cert = await db.PaymentCertificates
+            .FirstOrDefaultAsync(c => c.Id == certificateId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("PaymentCertificate");
+        if (cert.State != PaymentCertificateState.Draft)
+            throw new ConflictException(
+                $"Certificate is in state {cert.State}; only Draft certificates can be updated");
+
+        cert.CumulativeValuation       = req.CumulativeValuation;
+        cert.CumulativeMaterialsOnSite = req.CumulativeMaterialsOnSite;
+        cert.RetentionPercent          = req.RetentionPercent;
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "payment_certificate.draft_updated",
+            "PaymentCertificate", cert.Id.ToString(), projectId,
+            detail: new
+            {
+                number             = cert.CertificateNumber,
+                valuation          = cert.CumulativeValuation,
+                materialsOnSite    = cert.CumulativeMaterialsOnSite,
+                retentionPercent   = cert.RetentionPercent,
+            }, ip: ip, ua: ua);
+
+        return await BuildDtoAsync(cert, ct);
+    }
+
+    /// <summary>
+    /// Transition Draft → Issued. Snapshots the approved-variations
+    /// sum at this moment into IncludedVariationsAmount. Once issued,
+    /// the certificate is immutable in v1.0; corrections go into the
+    /// next period's certificate (cumulative chain self-corrects).
+    /// </summary>
+    public async Task<PaymentCertificateDto> IssueAsync(
+        Guid projectId, Guid certificateId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var cert = await db.PaymentCertificates
+            .FirstOrDefaultAsync(c => c.Id == certificateId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("PaymentCertificate");
+        if (cert.State != PaymentCertificateState.Draft)
+            throw new ConflictException(
+                $"Certificate is in state {cert.State}; only Draft certificates can be issued");
+
+        var variationsAtIssue = await SumApprovedVariationsAsync(projectId, ct);
+        cert.IncludedVariationsAmount = variationsAtIssue;
+        cert.State                    = PaymentCertificateState.Issued;
+        cert.IssuedById               = actorId;
+        cert.IssuedAt                 = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "payment_certificate.issued",
+            "PaymentCertificate", cert.Id.ToString(), projectId,
+            detail: new
+            {
+                number             = cert.CertificateNumber,
+                valuation          = cert.CumulativeValuation,
+                materialsOnSite    = cert.CumulativeMaterialsOnSite,
+                retentionPercent   = cert.RetentionPercent,
+                variationsIncluded = variationsAtIssue,
+            }, ip: ip, ua: ua);
+
+        return await BuildDtoAsync(cert, ct);
+    }
+
+    public async Task<PaymentCertificateDto> GetAsync(
+        Guid projectId, Guid certificateId, CancellationToken ct = default)
+    {
+        var cert = await db.PaymentCertificates
+            .FirstOrDefaultAsync(c => c.Id == certificateId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("PaymentCertificate");
+        return await BuildDtoAsync(cert, ct);
+    }
+
+    private static void ValidateInputs(decimal valuation, decimal materials, decimal retentionPct)
+    {
+        var errors = new List<string>();
+        if (valuation < 0m)         errors.Add("CumulativeValuation must be zero or greater");
+        if (materials < 0m)         errors.Add("CumulativeMaterialsOnSite must be zero or greater");
+        if (retentionPct < 0m || retentionPct > 100m)
+            errors.Add("RetentionPercent must be between 0 and 100");
+        if (errors.Count > 0) throw new ValidationException(errors);
+    }
+
+    private async Task<decimal> SumApprovedVariationsAsync(Guid projectId, CancellationToken ct)
+    {
+        // Variations with a null EstimatedCostImpact contribute zero
+        // (raised without a costed estimate). Unsigned sum is the
+        // contractual norm — a negative impact (omission saving) is
+        // an approved reduction and reduces the certificate value.
+        var sum = await db.Variations
+            .Where(v => v.ProjectId == projectId
+                     && v.State == VariationState.Approved
+                     && v.EstimatedCostImpact != null)
+            .SumAsync(v => v.EstimatedCostImpact!.Value, ct);
+        return sum;
+    }
+
+    private async Task<PaymentCertificateDto> BuildDtoAsync(
+        PaymentCertificate cert, CancellationToken ct)
+    {
+        // Variations: snapshot when issued; live preview when draft.
+        var variationsAmount = cert.IncludedVariationsAmount
+            ?? await SumApprovedVariationsAsync(cert.ProjectId, ct);
+
+        // Cumulative chain: PreviouslyCertified is the **latest prior
+        // Issued cert's CumulativeNet**, not the sum of prior
+        // AmountDues. With cumulative PWDD valuations, each cert's
+        // CumulativeNet IS the running total certified to date — so
+        // the AmountDue this period is just (this cert's net) minus
+        // (last cert's net). Σ AmountDue across all issued certs
+        // therefore equals the latest cert's net (conservation
+        // check), but that's not how PreviouslyCertified is computed.
+        var priorIssued = await db.PaymentCertificates
+            .Where(c => c.ProjectId == cert.ProjectId
+                     && c.Id != cert.Id
+                     && c.State == PaymentCertificateState.Issued
+                     && c.IssuedAt != null
+                     && (cert.IssuedAt == null || c.IssuedAt < cert.IssuedAt))
+            .OrderByDescending(c => c.IssuedAt)
+            .FirstOrDefaultAsync(ct);
+
+        var previouslyCertified = priorIssued == null ? 0m : NetOf(priorIssued);
+
+        var gross           = cert.CumulativeValuation + variationsAmount + cert.CumulativeMaterialsOnSite;
+        var retentionBase   = cert.CumulativeValuation + variationsAmount;
+        var retentionAmount = retentionBase * (cert.RetentionPercent / 100m);
+        var net             = gross - retentionAmount;
+        var amountDue       = net - previouslyCertified;
+
+        return new PaymentCertificateDto(
+            Id:                        cert.Id,
+            ProjectId:                 cert.ProjectId,
+            PeriodId:                  cert.PeriodId,
+            CertificateNumber:         cert.CertificateNumber,
+            State:                     cert.State,
+            CumulativeValuation:       cert.CumulativeValuation,
+            CumulativeMaterialsOnSite: cert.CumulativeMaterialsOnSite,
+            RetentionPercent:          cert.RetentionPercent,
+            IncludedVariationsAmount:  variationsAmount,
+            CumulativeGross:           gross,
+            RetentionAmount:           retentionAmount,
+            CumulativeNet:             net,
+            PreviouslyCertified:       previouslyCertified,
+            AmountDue:                 amountDue,
+            IssuedAt:                  cert.IssuedAt);
+    }
+
+    /// <summary>NEC4 net for an Issued cert, used to compute the
+    /// next cert's PreviouslyCertified. Identical math to BuildDtoAsync
+    /// except it relies on the snapshotted IncludedVariationsAmount
+    /// (always non-null on Issued certs).</summary>
+    private static decimal NetOf(PaymentCertificate cert)
+    {
+        var v               = cert.IncludedVariationsAmount ?? 0m;
+        var gross           = cert.CumulativeValuation + v + cert.CumulativeMaterialsOnSite;
+        var retentionAmount = (cert.CumulativeValuation + v) * (cert.RetentionPercent / 100m);
+        return gross - retentionAmount;
+    }
+}
+
+// ── Variations ────────────────────────────────────────────────────────────────
+// PAFM-SD Appendix F.2 sixth bullet (S1). T-S1-08 ships the **core
+// 3-state machine** only — Raised → Approved or Raised → Rejected
+// per CR-003. The full PMBOK / NEC4 6-state workflow (assess /
+// instruct / value / agree) is a v1.1 candidate (B-016).
+//
+// Approval / rejection is a *decision record* — it does not
+// automatically integrate cost / schedule impact into the project
+// baseline. Manual data entry on the affected CBS lines /
+// commitments is expected. Auto-integration is intentionally out of
+// T-S1-08 scope; revisit when there is concrete demand.
+public class VariationsService(CimsDbContext db, AuditService audit)
+{
+    /// <summary>
+    /// Raise a new Variation in state <see cref="VariationState.Raised"/>.
+    /// VariationNumber is auto-generated as `VAR-NNNN` per project,
+    /// matching the existing RFI numbering pattern. If a CBS line is
+    /// referenced, it must belong to the same project (cross-tenant
+    /// or wrong-project lineIds 404 here, same guard as
+    /// CostService.SetLineBudget / CreateCommitment).
+    /// </summary>
+    public async Task<Variation> RaiseAsync(
+        Guid projectId, RaiseVariationRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(["Title is required"]);
+
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        if (req.CostBreakdownItemId.HasValue)
+        {
+            var lineExists = await db.CostBreakdownItems.AnyAsync(
+                c => c.Id == req.CostBreakdownItemId.Value && c.ProjectId == projectId, ct);
+            if (!lineExists) throw new NotFoundException("CBS line");
+        }
+
+        // Concurrency note: count + 1 racing two requests can produce
+        // duplicate VariationNumbers. The unique index on
+        // (ProjectId, VariationNumber) catches it as a SaveChanges
+        // exception. Same trade-off the existing RfiService accepts;
+        // a strictly serial counter is a v1.1 candidate if real
+        // workflows surface contention.
+        var count = await db.Variations.CountAsync(v => v.ProjectId == projectId, ct);
+
+        var v = new Variation
+        {
+            ProjectId               = projectId,
+            VariationNumber         = $"VAR-{(count + 1):D4}",
+            Title                   = req.Title.Trim(),
+            Description             = req.Description,
+            Reason                  = req.Reason,
+            EstimatedCostImpact     = req.EstimatedCostImpact,
+            EstimatedTimeImpactDays = req.EstimatedTimeImpactDays,
+            CostBreakdownItemId     = req.CostBreakdownItemId,
+            RaisedById              = actorId,
+            State                   = VariationState.Raised,
+        };
+        db.Variations.Add(v);
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "variation.raised", "Variation",
+            v.Id.ToString(), projectId,
+            detail: new
+            {
+                number          = v.VariationNumber,
+                costImpact      = req.EstimatedCostImpact,
+                timeImpactDays  = req.EstimatedTimeImpactDays,
+                cbsLineId       = req.CostBreakdownItemId,
+            }, ip: ip, ua: ua);
+        return v;
+    }
+
+    public Task ApproveAsync(
+        Guid projectId, Guid variationId, VariationDecisionRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default) =>
+        DecideAsync(projectId, variationId, VariationState.Approved, req, actorId, ip, ua, ct);
+
+    public Task RejectAsync(
+        Guid projectId, Guid variationId, VariationDecisionRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default) =>
+        DecideAsync(projectId, variationId, VariationState.Rejected, req, actorId, ip, ua, ct);
+
+    /// <summary>
+    /// Shared transition path. Only Raised → Approved and Raised →
+    /// Rejected are valid in v1.0; both terminal states reject any
+    /// further transition with ConflictException. Re-decide after
+    /// terminal is a v1.1 candidate (B-016).
+    /// </summary>
+    private async Task DecideAsync(
+        Guid projectId, Guid variationId, VariationState target,
+        VariationDecisionRequest req, Guid actorId,
+        string? ip, string? ua, CancellationToken ct)
+    {
+        var v = await db.Variations
+            .FirstOrDefaultAsync(x => x.Id == variationId && x.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Variation");
+
+        if (v.State != VariationState.Raised)
+            throw new ConflictException(
+                $"Variation is in state {v.State}; only Raised variations can be {target.ToString().ToLowerInvariant()}");
+
+        v.State        = target;
+        v.DecidedById  = actorId;
+        v.DecidedAt    = DateTime.UtcNow;
+        v.DecisionNote = req.DecisionNote;
+        await db.SaveChangesAsync(ct);
+
+        var action = target == VariationState.Approved
+            ? "variation.approved"
+            : "variation.rejected";
+        await audit.WriteAsync(actorId, action, "Variation",
+            v.Id.ToString(), projectId,
+            detail: new
+            {
+                number         = v.VariationNumber,
+                decisionNote   = req.DecisionNote,
+                costImpact     = v.EstimatedCostImpact,
+                timeImpactDays = v.EstimatedTimeImpactDays,
+            }, ip: ip, ua: ua);
+    }
+}
+
 // ── CDE ───────────────────────────────────────────────────────────────────────
 public class CdeService(CimsDbContext db, AuditService audit)
 {

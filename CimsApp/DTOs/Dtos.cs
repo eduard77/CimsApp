@@ -22,3 +22,42 @@ public record CreateRfiRequest(string Subject, string Description, string? Disci
 public record RespondRfiRequest(string Response, RfiStatus Status);
 public record CreateActionRequest(string Title, string? Description, string? Source, Priority Priority, Guid? AssigneeId, DateTime? DueDate);
 public record UpdateActionRequest(string? Title, string? Description, Priority? Priority, ActionStatus? Status, Guid? AssigneeId, DateTime? DueDate);
+public record SetLineBudgetRequest(decimal? Budget);
+public record CreateCommitmentRequest(Guid CostBreakdownItemId, CommitmentType Type, string Reference, string Counterparty, decimal Amount, string? Description);
+// Variance is Budget - Committed (T-S1-05 semantic, preserved through
+// T-S1-06). Actual is the sum of all ActualCost rows on the line; the
+// consumer derives Budget - Actual or Committed - Actual as needed.
+public record CbsLineRollupDto(Guid ItemId, string Code, string Name, Guid? ParentId, decimal? Budget, decimal Committed, decimal Actual, decimal? Variance);
+// PlannedCashflow optional at create time — the baseline is often
+// set later as the QS works through the cashflow plan. T-S1-11.
+public record CreatePeriodRequest(string Label, DateTime StartDate, DateTime EndDate, decimal? PlannedCashflow = null);
+public record RecordActualRequest(Guid CostBreakdownItemId, Guid PeriodId, decimal Amount, string? Reference, string? Description);
+public record SetPeriodBaselineRequest(decimal? PlannedCashflow);
+// Cashflow S-curve (T-S1-11). Project-level only in v1.0; per-CBS-line
+// breakdown deferred. Forecast formula: actuals up to and including the
+// latest period with any actuals, then baseline-projected from there.
+public record CashflowPeriodPoint(
+    Guid PeriodId, string Label, DateTime StartDate, DateTime EndDate, bool IsClosed,
+    decimal? BaselinePlanned, decimal CumulativeBaseline,
+    decimal Actual, decimal CumulativeActual,
+    decimal? Forecast);
+public record CashflowDto(string ProjectCurrency, List<CashflowPeriodPoint> Points);
+public record RaiseVariationRequest(string Title, string? Description, string? Reason, decimal? EstimatedCostImpact, int? EstimatedTimeImpactDays, Guid? CostBreakdownItemId);
+public record VariationDecisionRequest(string? DecisionNote);
+// T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
+// the assessor states the running total each period, not the increment.
+// RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.
+public record CreatePaymentCertificateDraftRequest(Guid PeriodId, decimal CumulativeValuation, decimal CumulativeMaterialsOnSite, decimal RetentionPercent);
+public record UpdatePaymentCertificateDraftRequest(decimal CumulativeValuation, decimal CumulativeMaterialsOnSite, decimal RetentionPercent);
+// Computed view of a payment certificate. Stored fields are the inputs;
+// derived fields (gross, retention amount, net, amount due, previously
+// certified) are computed in PaymentCertificatesService.GetAsync per
+// the ADR-0013 NEC4 formula.
+public record PaymentCertificateDto(
+    Guid Id, Guid ProjectId, Guid PeriodId,
+    string CertificateNumber, PaymentCertificateState State,
+    decimal CumulativeValuation, decimal CumulativeMaterialsOnSite,
+    decimal RetentionPercent, decimal IncludedVariationsAmount,
+    decimal CumulativeGross, decimal RetentionAmount,
+    decimal CumulativeNet, decimal PreviouslyCertified, decimal AmountDue,
+    DateTime? IssuedAt);
