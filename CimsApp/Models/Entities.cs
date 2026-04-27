@@ -357,6 +357,63 @@ public class CostBreakdownItem
 }
 
 /// <summary>
+/// A payment certificate for a project at a specific CostPeriod
+/// (T-S1-09). NEC4 cumulative semantics per ADR-0013 (v1.0 default
+/// contract convention). One certificate per period — `Draft` while
+/// the assessor composes it, `Issued` when locked as a legal record.
+///
+/// Stored fields are the *inputs* to the calculation; derived
+/// values (gross, retention amount, net, amount due, previously
+/// certified) are computed in the response DTO so the math stays
+/// in the service layer rather than the database.
+///
+/// `IncludedVariationsAmount` is null while Draft (a live preview is
+/// computed on read) and snapshotted at issue time as the sum of
+/// `EstimatedCostImpact` over Approved Variations on the project at
+/// that moment. Variations approved after a certificate is issued
+/// land in the *next* certificate's snapshot.
+/// </summary>
+public class PaymentCertificate
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid PeriodId { get; set; }
+    public CostPeriod Period { get; set; } = null!;
+
+    /// <summary>Project-scoped sequential number, e.g. "PC-0001".</summary>
+    [Required, MaxLength(20)] public string CertificateNumber { get; set; } = "";
+
+    public PaymentCertificateState State { get; set; } = PaymentCertificateState.Draft;
+
+    /// <summary>Cumulative Price for Work Done to Date (NEC4 PWDD),
+    /// assessor-stated. v1.0: manual entry (no progress signal yet).</summary>
+    public decimal CumulativeValuation { get; set; }
+
+    /// <summary>Cumulative on-site materials. NEC4 typically excludes
+    /// these from the retention base — see ADR-0013.</summary>
+    public decimal CumulativeMaterialsOnSite { get; set; }
+
+    /// <summary>Retention rate as percent (0..100). e.g. 3.00 for 3%.
+    /// Lives on the certificate in v1.0; promotion to Project is a
+    /// v1.1 candidate (the contract sets retention, not each cert).</summary>
+    public decimal RetentionPercent { get; set; }
+
+    /// <summary>Snapshot of approved-variations sum at issue time.
+    /// Null while Draft — computed live on read.</summary>
+    public decimal? IncludedVariationsAmount { get; set; }
+
+    public Guid? IssuedById { get; set; }
+    public User? IssuedBy { get; set; }
+    public DateTime? IssuedAt { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
 /// A change-order / variation against the project's contracted scope
 /// (T-S1-08, F.2 sixth bullet). v1.0 implements the **core 3-state
 /// machine** — Raised → Approved or Raised → Rejected — per CR-003.

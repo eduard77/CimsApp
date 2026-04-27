@@ -43,6 +43,7 @@ public class CimsDbContext(
     public DbSet<CostPeriod>         CostPeriods         => Set<CostPeriod>();
     public DbSet<ActualCost>         ActualCosts         => Set<ActualCost>();
     public DbSet<Variation>          Variations          => Set<Variation>();
+    public DbSet<PaymentCertificate> PaymentCertificates => Set<PaymentCertificate>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -236,6 +237,27 @@ public class CimsDbContext(
              .HasForeignKey(a => a.PeriodId).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<PaymentCertificate>(e =>
+        {
+            // One certificate per period (any state). Two parallel
+            // drafts on the same period would race the cumulative
+            // chain — disallow at the storage layer.
+            e.HasIndex(c => new { c.ProjectId, c.PeriodId }).IsUnique();
+            e.HasIndex(c => new { c.ProjectId, c.CertificateNumber }).IsUnique();
+            e.Property(c => c.CumulativeValuation).HasPrecision(18, 2);
+            e.Property(c => c.CumulativeMaterialsOnSite).HasPrecision(18, 2);
+            e.Property(c => c.IncludedVariationsAmount).HasPrecision(18, 2);
+            e.Property(c => c.RetentionPercent).HasPrecision(5, 2);
+            // NoAction across all FKs — same multi-cascade-path
+            // reasoning that drives Variation / Invitation.
+            e.HasOne(c => c.Project).WithMany()
+             .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.Period).WithMany()
+             .HasForeignKey(c => c.PeriodId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.IssuedBy).WithMany()
+             .HasForeignKey(c => c.IssuedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         m.Entity<Variation>(e =>
         {
             // Project-scoped sequential number must be unique per project.
@@ -286,6 +308,7 @@ public class CimsDbContext(
         m.Entity<CostPeriod>().HasQueryFilter(p => p.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<ActualCost>().HasQueryFilter(a => a.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<Variation>().HasQueryFilter(v => v.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<PaymentCertificate>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
