@@ -666,6 +666,130 @@ public class CostService(CimsDbContext db, AuditService audit)
     }
 }
 
+// ── Variations ────────────────────────────────────────────────────────────────
+// PAFM-SD Appendix F.2 sixth bullet (S1). T-S1-08 ships the **core
+// 3-state machine** only — Raised → Approved or Raised → Rejected
+// per CR-003. The full PMBOK / NEC4 6-state workflow (assess /
+// instruct / value / agree) is a v1.1 candidate (B-016).
+//
+// Approval / rejection is a *decision record* — it does not
+// automatically integrate cost / schedule impact into the project
+// baseline. Manual data entry on the affected CBS lines /
+// commitments is expected. Auto-integration is intentionally out of
+// T-S1-08 scope; revisit when there is concrete demand.
+public class VariationsService(CimsDbContext db, AuditService audit)
+{
+    /// <summary>
+    /// Raise a new Variation in state <see cref="VariationState.Raised"/>.
+    /// VariationNumber is auto-generated as `VAR-NNNN` per project,
+    /// matching the existing RFI numbering pattern. If a CBS line is
+    /// referenced, it must belong to the same project (cross-tenant
+    /// or wrong-project lineIds 404 here, same guard as
+    /// CostService.SetLineBudget / CreateCommitment).
+    /// </summary>
+    public async Task<Variation> RaiseAsync(
+        Guid projectId, RaiseVariationRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(["Title is required"]);
+
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        if (req.CostBreakdownItemId.HasValue)
+        {
+            var lineExists = await db.CostBreakdownItems.AnyAsync(
+                c => c.Id == req.CostBreakdownItemId.Value && c.ProjectId == projectId, ct);
+            if (!lineExists) throw new NotFoundException("CBS line");
+        }
+
+        // Concurrency note: count + 1 racing two requests can produce
+        // duplicate VariationNumbers. The unique index on
+        // (ProjectId, VariationNumber) catches it as a SaveChanges
+        // exception. Same trade-off the existing RfiService accepts;
+        // a strictly serial counter is a v1.1 candidate if real
+        // workflows surface contention.
+        var count = await db.Variations.CountAsync(v => v.ProjectId == projectId, ct);
+
+        var v = new Variation
+        {
+            ProjectId               = projectId,
+            VariationNumber         = $"VAR-{(count + 1):D4}",
+            Title                   = req.Title.Trim(),
+            Description             = req.Description,
+            Reason                  = req.Reason,
+            EstimatedCostImpact     = req.EstimatedCostImpact,
+            EstimatedTimeImpactDays = req.EstimatedTimeImpactDays,
+            CostBreakdownItemId     = req.CostBreakdownItemId,
+            RaisedById              = actorId,
+            State                   = VariationState.Raised,
+        };
+        db.Variations.Add(v);
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "variation.raised", "Variation",
+            v.Id.ToString(), projectId,
+            detail: new
+            {
+                number          = v.VariationNumber,
+                costImpact      = req.EstimatedCostImpact,
+                timeImpactDays  = req.EstimatedTimeImpactDays,
+                cbsLineId       = req.CostBreakdownItemId,
+            }, ip: ip, ua: ua);
+        return v;
+    }
+
+    public Task ApproveAsync(
+        Guid projectId, Guid variationId, VariationDecisionRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default) =>
+        DecideAsync(projectId, variationId, VariationState.Approved, req, actorId, ip, ua, ct);
+
+    public Task RejectAsync(
+        Guid projectId, Guid variationId, VariationDecisionRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default) =>
+        DecideAsync(projectId, variationId, VariationState.Rejected, req, actorId, ip, ua, ct);
+
+    /// <summary>
+    /// Shared transition path. Only Raised → Approved and Raised →
+    /// Rejected are valid in v1.0; both terminal states reject any
+    /// further transition with ConflictException. Re-decide after
+    /// terminal is a v1.1 candidate (B-016).
+    /// </summary>
+    private async Task DecideAsync(
+        Guid projectId, Guid variationId, VariationState target,
+        VariationDecisionRequest req, Guid actorId,
+        string? ip, string? ua, CancellationToken ct)
+    {
+        var v = await db.Variations
+            .FirstOrDefaultAsync(x => x.Id == variationId && x.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Variation");
+
+        if (v.State != VariationState.Raised)
+            throw new ConflictException(
+                $"Variation is in state {v.State}; only Raised variations can be {target.ToString().ToLowerInvariant()}");
+
+        v.State        = target;
+        v.DecidedById  = actorId;
+        v.DecidedAt    = DateTime.UtcNow;
+        v.DecisionNote = req.DecisionNote;
+        await db.SaveChangesAsync(ct);
+
+        var action = target == VariationState.Approved
+            ? "variation.approved"
+            : "variation.rejected";
+        await audit.WriteAsync(actorId, action, "Variation",
+            v.Id.ToString(), projectId,
+            detail: new
+            {
+                number         = v.VariationNumber,
+                decisionNote   = req.DecisionNote,
+                costImpact     = v.EstimatedCostImpact,
+                timeImpactDays = v.EstimatedTimeImpactDays,
+            }, ip: ip, ua: ua);
+    }
+}
+
 // ── CDE ───────────────────────────────────────────────────────────────────────
 public class CdeService(CimsDbContext db, AuditService audit)
 {

@@ -267,6 +267,46 @@ public class ActualsController(CostService svc, CimsDbContext db) : CimsControll
     }
 }
 
+[Route("api/v1/projects/{projectId:guid}/variations")]
+public class VariationsController(VariationsService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpPost]
+    public async Task<IActionResult> Raise(
+        Guid projectId, RaiseVariationRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var v = await svc.RaiseAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = v });
+    }
+
+    [HttpPost("{variationId:guid}/approve")]
+    public async Task<IActionResult> Approve(
+        Guid projectId, Guid variationId, VariationDecisionRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.ApproveAsync(projectId, variationId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
+
+    [HttpPost("{variationId:guid}/reject")]
+    public async Task<IActionResult> Reject(
+        Guid projectId, Guid variationId, VariationDecisionRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.RejectAsync(projectId, variationId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

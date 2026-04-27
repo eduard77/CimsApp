@@ -30,3 +30,5 @@ public record CreateCommitmentRequest(Guid CostBreakdownItemId, CommitmentType T
 public record CbsLineRollupDto(Guid ItemId, string Code, string Name, Guid? ParentId, decimal? Budget, decimal Committed, decimal Actual, decimal? Variance);
 public record CreatePeriodRequest(string Label, DateTime StartDate, DateTime EndDate);
 public record RecordActualRequest(Guid CostBreakdownItemId, Guid PeriodId, decimal Amount, string? Reference, string? Description);
+public record RaiseVariationRequest(string Title, string? Description, string? Reason, decimal? EstimatedCostImpact, int? EstimatedTimeImpactDays, Guid? CostBreakdownItemId);
+public record VariationDecisionRequest(string? DecisionNote);
