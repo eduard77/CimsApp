@@ -1,6 +1,7 @@
 using System.Text;
 using CimsApp.Core;
 using CimsApp.Data;
+using CimsApp.DTOs;
 using CimsApp.Models;
 using CimsApp.Services;
 using CimsApp.Services.Audit;
@@ -383,5 +384,269 @@ public class CostServiceTests
         var svc = new CostService(dbA, new AuditService(dbA));
         await Assert.ThrowsAsync<NotFoundException>(() =>
             svc.SetLineBudgetAsync(projectB, lineOnB, 100m, userA));
+    }
+
+    // ── T-S1-05 CreateCommitmentAsync + GetCbsRollupAsync ────────────────────
+
+    private static CreateCommitmentRequest NewCommitment(
+        Guid lineId, decimal amount, CommitmentType type = CommitmentType.PO,
+        string? reference = null, string? counterparty = null) =>
+        new(lineId, type,
+            reference    ?? $"PO-{Guid.NewGuid():N}".Substring(0, 12),
+            counterparty ?? "Acme Co",
+            amount, null);
+
+    [Fact]
+    public async Task CreateCommitment_writes_row_and_emits_audit()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var lineId = SeedSingleLine(options, tenant, projectId);
+
+        Guid commitmentId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            var c = await svc.CreateCommitmentAsync(projectId,
+                new CreateCommitmentRequest(lineId, CommitmentType.Subcontract,
+                    "SC-001", "BuildCo Ltd", 250_000m, "Phase 1 groundworks"),
+                userId);
+            commitmentId = c.Id;
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var stored = verify.Commitments.Single(c => c.Id == commitmentId);
+        Assert.Equal(projectId, stored.ProjectId);
+        Assert.Equal(lineId, stored.CostBreakdownItemId);
+        Assert.Equal(CommitmentType.Subcontract, stored.Type);
+        Assert.Equal("SC-001", stored.Reference);
+        Assert.Equal("BuildCo Ltd", stored.Counterparty);
+        Assert.Equal(250_000m, stored.Amount);
+
+        var audit = Assert.Single(verify.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.Action == "commitment.created"));
+        Assert.Equal("Commitment", audit.Entity);
+        Assert.Equal(commitmentId.ToString(), audit.EntityId);
+        Assert.Equal(projectId, audit.ProjectId);
+        Assert.NotNull(audit.Detail);
+        Assert.Contains("\"type\":\"Subcontract\"", audit.Detail);
+        Assert.Contains("\"amount\":250000", audit.Detail);
+        Assert.Contains("\"reference\":\"SC-001\"", audit.Detail);
+    }
+
+    [Fact]
+    public async Task CreateCommitment_non_positive_amount_is_rejected()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var lineId = SeedSingleLine(options, tenant, projectId);
+
+        using var db = new CimsDbContext(options, tenant);
+        var svc = new CostService(db, new AuditService(db));
+        var ex0 = await Assert.ThrowsAsync<ValidationException>(() =>
+            svc.CreateCommitmentAsync(projectId, NewCommitment(lineId, 0m), userId));
+        Assert.Contains("Amount must be greater than zero", ex0.Errors[0]);
+        var exNeg = await Assert.ThrowsAsync<ValidationException>(() =>
+            svc.CreateCommitmentAsync(projectId, NewCommitment(lineId, -100m), userId));
+        Assert.Contains("Amount must be greater than zero", exNeg.Errors[0]);
+    }
+
+    [Fact]
+    public async Task CreateCommitment_required_fields_are_validated()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var lineId = SeedSingleLine(options, tenant, projectId);
+
+        using var db = new CimsDbContext(options, tenant);
+        var svc = new CostService(db, new AuditService(db));
+        var exRef = await Assert.ThrowsAsync<ValidationException>(() =>
+            svc.CreateCommitmentAsync(projectId,
+                new CreateCommitmentRequest(lineId, CommitmentType.PO, "", "Acme", 10m, null), userId));
+        Assert.Contains("Reference is required", exRef.Errors);
+        var exParty = await Assert.ThrowsAsync<ValidationException>(() =>
+            svc.CreateCommitmentAsync(projectId,
+                new CreateCommitmentRequest(lineId, CommitmentType.PO, "PO-1", "  ", 10m, null), userId));
+        Assert.Contains("Counterparty is required", exParty.Errors);
+    }
+
+    [Fact]
+    public async Task CreateCommitment_line_belonging_to_a_different_project_is_NotFound()
+    {
+        var (options, tenant, orgId, userId, projectA) = BuildFixture();
+        var projectB = Guid.NewGuid();
+        Guid lineOnB;
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            seed.Projects.Add(new Project
+            {
+                Id = projectB, Name = "Project B", Code = "PR2",
+                AppointingPartyId = orgId, Currency = "GBP",
+            });
+            var line = new CostBreakdownItem
+            {
+                ProjectId = projectB, Code = "1", Name = "B Root",
+            };
+            seed.CostBreakdownItems.Add(line);
+            seed.SaveChanges();
+            lineOnB = line.Id;
+        }
+
+        using var db = new CimsDbContext(options, tenant);
+        var svc = new CostService(db, new AuditService(db));
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            svc.CreateCommitmentAsync(projectA, NewCommitment(lineOnB, 100m), userId));
+    }
+
+    [Fact]
+    public async Task CreateCommitment_cross_tenant_line_lookup_is_NotFound()
+    {
+        var dbName    = Guid.NewGuid().ToString();
+        var orgA      = Guid.NewGuid();
+        var orgB      = Guid.NewGuid();
+        var userA     = Guid.NewGuid();
+        var userB     = Guid.NewGuid();
+        var projectB  = Guid.NewGuid();
+
+        var tenantA = new StubTenantContext { OrganisationId = orgA, UserId = userA };
+        var tenantB = new StubTenantContext { OrganisationId = orgB, UserId = userB };
+
+        var optionsB = new DbContextOptionsBuilder<CimsDbContext>()
+            .UseInMemoryDatabase(dbName).Options;
+        Guid lineOnB;
+        using (var seed = new CimsDbContext(optionsB, tenantB))
+        {
+            seed.Organisations.AddRange(
+                new Organisation { Id = orgA, Name = "A", Code = "TA" },
+                new Organisation { Id = orgB, Name = "B", Code = "TB" });
+            seed.Projects.Add(new Project
+            {
+                Id = projectB, Name = "B Project", Code = "PB",
+                AppointingPartyId = orgB, Currency = "GBP",
+            });
+            var line = new CostBreakdownItem
+            {
+                ProjectId = projectB, Code = "1", Name = "B Root",
+            };
+            seed.CostBreakdownItems.Add(line);
+            seed.SaveChanges();
+            lineOnB = line.Id;
+        }
+
+        var optionsA = new DbContextOptionsBuilder<CimsDbContext>()
+            .UseInMemoryDatabase(dbName).Options;
+        using var dbA = new CimsDbContext(optionsA, tenantA);
+        var svc = new CostService(dbA, new AuditService(dbA));
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            svc.CreateCommitmentAsync(projectB, NewCommitment(lineOnB, 100m), userA));
+    }
+
+    [Fact]
+    public async Task GetCbsRollup_returns_committed_sum_and_variance_per_line()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+
+        // Two lines: line1 with Budget=1000 + two POs (300 + 400);
+        // line2 unbudgeted with one Subcontract (150).
+        Guid line1Id, line2Id;
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            var l1 = new CostBreakdownItem
+            {
+                ProjectId = projectId, Code = "1", Name = "Line 1", Budget = 1000m,
+            };
+            var l2 = new CostBreakdownItem
+            {
+                ProjectId = projectId, Code = "2", Name = "Line 2",
+            };
+            seed.CostBreakdownItems.AddRange(l1, l2);
+            seed.SaveChanges();
+            line1Id = l1.Id; line2Id = l2.Id;
+        }
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            await svc.CreateCommitmentAsync(projectId,
+                new CreateCommitmentRequest(line1Id, CommitmentType.PO, "PO-A", "X", 300m, null), userId);
+            await svc.CreateCommitmentAsync(projectId,
+                new CreateCommitmentRequest(line1Id, CommitmentType.PO, "PO-B", "Y", 400m, null), userId);
+            await svc.CreateCommitmentAsync(projectId,
+                new CreateCommitmentRequest(line2Id, CommitmentType.Subcontract, "SC-A", "Z", 150m, null), userId);
+        }
+
+        List<CbsLineRollupDto> rollup;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            rollup = await svc.GetCbsRollupAsync(projectId);
+        }
+
+        Assert.Equal(2, rollup.Count);
+        var r1 = rollup.Single(r => r.ItemId == line1Id);
+        Assert.Equal(1000m, r1.Budget);
+        Assert.Equal(700m, r1.Committed);
+        Assert.Equal(300m, r1.Variance);
+
+        var r2 = rollup.Single(r => r.ItemId == line2Id);
+        Assert.Null(r2.Budget);
+        Assert.Equal(150m, r2.Committed);
+        // Variance is null when no budget is set — under-/over-spend
+        // against an unbudgeted line is not meaningful.
+        Assert.Null(r2.Variance);
+    }
+
+    [Fact]
+    public async Task GetCbsRollup_returns_zero_committed_for_lines_with_no_commitments()
+    {
+        var (options, tenant, _, _, projectId) = BuildFixture();
+        var lineId = SeedSingleLine(options, tenant, projectId);
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            // Set a budget but no commitments yet.
+            var line = seed.CostBreakdownItems.Single(c => c.Id == lineId);
+            line.Budget = 5_000m;
+            seed.SaveChanges();
+        }
+
+        using var db = new CimsDbContext(options, tenant);
+        var svc = new CostService(db, new AuditService(db));
+        var rollup = await svc.GetCbsRollupAsync(projectId);
+
+        var row = Assert.Single(rollup);
+        Assert.Equal(0m, row.Committed);
+        Assert.Equal(5_000m, row.Variance);
+    }
+
+    [Fact]
+    public async Task GetCbsRollup_cross_tenant_project_is_NotFound()
+    {
+        var dbName    = Guid.NewGuid().ToString();
+        var orgA      = Guid.NewGuid();
+        var orgB      = Guid.NewGuid();
+        var userA     = Guid.NewGuid();
+        var userB     = Guid.NewGuid();
+        var projectB  = Guid.NewGuid();
+
+        var tenantA = new StubTenantContext { OrganisationId = orgA, UserId = userA };
+        var tenantB = new StubTenantContext { OrganisationId = orgB, UserId = userB };
+
+        var optionsB = new DbContextOptionsBuilder<CimsDbContext>()
+            .UseInMemoryDatabase(dbName).Options;
+        using (var seed = new CimsDbContext(optionsB, tenantB))
+        {
+            seed.Organisations.AddRange(
+                new Organisation { Id = orgA, Name = "A", Code = "TA" },
+                new Organisation { Id = orgB, Name = "B", Code = "TB" });
+            seed.Projects.Add(new Project
+            {
+                Id = projectB, Name = "B Project", Code = "PB",
+                AppointingPartyId = orgB, Currency = "GBP",
+            });
+            seed.SaveChanges();
+        }
+
+        var optionsA = new DbContextOptionsBuilder<CimsDbContext>()
+            .UseInMemoryDatabase(dbName).Options;
+        using var dbA = new CimsDbContext(optionsA, tenantA);
+        var svc = new CostService(dbA, new AuditService(dbA));
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            svc.GetCbsRollupAsync(projectB));
     }
 }
