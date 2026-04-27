@@ -362,6 +362,38 @@ public class CostService(CimsDbContext db, AuditService audit)
         return new ImportResult(entities.Count);
     }
 
+    /// <summary>
+    /// Set (or clear, with budget == null) the planned budget on a single
+    /// CBS line. T-S1-04, F.2 "Budget set at CBS line level". Currency is
+    /// implied by Project.Currency — the line carries the amount only.
+    /// </summary>
+    public async Task SetLineBudgetAsync(
+        Guid projectId, Guid itemId, decimal? budget, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (budget.HasValue && budget.Value < 0m)
+            throw new ValidationException(["Budget must be zero or greater"]);
+
+        // Single query enforces both tenant scope (via the CBS query
+        // filter through Project.AppointingPartyId) and project membership
+        // of the line. Cross-tenant or wrong-project itemIds 404.
+        var item = await db.CostBreakdownItems
+            .FirstOrDefaultAsync(c => c.Id == itemId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CBS line");
+
+        var previous = item.Budget;
+        item.Budget = budget;
+        await db.SaveChangesAsync(ct);
+
+        // Per-row Update audit is captured automatically by AuditInterceptor;
+        // the explicit cbs.line_budget_set entry below carries the
+        // before/after pair as a structured detail for cost-domain
+        // reporting (separate from the field-level audit).
+        await audit.WriteAsync(actorId, "cbs.line_budget_set", "CostBreakdownItem",
+            itemId.ToString(), projectId,
+            detail: new { previous, current = budget }, ip: ip, ua: ua);
+    }
+
     private sealed record CsvRow(string Code, string Name, string? ParentCode, string? Description, int SortOrder);
 
     private static List<CsvRow> ParseCsv(Stream stream)

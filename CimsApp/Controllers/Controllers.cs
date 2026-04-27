@@ -186,6 +186,18 @@ public class CostController(CostService svc, CimsDbContext db) : CimsControllerB
             CurrentUserId, ClientIp, ClientAgent, ct);
         return Ok(new { success = true, data = result });
     }
+
+    [HttpPut("{itemId:guid}/budget")]
+    public async Task<IActionResult> SetLineBudget(
+        Guid projectId, Guid itemId, SetLineBudgetRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.SetLineBudgetAsync(projectId, itemId, req.Budget,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
 }
 
 // ── Documents ─────────────────────────────────────────────────────────────────
