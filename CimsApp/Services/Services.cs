@@ -666,6 +666,239 @@ public class CostService(CimsDbContext db, AuditService audit)
     }
 }
 
+// ── Payment Certificates ──────────────────────────────────────────────────────
+// PAFM-SD Appendix F.2 seventh bullet (S1). T-S1-09. NEC4 cumulative
+// semantics per ADR-0013 — JCT and Construction Act notice flows
+// (B-014) deferred to v1.1.
+//
+// Calculation (NEC4 / ADR-0013):
+//   CumulativeGross    = Valuation + IncludedVariations + Materials
+//   RetentionBase      = Valuation + IncludedVariations  (materials excluded)
+//   RetentionAmount    = RetentionBase × (RetentionPercent / 100)
+//   CumulativeNet      = CumulativeGross − RetentionAmount
+//   PreviouslyCertified = Σ AmountDue from prior Issued certs
+//   AmountDue          = CumulativeNet − PreviouslyCertified
+//
+// `IncludedVariationsAmount` is null while a certificate is Draft —
+// the service computes a live preview on read. At issue time, it
+// snapshots the sum of EstimatedCostImpact on Approved Variations
+// (so a variation approved AFTER issue lands in the next certificate).
+public class PaymentCertificatesService(CimsDbContext db, AuditService audit)
+{
+    public async Task<PaymentCertificateDto> CreateDraftAsync(
+        Guid projectId, CreatePaymentCertificateDraftRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        ValidateInputs(req.CumulativeValuation, req.CumulativeMaterialsOnSite, req.RetentionPercent);
+
+        // Period must exist in this project and tenant scope.
+        _ = await db.CostPeriods
+            .FirstOrDefaultAsync(p => p.Id == req.PeriodId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CostPeriod");
+
+        // One certificate per period — Draft or Issued. Two parallel
+        // drafts on the same period would race the cumulative chain.
+        if (await db.PaymentCertificates.AnyAsync(
+                c => c.ProjectId == projectId && c.PeriodId == req.PeriodId, ct))
+            throw new ConflictException("A payment certificate already exists for this period");
+
+        var count = await db.PaymentCertificates
+            .CountAsync(c => c.ProjectId == projectId, ct);
+
+        var cert = new PaymentCertificate
+        {
+            ProjectId                 = projectId,
+            PeriodId                  = req.PeriodId,
+            CertificateNumber         = $"PC-{(count + 1):D4}",
+            State                     = PaymentCertificateState.Draft,
+            CumulativeValuation       = req.CumulativeValuation,
+            CumulativeMaterialsOnSite = req.CumulativeMaterialsOnSite,
+            RetentionPercent          = req.RetentionPercent,
+            IncludedVariationsAmount  = null,
+        };
+        db.PaymentCertificates.Add(cert);
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "payment_certificate.draft_created",
+            "PaymentCertificate", cert.Id.ToString(), projectId,
+            detail: new
+            {
+                number             = cert.CertificateNumber,
+                periodId           = cert.PeriodId,
+                valuation          = cert.CumulativeValuation,
+                materialsOnSite    = cert.CumulativeMaterialsOnSite,
+                retentionPercent   = cert.RetentionPercent,
+            }, ip: ip, ua: ua);
+
+        return await BuildDtoAsync(cert, ct);
+    }
+
+    public async Task<PaymentCertificateDto> UpdateDraftAsync(
+        Guid projectId, Guid certificateId, UpdatePaymentCertificateDraftRequest req,
+        Guid actorId, string? ip = null, string? ua = null,
+        CancellationToken ct = default)
+    {
+        ValidateInputs(req.CumulativeValuation, req.CumulativeMaterialsOnSite, req.RetentionPercent);
+
+        var cert = await db.PaymentCertificates
+            .FirstOrDefaultAsync(c => c.Id == certificateId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("PaymentCertificate");
+        if (cert.State != PaymentCertificateState.Draft)
+            throw new ConflictException(
+                $"Certificate is in state {cert.State}; only Draft certificates can be updated");
+
+        cert.CumulativeValuation       = req.CumulativeValuation;
+        cert.CumulativeMaterialsOnSite = req.CumulativeMaterialsOnSite;
+        cert.RetentionPercent          = req.RetentionPercent;
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "payment_certificate.draft_updated",
+            "PaymentCertificate", cert.Id.ToString(), projectId,
+            detail: new
+            {
+                number             = cert.CertificateNumber,
+                valuation          = cert.CumulativeValuation,
+                materialsOnSite    = cert.CumulativeMaterialsOnSite,
+                retentionPercent   = cert.RetentionPercent,
+            }, ip: ip, ua: ua);
+
+        return await BuildDtoAsync(cert, ct);
+    }
+
+    /// <summary>
+    /// Transition Draft → Issued. Snapshots the approved-variations
+    /// sum at this moment into IncludedVariationsAmount. Once issued,
+    /// the certificate is immutable in v1.0; corrections go into the
+    /// next period's certificate (cumulative chain self-corrects).
+    /// </summary>
+    public async Task<PaymentCertificateDto> IssueAsync(
+        Guid projectId, Guid certificateId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var cert = await db.PaymentCertificates
+            .FirstOrDefaultAsync(c => c.Id == certificateId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("PaymentCertificate");
+        if (cert.State != PaymentCertificateState.Draft)
+            throw new ConflictException(
+                $"Certificate is in state {cert.State}; only Draft certificates can be issued");
+
+        var variationsAtIssue = await SumApprovedVariationsAsync(projectId, ct);
+        cert.IncludedVariationsAmount = variationsAtIssue;
+        cert.State                    = PaymentCertificateState.Issued;
+        cert.IssuedById               = actorId;
+        cert.IssuedAt                 = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "payment_certificate.issued",
+            "PaymentCertificate", cert.Id.ToString(), projectId,
+            detail: new
+            {
+                number             = cert.CertificateNumber,
+                valuation          = cert.CumulativeValuation,
+                materialsOnSite    = cert.CumulativeMaterialsOnSite,
+                retentionPercent   = cert.RetentionPercent,
+                variationsIncluded = variationsAtIssue,
+            }, ip: ip, ua: ua);
+
+        return await BuildDtoAsync(cert, ct);
+    }
+
+    public async Task<PaymentCertificateDto> GetAsync(
+        Guid projectId, Guid certificateId, CancellationToken ct = default)
+    {
+        var cert = await db.PaymentCertificates
+            .FirstOrDefaultAsync(c => c.Id == certificateId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("PaymentCertificate");
+        return await BuildDtoAsync(cert, ct);
+    }
+
+    private static void ValidateInputs(decimal valuation, decimal materials, decimal retentionPct)
+    {
+        var errors = new List<string>();
+        if (valuation < 0m)         errors.Add("CumulativeValuation must be zero or greater");
+        if (materials < 0m)         errors.Add("CumulativeMaterialsOnSite must be zero or greater");
+        if (retentionPct < 0m || retentionPct > 100m)
+            errors.Add("RetentionPercent must be between 0 and 100");
+        if (errors.Count > 0) throw new ValidationException(errors);
+    }
+
+    private async Task<decimal> SumApprovedVariationsAsync(Guid projectId, CancellationToken ct)
+    {
+        // Variations with a null EstimatedCostImpact contribute zero
+        // (raised without a costed estimate). Unsigned sum is the
+        // contractual norm — a negative impact (omission saving) is
+        // an approved reduction and reduces the certificate value.
+        var sum = await db.Variations
+            .Where(v => v.ProjectId == projectId
+                     && v.State == VariationState.Approved
+                     && v.EstimatedCostImpact != null)
+            .SumAsync(v => v.EstimatedCostImpact!.Value, ct);
+        return sum;
+    }
+
+    private async Task<PaymentCertificateDto> BuildDtoAsync(
+        PaymentCertificate cert, CancellationToken ct)
+    {
+        // Variations: snapshot when issued; live preview when draft.
+        var variationsAmount = cert.IncludedVariationsAmount
+            ?? await SumApprovedVariationsAsync(cert.ProjectId, ct);
+
+        // Cumulative chain: PreviouslyCertified is the **latest prior
+        // Issued cert's CumulativeNet**, not the sum of prior
+        // AmountDues. With cumulative PWDD valuations, each cert's
+        // CumulativeNet IS the running total certified to date — so
+        // the AmountDue this period is just (this cert's net) minus
+        // (last cert's net). Σ AmountDue across all issued certs
+        // therefore equals the latest cert's net (conservation
+        // check), but that's not how PreviouslyCertified is computed.
+        var priorIssued = await db.PaymentCertificates
+            .Where(c => c.ProjectId == cert.ProjectId
+                     && c.Id != cert.Id
+                     && c.State == PaymentCertificateState.Issued
+                     && c.IssuedAt != null
+                     && (cert.IssuedAt == null || c.IssuedAt < cert.IssuedAt))
+            .OrderByDescending(c => c.IssuedAt)
+            .FirstOrDefaultAsync(ct);
+
+        var previouslyCertified = priorIssued == null ? 0m : NetOf(priorIssued);
+
+        var gross           = cert.CumulativeValuation + variationsAmount + cert.CumulativeMaterialsOnSite;
+        var retentionBase   = cert.CumulativeValuation + variationsAmount;
+        var retentionAmount = retentionBase * (cert.RetentionPercent / 100m);
+        var net             = gross - retentionAmount;
+        var amountDue       = net - previouslyCertified;
+
+        return new PaymentCertificateDto(
+            Id:                        cert.Id,
+            ProjectId:                 cert.ProjectId,
+            PeriodId:                  cert.PeriodId,
+            CertificateNumber:         cert.CertificateNumber,
+            State:                     cert.State,
+            CumulativeValuation:       cert.CumulativeValuation,
+            CumulativeMaterialsOnSite: cert.CumulativeMaterialsOnSite,
+            RetentionPercent:          cert.RetentionPercent,
+            IncludedVariationsAmount:  variationsAmount,
+            CumulativeGross:           gross,
+            RetentionAmount:           retentionAmount,
+            CumulativeNet:             net,
+            PreviouslyCertified:       previouslyCertified,
+            AmountDue:                 amountDue,
+            IssuedAt:                  cert.IssuedAt);
+    }
+
+    /// <summary>NEC4 net for an Issued cert, used to compute the
+    /// next cert's PreviouslyCertified. Identical math to BuildDtoAsync
+    /// except it relies on the snapshotted IncludedVariationsAmount
+    /// (always non-null on Issued certs).</summary>
+    private static decimal NetOf(PaymentCertificate cert)
+    {
+        var v               = cert.IncludedVariationsAmount ?? 0m;
+        var gross           = cert.CumulativeValuation + v + cert.CumulativeMaterialsOnSite;
+        var retentionAmount = (cert.CumulativeValuation + v) * (cert.RetentionPercent / 100m);
+        return gross - retentionAmount;
+    }
+}
+
 // ── Variations ────────────────────────────────────────────────────────────────
 // PAFM-SD Appendix F.2 sixth bullet (S1). T-S1-08 ships the **core
 // 3-state machine** only — Raised → Approved or Raised → Rejected

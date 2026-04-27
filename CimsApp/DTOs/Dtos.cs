@@ -32,3 +32,20 @@ public record CreatePeriodRequest(string Label, DateTime StartDate, DateTime End
 public record RecordActualRequest(Guid CostBreakdownItemId, Guid PeriodId, decimal Amount, string? Reference, string? Description);
 public record RaiseVariationRequest(string Title, string? Description, string? Reason, decimal? EstimatedCostImpact, int? EstimatedTimeImpactDays, Guid? CostBreakdownItemId);
 public record VariationDecisionRequest(string? DecisionNote);
+// T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
+// the assessor states the running total each period, not the increment.
+// RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.
+public record CreatePaymentCertificateDraftRequest(Guid PeriodId, decimal CumulativeValuation, decimal CumulativeMaterialsOnSite, decimal RetentionPercent);
+public record UpdatePaymentCertificateDraftRequest(decimal CumulativeValuation, decimal CumulativeMaterialsOnSite, decimal RetentionPercent);
+// Computed view of a payment certificate. Stored fields are the inputs;
+// derived fields (gross, retention amount, net, amount due, previously
+// certified) are computed in PaymentCertificatesService.GetAsync per
+// the ADR-0013 NEC4 formula.
+public record PaymentCertificateDto(
+    Guid Id, Guid ProjectId, Guid PeriodId,
+    string CertificateNumber, PaymentCertificateState State,
+    decimal CumulativeValuation, decimal CumulativeMaterialsOnSite,
+    decimal RetentionPercent, decimal IncludedVariationsAmount,
+    decimal CumulativeGross, decimal RetentionAmount,
+    decimal CumulativeNet, decimal PreviouslyCertified, decimal AmountDue,
+    DateTime? IssuedAt);

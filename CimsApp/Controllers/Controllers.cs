@@ -267,6 +267,56 @@ public class ActualsController(CostService svc, CimsDbContext db) : CimsControll
     }
 }
 
+[Route("api/v1/projects/{projectId:guid}/payment-certificates")]
+public class PaymentCertificatesController(PaymentCertificatesService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpPost]
+    public async Task<IActionResult> CreateDraft(
+        Guid projectId, CreatePaymentCertificateDraftRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var dto = await svc.CreateDraftAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = dto });
+    }
+
+    [HttpPut("{certificateId:guid}")]
+    public async Task<IActionResult> UpdateDraft(
+        Guid projectId, Guid certificateId,
+        UpdatePaymentCertificateDraftRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var dto = await svc.UpdateDraftAsync(projectId, certificateId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    [HttpPost("{certificateId:guid}/issue")]
+    public async Task<IActionResult> Issue(
+        Guid projectId, Guid certificateId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var dto = await svc.IssueAsync(projectId, certificateId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    [HttpGet("{certificateId:guid}")]
+    public async Task<IActionResult> Get(
+        Guid projectId, Guid certificateId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetAsync(projectId, certificateId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+}
+
 [Route("api/v1/projects/{projectId:guid}/variations")]
 public class VariationsController(VariationsService svc, CimsDbContext db) : CimsControllerBase
 {
