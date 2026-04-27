@@ -357,6 +357,40 @@ public class CostBreakdownItem
 }
 
 /// <summary>
+/// A monetary commitment (PO or Subcontract) issued against a CBS line
+/// (T-S1-05). Tenant-scoped indirectly through Project.AppointingPartyId
+/// like every other Cost-domain entity. Amount uses decimal(18,2);
+/// currency is implied by Project.Currency. v1.0 has no
+/// status/cancellation lifecycle — that is a v1.1 hardening item if
+/// real-world usage demands it.
+/// </summary>
+public class Commitment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid CostBreakdownItemId { get; set; }
+    public CostBreakdownItem CostBreakdownItem { get; set; } = null!;
+
+    public CommitmentType Type { get; set; }
+
+    /// <summary>Reference number — PO number, subcontract number etc.</summary>
+    [Required, MaxLength(100)] public string Reference { get; set; } = "";
+
+    /// <summary>Supplier (for PO) or subcontractor (for Subcontract).</summary>
+    [Required, MaxLength(200)] public string Counterparty { get; set; } = "";
+
+    public decimal Amount { get; set; }
+
+    public string? Description { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
 /// Single-use token binding a registering user to a specific organisation.
 /// Closes SR-S0-01: registration can no longer accept an attacker-supplied
 /// OrganisationId. Minted by an OrgAdmin via POST /organisations/{id}/invitations

@@ -8,3 +8,4 @@ public enum DocumentType { Model, Drawing, Specification, Schedule, Report, Corr
 public enum RfiStatus { Draft, Open, UnderReview, Responded, Closed, Cancelled }
 public enum Priority { Low, Medium, High, Urgent }
 public enum ActionStatus { Open, InProgress, Closed, Cancelled }
+public enum CommitmentType { PO, Subcontract }

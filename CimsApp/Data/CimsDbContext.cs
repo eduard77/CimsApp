@@ -39,6 +39,7 @@ public class CimsDbContext(
     public DbSet<ProjectTemplate>    ProjectTemplates    => Set<ProjectTemplate>();
     public DbSet<Invitation>         Invitations         => Set<Invitation>();
     public DbSet<CostBreakdownItem>  CostBreakdownItems  => Set<CostBreakdownItem>();
+    public DbSet<Commitment>         Commitments         => Set<Commitment>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -196,6 +197,19 @@ public class CimsDbContext(
             e.Property(c => c.Budget).HasPrecision(18, 2);
         });
 
+        m.Entity<Commitment>(e =>
+        {
+            // Rollup queries group by CostBreakdownItemId — index that.
+            // Project-level filtering is covered by the per-project
+            // (ProjectId, CostBreakdownItemId) shape of the index.
+            e.HasIndex(c => new { c.ProjectId, c.CostBreakdownItemId });
+            e.Property(c => c.Amount).HasPrecision(18, 2);
+            e.HasOne(c => c.Project).WithMany()
+             .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.CostBreakdownItem).WithMany()
+             .HasForeignKey(c => c.CostBreakdownItemId).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -222,6 +236,7 @@ public class CimsDbContext(
         // same pattern AuthService uses for User/RefreshToken lookups.
         m.Entity<Invitation>().HasQueryFilter(i => i.OrganisationId == _tenant.OrganisationId);
         m.Entity<CostBreakdownItem>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Commitment>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()

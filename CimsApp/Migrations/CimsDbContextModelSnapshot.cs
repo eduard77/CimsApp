@@ -188,6 +188,53 @@ namespace CimsApp.Migrations
                     b.ToTable("CdeContainers");
                 });
 
+            modelBuilder.Entity("CimsApp.Models.Commitment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid>("CostBreakdownItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Counterparty")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CostBreakdownItemId");
+
+                    b.HasIndex("ProjectId", "CostBreakdownItemId");
+
+                    b.ToTable("Commitments");
+                });
+
             modelBuilder.Entity("CimsApp.Models.CostBreakdownItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -972,6 +1019,25 @@ namespace CimsApp.Migrations
                         .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.NoAction)
                         .IsRequired();
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("CimsApp.Models.Commitment", b =>
+                {
+                    b.HasOne("CimsApp.Models.CostBreakdownItem", "CostBreakdownItem")
+                        .WithMany()
+                        .HasForeignKey("CostBreakdownItemId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("CimsApp.Models.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("CostBreakdownItem");
 
                     b.Navigation("Project");
                 });
