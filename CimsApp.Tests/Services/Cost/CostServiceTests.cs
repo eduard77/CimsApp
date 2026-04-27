@@ -649,4 +649,289 @@ public class CostServiceTests
         await Assert.ThrowsAsync<NotFoundException>(() =>
             svc.GetCbsRollupAsync(projectB));
     }
+
+    // ── T-S1-06 CostPeriod + ActualCost ──────────────────────────────────────
+
+    private static CreatePeriodRequest NewPeriod(
+        string label = "2026-04",
+        DateTime? start = null, DateTime? end = null) =>
+        new(label,
+            start ?? new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+            end   ?? new DateTime(2026, 4, 30, 0, 0, 0, DateTimeKind.Utc));
+
+    [Fact]
+    public async Task CreatePeriod_writes_row_and_emits_audit()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+
+        Guid periodId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            var p = await svc.CreatePeriodAsync(projectId,
+                NewPeriod(label: "April 2026"), userId);
+            periodId = p.Id;
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var stored = verify.CostPeriods.Single(p => p.Id == periodId);
+        Assert.Equal(projectId, stored.ProjectId);
+        Assert.Equal("April 2026", stored.Label);
+        Assert.False(stored.IsClosed);
+        Assert.Null(stored.ClosedAt);
+
+        var audit = Assert.Single(verify.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.Action == "cost_period.opened"));
+        Assert.Equal("CostPeriod", audit.Entity);
+        Assert.Equal(periodId.ToString(), audit.EntityId);
+        Assert.Equal(projectId, audit.ProjectId);
+        Assert.Contains("\"label\":\"April 2026\"", audit.Detail);
+    }
+
+    [Fact]
+    public async Task CreatePeriod_StartDate_must_be_before_EndDate()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+
+        using var db = new CimsDbContext(options, tenant);
+        var svc = new CostService(db, new AuditService(db));
+        var sameDay = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc);
+        var ex = await Assert.ThrowsAsync<ValidationException>(() =>
+            svc.CreatePeriodAsync(projectId,
+                new CreatePeriodRequest("X", sameDay, sameDay), userId));
+        Assert.Contains("StartDate must be before EndDate", ex.Errors[0]);
+    }
+
+    [Fact]
+    public async Task ClosePeriod_marks_closed_with_audit_and_double_close_rejected()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+
+        Guid periodId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            var p = await svc.CreatePeriodAsync(projectId, NewPeriod(), userId);
+            periodId = p.Id;
+            await svc.ClosePeriodAsync(projectId, periodId, userId);
+        }
+
+        using (var verify = new CimsDbContext(options, tenant))
+        {
+            var period = verify.CostPeriods.Single(p => p.Id == periodId);
+            Assert.True(period.IsClosed);
+            Assert.NotNull(period.ClosedAt);
+            Assert.Equal(userId, period.ClosedById);
+            Assert.Single(verify.AuditLogs.IgnoreQueryFilters()
+                .Where(a => a.Action == "cost_period.closed"));
+        }
+
+        // Second close on the same period must fail — the close is a
+        // one-way integrity boundary in v1.0.
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            await Assert.ThrowsAsync<ConflictException>(() =>
+                svc.ClosePeriodAsync(projectId, periodId, userId));
+        }
+    }
+
+    [Fact]
+    public async Task RecordActual_writes_row_and_emits_audit()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var lineId = SeedSingleLine(options, tenant, projectId);
+
+        Guid periodId, actualId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            var p = await svc.CreatePeriodAsync(projectId, NewPeriod(), userId);
+            periodId = p.Id;
+            var a = await svc.RecordActualAsync(projectId,
+                new RecordActualRequest(lineId, periodId, 4_321.00m, "INV-99", "April invoice"),
+                userId);
+            actualId = a.Id;
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var stored = verify.ActualCosts.Single(a => a.Id == actualId);
+        Assert.Equal(projectId, stored.ProjectId);
+        Assert.Equal(lineId, stored.CostBreakdownItemId);
+        Assert.Equal(periodId, stored.PeriodId);
+        Assert.Equal(4_321.00m, stored.Amount);
+        Assert.Equal("INV-99", stored.Reference);
+
+        var audit = Assert.Single(verify.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.Action == "actual_cost.recorded"));
+        Assert.Equal("ActualCost", audit.Entity);
+        Assert.Equal(actualId.ToString(), audit.EntityId);
+        Assert.Contains("\"amount\":4321.00", audit.Detail);
+        Assert.Contains("\"reference\":\"INV-99\"", audit.Detail);
+    }
+
+    [Fact]
+    public async Task RecordActual_non_positive_amount_is_rejected()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var lineId = SeedSingleLine(options, tenant, projectId);
+
+        Guid periodId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            var p = await svc.CreatePeriodAsync(projectId, NewPeriod(), userId);
+            periodId = p.Id;
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new CostService(db2, new AuditService(db2));
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            svc2.RecordActualAsync(projectId,
+                new RecordActualRequest(lineId, periodId, 0m, null, null), userId));
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            svc2.RecordActualAsync(projectId,
+                new RecordActualRequest(lineId, periodId, -10m, null, null), userId));
+    }
+
+    [Fact]
+    public async Task RecordActual_against_closed_period_is_rejected()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var lineId = SeedSingleLine(options, tenant, projectId);
+
+        Guid periodId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            var p = await svc.CreatePeriodAsync(projectId, NewPeriod(), userId);
+            periodId = p.Id;
+            await svc.ClosePeriodAsync(projectId, periodId, userId);
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new CostService(db2, new AuditService(db2));
+        var ex = await Assert.ThrowsAsync<ConflictException>(() =>
+            svc2.RecordActualAsync(projectId,
+                new RecordActualRequest(lineId, periodId, 100m, null, null), userId));
+        Assert.Contains("Period is closed", ex.Message);
+    }
+
+    [Fact]
+    public async Task RecordActual_line_in_wrong_project_is_NotFound()
+    {
+        var (options, tenant, orgId, userId, projectA) = BuildFixture();
+        var projectB = Guid.NewGuid();
+        Guid lineOnB, periodOnA;
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            seed.Projects.Add(new Project
+            {
+                Id = projectB, Name = "B", Code = "PR2",
+                AppointingPartyId = orgId, Currency = "GBP",
+            });
+            var line = new CostBreakdownItem
+            {
+                ProjectId = projectB, Code = "1", Name = "B Root",
+            };
+            seed.CostBreakdownItems.Add(line);
+            seed.SaveChanges();
+            lineOnB = line.Id;
+        }
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            var p = await svc.CreatePeriodAsync(projectA, NewPeriod(), userId);
+            periodOnA = p.Id;
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new CostService(db2, new AuditService(db2));
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            svc2.RecordActualAsync(projectA,
+                new RecordActualRequest(lineOnB, periodOnA, 100m, null, null), userId));
+    }
+
+    [Fact]
+    public async Task RecordActual_period_in_wrong_project_is_NotFound()
+    {
+        var (options, tenant, orgId, userId, projectA) = BuildFixture();
+        var lineOnA = SeedSingleLine(options, tenant, projectA);
+        var projectB = Guid.NewGuid();
+        Guid periodOnB;
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            seed.Projects.Add(new Project
+            {
+                Id = projectB, Name = "B", Code = "PR2",
+                AppointingPartyId = orgId, Currency = "GBP",
+            });
+            seed.SaveChanges();
+        }
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            var p = await svc.CreatePeriodAsync(projectB, NewPeriod(), userId);
+            periodOnB = p.Id;
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new CostService(db2, new AuditService(db2));
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            svc2.RecordActualAsync(projectA,
+                new RecordActualRequest(lineOnA, periodOnB, 100m, null, null), userId));
+    }
+
+    [Fact]
+    public async Task GetCbsRollup_includes_actual_sum_per_line()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+
+        Guid line1Id, line2Id;
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            var l1 = new CostBreakdownItem
+            {
+                ProjectId = projectId, Code = "1", Name = "Line 1", Budget = 1000m,
+            };
+            var l2 = new CostBreakdownItem
+            {
+                ProjectId = projectId, Code = "2", Name = "Line 2",
+            };
+            seed.CostBreakdownItems.AddRange(l1, l2);
+            seed.SaveChanges();
+            line1Id = l1.Id; line2Id = l2.Id;
+        }
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            // Two periods. Actuals on both close-then-stay-summed.
+            var p1 = await svc.CreatePeriodAsync(projectId, NewPeriod("Apr"), userId);
+            var p2 = await svc.CreatePeriodAsync(projectId,
+                NewPeriod("May",
+                    new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc),
+                    new DateTime(2026, 5, 31, 0, 0, 0, DateTimeKind.Utc)),
+                userId);
+            await svc.RecordActualAsync(projectId,
+                new RecordActualRequest(line1Id, p1.Id, 200m, "INV-A", null), userId);
+            await svc.RecordActualAsync(projectId,
+                new RecordActualRequest(line1Id, p2.Id, 100m, "INV-B", null), userId);
+            await svc.ClosePeriodAsync(projectId, p1.Id, userId);
+            // p1 closed but its actuals still count in the rollup.
+            await svc.RecordActualAsync(projectId,
+                new RecordActualRequest(line2Id, p2.Id, 50m, "INV-C", null), userId);
+        }
+
+        List<CbsLineRollupDto> rollup;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            rollup = await svc.GetCbsRollupAsync(projectId);
+        }
+
+        var r1 = rollup.Single(r => r.ItemId == line1Id);
+        Assert.Equal(300m, r1.Actual);
+        var r2 = rollup.Single(r => r.ItemId == line2Id);
+        Assert.Equal(50m, r2.Actual);
+    }
 }
