@@ -228,4 +228,160 @@ public class CostServiceTests
         await Assert.ThrowsAsync<NotFoundException>(() =>
             svc.ImportCbsAsync(projectB, csv, userA));
     }
+
+    // ── T-S1-04 SetLineBudgetAsync ───────────────────────────────────────────
+
+    private static Guid SeedSingleLine(DbContextOptions<CimsDbContext> options,
+        StubTenantContext tenant, Guid projectId)
+    {
+        var lineId = Guid.NewGuid();
+        using var seed = new CimsDbContext(options, tenant);
+        seed.CostBreakdownItems.Add(new CostBreakdownItem
+        {
+            Id = lineId, ProjectId = projectId, Code = "1", Name = "Root",
+        });
+        seed.SaveChanges();
+        return lineId;
+    }
+
+    [Fact]
+    public async Task SetLineBudget_writes_value_and_emits_audit_with_before_after()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var lineId = SeedSingleLine(options, tenant, projectId);
+
+        // First write: previous == null, current == 12_345.67.
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            await svc.SetLineBudgetAsync(projectId, lineId, 12_345.67m, userId);
+        }
+        // Second write: previous == 12_345.67, current == 99_999.00 — verifies
+        // the audit detail captures the actual previous value, not null.
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            await svc.SetLineBudgetAsync(projectId, lineId, 99_999.00m, userId);
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var line = verify.CostBreakdownItems.Single(c => c.Id == lineId);
+        Assert.Equal(99_999.00m, line.Budget);
+
+        var audits = verify.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.Action == "cbs.line_budget_set")
+            .OrderBy(a => a.CreatedAt).ToList();
+        Assert.Equal(2, audits.Count);
+        Assert.Equal("CostBreakdownItem", audits[0].Entity);
+        Assert.Equal(lineId.ToString(), audits[0].EntityId);
+        Assert.Equal(projectId, audits[0].ProjectId);
+        Assert.Contains("\"previous\":null", audits[0].Detail);
+        Assert.Contains("\"current\":12345.67", audits[0].Detail);
+        Assert.Contains("\"previous\":12345.67", audits[1].Detail);
+        Assert.Contains("\"current\":99999.00", audits[1].Detail);
+    }
+
+    [Fact]
+    public async Task SetLineBudget_clearing_to_null_is_allowed_and_audited()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var lineId = SeedSingleLine(options, tenant, projectId);
+
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            await svc.SetLineBudgetAsync(projectId, lineId, 500m, userId);
+            await svc.SetLineBudgetAsync(projectId, lineId, null, userId);
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        Assert.Null(verify.CostBreakdownItems.Single(c => c.Id == lineId).Budget);
+    }
+
+    [Fact]
+    public async Task SetLineBudget_negative_value_is_rejected()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var lineId = SeedSingleLine(options, tenant, projectId);
+
+        using var db = new CimsDbContext(options, tenant);
+        var svc = new CostService(db, new AuditService(db));
+        var ex = await Assert.ThrowsAsync<ValidationException>(() =>
+            svc.SetLineBudgetAsync(projectId, lineId, -1m, userId));
+        Assert.Contains("Budget must be zero or greater", ex.Errors[0]);
+    }
+
+    [Fact]
+    public async Task SetLineBudget_item_belonging_to_a_different_project_is_NotFound()
+    {
+        var (options, tenant, orgId, userId, projectA) = BuildFixture();
+        // Second project under the SAME tenant — no cross-tenant filtering
+        // here, just the (Id, ProjectId) tuple constraint inside the
+        // service. A line on projectB must not be settable through projectA.
+        var projectB = Guid.NewGuid();
+        Guid lineOnB;
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            seed.Projects.Add(new Project
+            {
+                Id = projectB, Name = "Project B", Code = "PR2",
+                AppointingPartyId = orgId, Currency = "GBP",
+            });
+            var line = new CostBreakdownItem
+            {
+                ProjectId = projectB, Code = "1", Name = "B Root",
+            };
+            seed.CostBreakdownItems.Add(line);
+            seed.SaveChanges();
+            lineOnB = line.Id;
+        }
+
+        using var db = new CimsDbContext(options, tenant);
+        var svc = new CostService(db, new AuditService(db));
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            svc.SetLineBudgetAsync(projectA, lineOnB, 100m, userId));
+    }
+
+    [Fact]
+    public async Task SetLineBudget_cross_tenant_line_lookup_is_NotFound()
+    {
+        var dbName    = Guid.NewGuid().ToString();
+        var orgA      = Guid.NewGuid();
+        var orgB      = Guid.NewGuid();
+        var userA     = Guid.NewGuid();
+        var userB     = Guid.NewGuid();
+        var projectB  = Guid.NewGuid();
+
+        var tenantA = new StubTenantContext { OrganisationId = orgA, UserId = userA };
+        var tenantB = new StubTenantContext { OrganisationId = orgB, UserId = userB };
+
+        var optionsB = new DbContextOptionsBuilder<CimsDbContext>()
+            .UseInMemoryDatabase(dbName).Options;
+        Guid lineOnB;
+        using (var seed = new CimsDbContext(optionsB, tenantB))
+        {
+            seed.Organisations.AddRange(
+                new Organisation { Id = orgA, Name = "A", Code = "TA" },
+                new Organisation { Id = orgB, Name = "B", Code = "TB" });
+            seed.Projects.Add(new Project
+            {
+                Id = projectB, Name = "B Project", Code = "PB",
+                AppointingPartyId = orgB, Currency = "GBP",
+            });
+            var line = new CostBreakdownItem
+            {
+                ProjectId = projectB, Code = "1", Name = "B Root",
+            };
+            seed.CostBreakdownItems.Add(line);
+            seed.SaveChanges();
+            lineOnB = line.Id;
+        }
+
+        var optionsA = new DbContextOptionsBuilder<CimsDbContext>()
+            .UseInMemoryDatabase(dbName).Options;
+        using var dbA = new CimsDbContext(optionsA, tenantA);
+        var svc = new CostService(dbA, new AuditService(dbA));
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            svc.SetLineBudgetAsync(projectB, lineOnB, 100m, userA));
+    }
 }
