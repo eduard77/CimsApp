@@ -394,6 +394,98 @@ public class CostService(CimsDbContext db, AuditService audit)
             detail: new { previous, current = budget }, ip: ip, ua: ua);
     }
 
+    /// <summary>
+    /// Record a monetary commitment (PO or subcontract) against a CBS
+    /// line. T-S1-05, F.2 "Commitments (POs, subcontracts) tracked".
+    /// Currency is implied by Project.Currency; the line carries the
+    /// amount only.
+    /// </summary>
+    public async Task<Commitment> CreateCommitmentAsync(
+        Guid projectId, CreateCommitmentRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (req.Amount <= 0m)
+            throw new ValidationException(["Amount must be greater than zero"]);
+        if (string.IsNullOrWhiteSpace(req.Reference))
+            throw new ValidationException(["Reference is required"]);
+        if (string.IsNullOrWhiteSpace(req.Counterparty))
+            throw new ValidationException(["Counterparty is required"]);
+
+        // (Id, ProjectId) tuple lookup enforces both the CBS query filter
+        // (tenant scope) AND that the line actually belongs to the
+        // project the caller named in the URL — same pattern as
+        // SetLineBudgetAsync.
+        var line = await db.CostBreakdownItems
+            .FirstOrDefaultAsync(c => c.Id == req.CostBreakdownItemId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CBS line");
+
+        var commitment = new Commitment
+        {
+            ProjectId           = projectId,
+            CostBreakdownItemId = line.Id,
+            Type                = req.Type,
+            Reference           = req.Reference.Trim(),
+            Counterparty        = req.Counterparty.Trim(),
+            Amount              = req.Amount,
+            Description         = req.Description,
+        };
+        db.Commitments.Add(commitment);
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "commitment.created", "Commitment",
+            commitment.Id.ToString(), projectId,
+            detail: new
+            {
+                cbsLineId = line.Id,
+                type      = req.Type.ToString(),
+                amount    = req.Amount,
+                reference = commitment.Reference,
+            }, ip: ip, ua: ua);
+        return commitment;
+    }
+
+    /// <summary>
+    /// Per-line committed-vs-budget rollup for a project's CBS. T-S1-05,
+    /// F.2 "committed-vs-budget rollup". Returns one row per CBS line
+    /// (flat, ordered by Code) carrying the line's Budget, the SUM of
+    /// commitment Amounts on that line, and the variance
+    /// (Budget - Committed) when Budget is set.
+    ///
+    /// Tree aggregation (parent rolls up children) is intentionally NOT
+    /// done here — that semantic belongs in the EVM PV calculation
+    /// (T-S1-07) where it has to make explicit decisions about whether
+    /// budgets are placed at leaves or at parents. v1.0 callers
+    /// (UI, EVM) build the tree on top of this flat result.
+    /// </summary>
+    public async Task<List<CbsLineRollupDto>> GetCbsRollupAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        // Tenant scope: the project lookup uses the Project query filter,
+        // so a cross-tenant projectId 404s before any CBS / Commitment
+        // query runs. Lines and commitments share the same filter.
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var lines = await db.CostBreakdownItems
+            .Where(c => c.ProjectId == projectId)
+            .OrderBy(c => c.Code)
+            .ToListAsync(ct);
+
+        var commitmentSums = await db.Commitments
+            .Where(c => c.ProjectId == projectId)
+            .GroupBy(c => c.CostBreakdownItemId)
+            .Select(g => new { ItemId = g.Key, Total = g.Sum(c => c.Amount) })
+            .ToListAsync(ct);
+        var byItem = commitmentSums.ToDictionary(x => x.ItemId, x => x.Total);
+
+        return lines.Select(l =>
+        {
+            var committed = byItem.TryGetValue(l.Id, out var c) ? c : 0m;
+            var variance = l.Budget.HasValue ? (decimal?)(l.Budget.Value - committed) : null;
+            return new CbsLineRollupDto(l.Id, l.Code, l.Name, l.ParentId, l.Budget, committed, variance);
+        }).ToList();
+    }
+
     private sealed record CsvRow(string Code, string Name, string? ParentCode, string? Description, int SortOrder);
 
     private static List<CsvRow> ParseCsv(Stream stream)

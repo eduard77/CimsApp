@@ -198,6 +198,29 @@ public class CostController(CostService svc, CimsDbContext db) : CimsControllerB
             CurrentUserId, ClientIp, ClientAgent, ct);
         return Ok(new { success = true });
     }
+
+    [HttpGet("rollup")]
+    public async Task<IActionResult> Rollup(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.GetCbsRollupAsync(projectId, ct) });
+    }
+}
+
+[Route("api/v1/projects/{projectId:guid}/commitments")]
+public class CommitmentsController(CostService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpPost]
+    public async Task<IActionResult> Create(
+        Guid projectId, CreateCommitmentRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var c = await svc.CreateCommitmentAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = c });
+    }
 }
 
 // ── Documents ─────────────────────────────────────────────────────────────────

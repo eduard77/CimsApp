@@ -63,6 +63,8 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 |---|---|---|---|---|
 | POST | `/api/v1/projects/{projectId}/cbs/import` | authenticated | `ProjectManager+` | T-S1-03. Multipart `file` (CSV). Header: `Code,Name,ParentCode,Description,SortOrder`. Import-into-empty only — re-import / merge deferred. Audit: `cbs.imported`. |
 | PUT  | `/api/v1/projects/{projectId}/cbs/{itemId}/budget` | authenticated | `ProjectManager+` | T-S1-04. Body `{ "budget": <decimal\|null> }`. Sets / clears the planned budget on a single CBS line. `decimal(18,2)`; currency follows `Project.Currency`. Negative values rejected. Audit: `cbs.line_budget_set` with `previous` / `current` in detail. |
+| GET  | `/api/v1/projects/{projectId}/cbs/rollup` | authenticated | membership | T-S1-05. Per-line committed-vs-budget rollup: one row per CBS line with `budget`, `committed` (sum of commitment Amounts), and `variance` (`budget - committed` when budget set, else `null`). Flat — tree aggregation deferred to T-S1-07 EVM. |
+| POST | `/api/v1/projects/{projectId}/commitments` | authenticated | `ProjectManager+` | T-S1-05. Body `CreateCommitmentRequest`. Records a `PO` or `Subcontract` against a CBS line in the same project. `Amount > 0` required. Audit: `commitment.created` with `cbsLineId`, `type`, `amount`, `reference` in detail. |
 
 ## Documents
 
