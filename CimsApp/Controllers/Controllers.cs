@@ -223,6 +223,50 @@ public class CommitmentsController(CostService svc, CimsDbContext db) : CimsCont
     }
 }
 
+[Route("api/v1/projects/{projectId:guid}/cost-periods")]
+public class CostPeriodsController(CostService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpPost]
+    public async Task<IActionResult> Create(
+        Guid projectId, CreatePeriodRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var p = await svc.CreatePeriodAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = p });
+    }
+
+    [HttpPost("{periodId:guid}/close")]
+    public async Task<IActionResult> Close(
+        Guid projectId, Guid periodId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.ClosePeriodAsync(projectId, periodId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
+}
+
+[Route("api/v1/projects/{projectId:guid}/actuals")]
+public class ActualsController(CostService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpPost]
+    public async Task<IActionResult> Record(
+        Guid projectId, RecordActualRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var a = await svc.RecordActualAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = a });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

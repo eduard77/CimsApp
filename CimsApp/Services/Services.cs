@@ -476,14 +476,140 @@ public class CostService(CimsDbContext db, AuditService audit)
             .GroupBy(c => c.CostBreakdownItemId)
             .Select(g => new { ItemId = g.Key, Total = g.Sum(c => c.Amount) })
             .ToListAsync(ct);
-        var byItem = commitmentSums.ToDictionary(x => x.ItemId, x => x.Total);
+        var commByItem = commitmentSums.ToDictionary(x => x.ItemId, x => x.Total);
+
+        // Actuals are summed across all periods (open and closed) — the
+        // rollup reflects everything that has actually been spent against
+        // the line. Per-period breakdown belongs to the cashflow report
+        // (T-S1-11), not the cost rollup.
+        var actualSums = await db.ActualCosts
+            .Where(a => a.ProjectId == projectId)
+            .GroupBy(a => a.CostBreakdownItemId)
+            .Select(g => new { ItemId = g.Key, Total = g.Sum(a => a.Amount) })
+            .ToListAsync(ct);
+        var actByItem = actualSums.ToDictionary(x => x.ItemId, x => x.Total);
 
         return lines.Select(l =>
         {
-            var committed = byItem.TryGetValue(l.Id, out var c) ? c : 0m;
-            var variance = l.Budget.HasValue ? (decimal?)(l.Budget.Value - committed) : null;
-            return new CbsLineRollupDto(l.Id, l.Code, l.Name, l.ParentId, l.Budget, committed, variance);
+            var committed = commByItem.TryGetValue(l.Id, out var c) ? c : 0m;
+            var actual    = actByItem.TryGetValue(l.Id, out var a) ? a : 0m;
+            var variance  = l.Budget.HasValue ? (decimal?)(l.Budget.Value - committed) : null;
+            return new CbsLineRollupDto(l.Id, l.Code, l.Name, l.ParentId,
+                l.Budget, committed, actual, variance);
         }).ToList();
+    }
+
+    /// <summary>
+    /// Open a new CostPeriod on the project. v1.0 requires
+    /// `StartDate &lt; EndDate` and a non-empty Label; period overlap
+    /// with existing periods is intentionally NOT enforced — the
+    /// project may legitimately want overlapping windows (months
+    /// alongside quarters, or contractual periods alongside
+    /// reporting months). T-S1-06.
+    /// </summary>
+    public async Task<CostPeriod> CreatePeriodAsync(
+        Guid projectId, CreatePeriodRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Label))
+            throw new ValidationException(["Label is required"]);
+        if (req.StartDate >= req.EndDate)
+            throw new ValidationException(["StartDate must be before EndDate"]);
+
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var period = new CostPeriod
+        {
+            ProjectId = projectId,
+            Label     = req.Label.Trim(),
+            StartDate = req.StartDate,
+            EndDate   = req.EndDate,
+        };
+        db.CostPeriods.Add(period);
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "cost_period.opened", "CostPeriod",
+            period.Id.ToString(), projectId,
+            detail: new { label = period.Label, period.StartDate, period.EndDate },
+            ip: ip, ua: ua);
+        return period;
+    }
+
+    /// <summary>
+    /// Close a CostPeriod. Once closed, RecordActualAsync rejects any
+    /// further actuals targeting it; the close is a one-way integrity
+    /// boundary in v1.0 (re-open deferred — out-of-period correction
+    /// goes to the next open period). Closing an already-closed period
+    /// is rejected with ConflictException so the operator notices.
+    /// </summary>
+    public async Task ClosePeriodAsync(
+        Guid projectId, Guid periodId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var period = await db.CostPeriods
+            .FirstOrDefaultAsync(p => p.Id == periodId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CostPeriod");
+        if (period.IsClosed)
+            throw new ConflictException("Period is already closed");
+
+        period.IsClosed   = true;
+        period.ClosedAt   = DateTime.UtcNow;
+        period.ClosedById = actorId;
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "cost_period.closed", "CostPeriod",
+            period.Id.ToString(), projectId,
+            detail: new { label = period.Label }, ip: ip, ua: ua);
+    }
+
+    /// <summary>
+    /// Record an actual cost against a CBS line in a specific
+    /// CostPeriod. Validates `Amount &gt; 0`, the line belongs to the
+    /// project (tenant + cross-project guard pattern shared with
+    /// SetLineBudget / CreateCommitment), and the target period is open
+    /// AND belongs to the same project. Closed periods reject writes.
+    /// T-S1-06.
+    /// </summary>
+    public async Task<ActualCost> RecordActualAsync(
+        Guid projectId, RecordActualRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (req.Amount <= 0m)
+            throw new ValidationException(["Amount must be greater than zero"]);
+
+        var line = await db.CostBreakdownItems
+            .FirstOrDefaultAsync(c => c.Id == req.CostBreakdownItemId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CBS line");
+
+        var period = await db.CostPeriods
+            .FirstOrDefaultAsync(p => p.Id == req.PeriodId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CostPeriod");
+        if (period.IsClosed)
+            throw new ConflictException("Period is closed; record actuals against an open period instead");
+
+        var actual = new ActualCost
+        {
+            ProjectId           = projectId,
+            CostBreakdownItemId = line.Id,
+            PeriodId            = period.Id,
+            Amount              = req.Amount,
+            Reference           = req.Reference,
+            Description         = req.Description,
+        };
+        db.ActualCosts.Add(actual);
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "actual_cost.recorded", "ActualCost",
+            actual.Id.ToString(), projectId,
+            detail: new
+            {
+                cbsLineId = line.Id,
+                periodId  = period.Id,
+                amount    = req.Amount,
+                reference = req.Reference,
+            }, ip: ip, ua: ua);
+        return actual;
     }
 
     private sealed record CsvRow(string Code, string Name, string? ParentCode, string? Description, int SortOrder);

@@ -24,4 +24,9 @@ public record CreateActionRequest(string Title, string? Description, string? Sou
 public record UpdateActionRequest(string? Title, string? Description, Priority? Priority, ActionStatus? Status, Guid? AssigneeId, DateTime? DueDate);
 public record SetLineBudgetRequest(decimal? Budget);
 public record CreateCommitmentRequest(Guid CostBreakdownItemId, CommitmentType Type, string Reference, string Counterparty, decimal Amount, string? Description);
-public record CbsLineRollupDto(Guid ItemId, string Code, string Name, Guid? ParentId, decimal? Budget, decimal Committed, decimal? Variance);
+// Variance is Budget - Committed (T-S1-05 semantic, preserved through
+// T-S1-06). Actual is the sum of all ActualCost rows on the line; the
+// consumer derives Budget - Actual or Committed - Actual as needed.
+public record CbsLineRollupDto(Guid ItemId, string Code, string Name, Guid? ParentId, decimal? Budget, decimal Committed, decimal Actual, decimal? Variance);
+public record CreatePeriodRequest(string Label, DateTime StartDate, DateTime EndDate);
+public record RecordActualRequest(Guid CostBreakdownItemId, Guid PeriodId, decimal Amount, string? Reference, string? Description);
