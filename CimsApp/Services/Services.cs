@@ -515,25 +515,55 @@ public class CostService(CimsDbContext db, AuditService audit)
             throw new ValidationException(["Label is required"]);
         if (req.StartDate >= req.EndDate)
             throw new ValidationException(["StartDate must be before EndDate"]);
+        if (req.PlannedCashflow is < 0m)
+            throw new ValidationException(["PlannedCashflow must be zero or greater"]);
 
         _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
             ?? throw new NotFoundException("Project");
 
         var period = new CostPeriod
         {
-            ProjectId = projectId,
-            Label     = req.Label.Trim(),
-            StartDate = req.StartDate,
-            EndDate   = req.EndDate,
+            ProjectId       = projectId,
+            Label           = req.Label.Trim(),
+            StartDate       = req.StartDate,
+            EndDate         = req.EndDate,
+            PlannedCashflow = req.PlannedCashflow,
         };
         db.CostPeriods.Add(period);
         await db.SaveChangesAsync(ct);
 
         await audit.WriteAsync(actorId, "cost_period.opened", "CostPeriod",
             period.Id.ToString(), projectId,
-            detail: new { label = period.Label, period.StartDate, period.EndDate },
+            detail: new { label = period.Label, period.StartDate, period.EndDate, period.PlannedCashflow },
             ip: ip, ua: ua);
         return period;
+    }
+
+    /// <summary>
+    /// Set or clear the planned-cashflow baseline on an existing
+    /// CostPeriod. T-S1-11. Allowed on both Open and Closed periods —
+    /// baselines often get refined after the period closes (a re-baseline
+    /// is a forecast adjustment, not an actual mutation).
+    /// </summary>
+    public async Task SetPeriodBaselineAsync(
+        Guid projectId, Guid periodId, SetPeriodBaselineRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (req.PlannedCashflow is < 0m)
+            throw new ValidationException(["PlannedCashflow must be zero or greater"]);
+
+        var period = await db.CostPeriods
+            .FirstOrDefaultAsync(p => p.Id == periodId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CostPeriod");
+
+        var previous = period.PlannedCashflow;
+        period.PlannedCashflow = req.PlannedCashflow;
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "cost_period.baseline_set", "CostPeriod",
+            period.Id.ToString(), projectId,
+            detail: new { period.Label, previous, current = req.PlannedCashflow },
+            ip: ip, ua: ua);
     }
 
     /// <summary>
@@ -610,6 +640,116 @@ public class CostService(CimsDbContext db, AuditService audit)
                 reference = req.Reference,
             }, ip: ip, ua: ua);
         return actual;
+    }
+
+    /// <summary>
+    /// Project-level cashflow S-curve (T-S1-11). One point per
+    /// CostPeriod, ordered by StartDate. For each point:
+    ///   BaselinePlanned     = the period's manual PlannedCashflow (nullable).
+    ///   CumulativeBaseline  = running total of PlannedCashflow values
+    ///                         (null treated as 0 — periods without a baseline
+    ///                         simply don't add to the total).
+    ///   Actual              = sum of ActualCost.Amount for the period.
+    ///   CumulativeActual    = running total of Actual.
+    ///   Forecast            = CumulativeActual for periods up to and
+    ///                         including the latest period that has any
+    ///                         actuals; for later periods,
+    ///                         CumulativeActual_latest +
+    ///                           (CumulativeBaseline_thisPeriod −
+    ///                            CumulativeBaseline_atLatestActualPeriod).
+    ///                         Null when no baseline AND no actuals exist.
+    /// Per-CBS-line cashflow breakdown is deferred (v1.0 is project-level
+    /// only; the consumer composes per-line views from the rollup if needed).
+    /// </summary>
+    public async Task<CashflowDto> GetCashflowAsync(Guid projectId, CancellationToken ct = default)
+    {
+        var project = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var periods = await db.CostPeriods
+            .Where(p => p.ProjectId == projectId)
+            .OrderBy(p => p.StartDate).ThenBy(p => p.Id)
+            .ToListAsync(ct);
+
+        // Group ActualCost by PeriodId so we can join in-memory; the
+        // (ProjectId, PeriodId) index on ActualCost (T-S1-06) makes this
+        // a single index seek per project.
+        var actualSums = await db.ActualCosts
+            .Where(a => a.ProjectId == projectId)
+            .GroupBy(a => a.PeriodId)
+            .Select(g => new { PeriodId = g.Key, Total = g.Sum(a => a.Amount) })
+            .ToListAsync(ct);
+        var actualByPeriod = actualSums.ToDictionary(x => x.PeriodId, x => x.Total);
+
+        var points = new List<CashflowPeriodPoint>(periods.Count);
+        decimal cumBaseline = 0m;
+        decimal cumActual   = 0m;
+        var snapshots = new (decimal cumBaseline, decimal cumActual, bool hasActuals)[periods.Count];
+
+        // Pass 1 — accumulate cumulative totals; record per-period
+        // snapshots so the forecast pass can reference the latest
+        // actual period.
+        for (var i = 0; i < periods.Count; i++)
+        {
+            var p          = periods[i];
+            var actual     = actualByPeriod.TryGetValue(p.Id, out var a) ? a : 0m;
+            cumBaseline   += p.PlannedCashflow ?? 0m;
+            cumActual     += actual;
+            snapshots[i]   = (cumBaseline, cumActual, hasActuals: actual != 0m);
+        }
+
+        // Latest period index that has any actuals; -1 if none.
+        var latestActualIdx = -1;
+        for (var i = periods.Count - 1; i >= 0; i--)
+            if (snapshots[i].hasActuals) { latestActualIdx = i; break; }
+
+        var latestActualValue   = latestActualIdx >= 0 ? snapshots[latestActualIdx].cumActual   : 0m;
+        var latestActualBaseline = latestActualIdx >= 0 ? snapshots[latestActualIdx].cumBaseline : 0m;
+
+        for (var i = 0; i < periods.Count; i++)
+        {
+            var p   = periods[i];
+            var s   = snapshots[i];
+            var act = actualByPeriod.TryGetValue(p.Id, out var v) ? v : 0m;
+
+            decimal? forecast;
+            if (i <= latestActualIdx)
+            {
+                // Past or current: forecast = what actually happened cumulatively.
+                forecast = s.cumActual;
+            }
+            else if (p.PlannedCashflow.HasValue || s.cumBaseline > 0m)
+            {
+                // Future: project from the latest actual at the
+                // baseline rate.
+                forecast = latestActualValue + (s.cumBaseline - latestActualBaseline);
+            }
+            else if (latestActualIdx >= 0)
+            {
+                // Future with no baseline at all: hold the latest
+                // actual flat (no signal otherwise).
+                forecast = latestActualValue;
+            }
+            else
+            {
+                // No baseline data and no actuals — no projection.
+                forecast = null;
+            }
+
+            points.Add(new CashflowPeriodPoint(
+                PeriodId:           p.Id,
+                Label:              p.Label,
+                StartDate:          p.StartDate,
+                EndDate:            p.EndDate,
+                IsClosed:           p.IsClosed,
+                BaselinePlanned:    p.PlannedCashflow,
+                CumulativeBaseline: s.cumBaseline,
+                Actual:             act,
+                CumulativeActual:   s.cumActual,
+                Forecast:           forecast));
+        }
+
+        return new CashflowDto(project.Currency, points);
     }
 
     private sealed record CsvRow(string Code, string Name, string? ParentCode, string? Description, int SortOrder);

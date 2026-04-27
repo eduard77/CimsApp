@@ -249,6 +249,30 @@ public class CostPeriodsController(CostService svc, CimsDbContext db) : CimsCont
             CurrentUserId, ClientIp, ClientAgent, ct);
         return Ok(new { success = true });
     }
+
+    [HttpPut("{periodId:guid}/baseline")]
+    public async Task<IActionResult> SetBaseline(
+        Guid projectId, Guid periodId, SetPeriodBaselineRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.SetPeriodBaselineAsync(projectId, periodId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
+}
+
+[Route("api/v1/projects/{projectId:guid}/cashflow")]
+public class CashflowController(CostService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> Get(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetCashflowAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
 }
 
 [Route("api/v1/projects/{projectId:guid}/actuals")]
