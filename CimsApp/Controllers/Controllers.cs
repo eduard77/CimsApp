@@ -297,6 +297,14 @@ public class CashflowController(CostService svc, CimsDbContext db) : CimsControl
         var dto = await svc.GetCashflowAsync(projectId, ct);
         return Ok(new { success = true, data = dto });
     }
+
+    [HttpGet("by-line")]
+    public async Task<IActionResult> GetByLine(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetCashflowByLineAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
 }
 
 [Route("api/v1/projects/{projectId:guid}/evm")]

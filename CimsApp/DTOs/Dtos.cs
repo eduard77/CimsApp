@@ -44,6 +44,20 @@ public record CashflowPeriodPoint(
     decimal Actual, decimal CumulativeActual,
     decimal? Forecast);
 public record CashflowDto(string ProjectCurrency, List<CashflowPeriodPoint> Points);
+// Per-CBS-line cashflow breakdown (T-S1-11 wire-up via B-017). For
+// each (line, period) the BaselinePlanned is the line's Budget
+// distributed across the period by linear overlap of the line's
+// schedule range with the period's date range. Actual is summed from
+// ActualCost where line+period match.
+public record CashflowLinePeriodPoint(
+    Guid PeriodId, string Label, DateTime StartDate, DateTime EndDate,
+    decimal BaselinePlanned, decimal Actual);
+public record CashflowLineSeries(
+    Guid ItemId, string Code, string Name,
+    decimal? Budget, DateTime? ScheduledStart, DateTime? ScheduledEnd,
+    List<CashflowLinePeriodPoint> Points);
+public record CashflowByLineDto(
+    string ProjectCurrency, List<CashflowLineSeries> Lines);
 public record RaiseVariationRequest(string Title, string? Description, string? Reason, decimal? EstimatedCostImpact, int? EstimatedTimeImpactDays, Guid? CostBreakdownItemId);
 public record VariationDecisionRequest(string? DecisionNote);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:

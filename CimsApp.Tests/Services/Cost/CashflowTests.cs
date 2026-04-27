@@ -327,6 +327,187 @@ public class CashflowTests
         Assert.Equal(60m, dto.Points[2].CumulativeBaseline);
     }
 
+    // ── T-S1-11 wire-up via B-017: per-CBS-line cashflow ─────────────
+
+    [Fact]
+    public async Task GetCashflowByLine_distributes_budget_across_overlapping_periods()
+    {
+        // Single line, Budget 91, scheduled Apr 1 → Jul 1 (91 days).
+        // Three monthly periods Apr / May / Jun, lengths 30 / 31 / 30
+        // days. Distribution = Budget × (period-overlap-days /
+        // schedule-total-days). Σ across all three periods equals
+        // Budget exactly because the schedule and the union of
+        // periods coincide.
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var apr1  = Utc(2026, 4, 1);
+        var may1  = Utc(2026, 5, 1);
+        var jun1  = Utc(2026, 6, 1);
+        var jul1  = Utc(2026, 7, 1);
+
+        Guid lineId;
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            var l = new CostBreakdownItem
+            {
+                ProjectId = projectId, Code = "1", Name = "L1",
+                Budget = 91m,
+                ScheduledStart = apr1, ScheduledEnd = jul1,
+            };
+            seed.CostBreakdownItems.Add(l);
+            seed.SaveChanges();
+            lineId = l.Id;
+        }
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            await svc.CreatePeriodAsync(projectId,
+                new CreatePeriodRequest("Apr", apr1, may1), userId);
+            await svc.CreatePeriodAsync(projectId,
+                new CreatePeriodRequest("May", may1, jun1), userId);
+            await svc.CreatePeriodAsync(projectId,
+                new CreatePeriodRequest("Jun", jun1, jul1), userId);
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new CostService(db2, new AuditService(db2));
+        var dto = await svc2.GetCashflowByLineAsync(projectId);
+
+        var line = Assert.Single(dto.Lines);
+        Assert.Equal(lineId, line.ItemId);
+        Assert.Equal(3, line.Points.Count);
+
+        // Decimal repeated-division drift: 91 × (30/91) does not close
+        // exactly because 30/91 has a non-terminating decimal expansion.
+        // The math is conservation-correct; the test asserts within a
+        // tight tolerance.
+        static void AssertClose(decimal expected, decimal actual, decimal tol = 0.0001m)
+        {
+            var diff = expected - actual;
+            if (diff < 0m) diff = -diff;
+            Assert.True(diff < tol, $"Expected {expected} ± {tol}, got {actual}");
+        }
+
+        // Σ across periods ≈ Budget (perfectly-aligned schedule).
+        AssertClose(91m, line.Points.Sum(p => p.BaselinePlanned));
+
+        // Apr 30/91, May 31/91, Jun 30/91.
+        AssertClose(30m, line.Points[0].BaselinePlanned);
+        AssertClose(31m, line.Points[1].BaselinePlanned);
+        AssertClose(30m, line.Points[2].BaselinePlanned);
+    }
+
+    [Fact]
+    public async Task GetCashflowByLine_perfectly_aligned_schedule_sums_to_full_Budget()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var apr1 = Utc(2026, 4, 1);
+        var may1 = Utc(2026, 5, 1);
+        var jun1 = Utc(2026, 6, 1);
+
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            seed.CostBreakdownItems.Add(new CostBreakdownItem
+            {
+                ProjectId = projectId, Code = "1", Name = "L1",
+                Budget = 6_000m,
+                ScheduledStart = apr1, ScheduledEnd = jun1,
+            });
+            seed.SaveChanges();
+        }
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            await svc.CreatePeriodAsync(projectId,
+                new CreatePeriodRequest("Apr", apr1, may1), userId);
+            await svc.CreatePeriodAsync(projectId,
+                new CreatePeriodRequest("May", may1, jun1), userId);
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new CostService(db2, new AuditService(db2));
+        var dto = await svc2.GetCashflowByLineAsync(projectId);
+        var line = Assert.Single(dto.Lines);
+        var sum = line.Points.Sum(p => p.BaselinePlanned);
+        Assert.Equal(6_000m, sum);   // Schedule covers exactly Apr + May.
+    }
+
+    [Fact]
+    public async Task GetCashflowByLine_actuals_attach_to_correct_line_period_pair()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var apr1 = Utc(2026, 4, 1);
+        var may1 = Utc(2026, 5, 1);
+
+        Guid lineAId, lineBId, periodAprId;
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            var lA = new CostBreakdownItem { ProjectId = projectId, Code = "A", Name = "A", Budget = 100m };
+            var lB = new CostBreakdownItem { ProjectId = projectId, Code = "B", Name = "B", Budget = 200m };
+            seed.CostBreakdownItems.AddRange(lA, lB);
+            seed.SaveChanges();
+            lineAId = lA.Id; lineBId = lB.Id;
+        }
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            var apr = await svc.CreatePeriodAsync(projectId,
+                new CreatePeriodRequest("Apr", apr1, may1), userId);
+            periodAprId = apr.Id;
+            await svc.RecordActualAsync(projectId,
+                new RecordActualRequest(lineAId, apr.Id, 25m, "INV-A", null), userId);
+            await svc.RecordActualAsync(projectId,
+                new RecordActualRequest(lineBId, apr.Id, 75m, "INV-B", null), userId);
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new CostService(db2, new AuditService(db2));
+        var dto = await svc2.GetCashflowByLineAsync(projectId);
+
+        var aSeries = dto.Lines.Single(l => l.ItemId == lineAId);
+        var bSeries = dto.Lines.Single(l => l.ItemId == lineBId);
+        Assert.Equal(25m, aSeries.Points.Single(p => p.PeriodId == periodAprId).Actual);
+        Assert.Equal(75m, bSeries.Points.Single(p => p.PeriodId == periodAprId).Actual);
+        // Lines without schedules → baseline 0 across all periods.
+        Assert.All(aSeries.Points, p => Assert.Equal(0m, p.BaselinePlanned));
+        Assert.All(bSeries.Points, p => Assert.Equal(0m, p.BaselinePlanned));
+    }
+
+    [Fact]
+    public async Task GetCashflowByLine_cross_tenant_project_is_NotFound()
+    {
+        var dbName    = Guid.NewGuid().ToString();
+        var orgA      = Guid.NewGuid();
+        var orgB      = Guid.NewGuid();
+        var userA     = Guid.NewGuid();
+        var userB     = Guid.NewGuid();
+        var projectB  = Guid.NewGuid();
+
+        var tenantA = new StubTenantContext { OrganisationId = orgA, UserId = userA };
+        var tenantB = new StubTenantContext { OrganisationId = orgB, UserId = userB };
+
+        var optionsB = new DbContextOptionsBuilder<CimsDbContext>()
+            .UseInMemoryDatabase(dbName).Options;
+        using (var seed = new CimsDbContext(optionsB, tenantB))
+        {
+            seed.Organisations.AddRange(
+                new Organisation { Id = orgA, Name = "A", Code = "TA" },
+                new Organisation { Id = orgB, Name = "B", Code = "TB" });
+            seed.Projects.Add(new Project
+            {
+                Id = projectB, Name = "B", Code = "PB",
+                AppointingPartyId = orgB, Currency = "GBP",
+            });
+            seed.SaveChanges();
+        }
+
+        var optionsA = new DbContextOptionsBuilder<CimsDbContext>()
+            .UseInMemoryDatabase(dbName).Options;
+        using var dbA = new CimsDbContext(optionsA, tenantA);
+        var svc = new CostService(dbA, new AuditService(dbA));
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            svc.GetCashflowByLineAsync(projectB));
+    }
+
     [Fact]
     public async Task GetCashflow_cross_tenant_project_is_NotFound()
     {

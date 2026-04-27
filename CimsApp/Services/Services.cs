@@ -772,6 +772,91 @@ public class CostService(CimsDbContext db, AuditService audit)
         return elapsed / total;
     }
 
+    /// <summary>Linear overlap of [periodStart, periodEnd] with the
+    /// schedule [scheduleStart, scheduleEnd], expressed as a fraction
+    /// of the schedule's total duration. Returns 0 when the line has
+    /// no schedule. Used to distribute a CBS line's Budget across
+    /// CostPeriods for the per-line cashflow breakdown (T-S1-11
+    /// wire-up).</summary>
+    private static decimal ScheduleOverlapFraction(
+        DateTime periodStart, DateTime periodEnd,
+        DateTime? scheduleStart, DateTime? scheduleEnd)
+    {
+        if (!scheduleStart.HasValue || !scheduleEnd.HasValue) return 0m;
+        if (scheduleEnd.Value <= scheduleStart.Value) return 0m;
+        var overlapStart = periodStart > scheduleStart.Value ? periodStart : scheduleStart.Value;
+        var overlapEnd   = periodEnd   < scheduleEnd.Value   ? periodEnd   : scheduleEnd.Value;
+        if (overlapEnd <= overlapStart) return 0m;
+        var total   = (decimal)(scheduleEnd.Value - scheduleStart.Value).TotalSeconds;
+        var overlap = (decimal)(overlapEnd - overlapStart).TotalSeconds;
+        return overlap / total;
+    }
+
+    /// <summary>
+    /// Per-CBS-line cashflow breakdown (T-S1-11 wire-up via B-017).
+    /// One series per CBS line, each carrying one point per CostPeriod.
+    ///
+    ///   BaselinePlanned(line, period) = Budget × overlapFraction(
+    ///     period.[Start, End], line.[ScheduledStart, ScheduledEnd])
+    ///   Actual(line, period)          = Σ ActualCost.Amount where
+    ///     CostBreakdownItemId == line.Id AND PeriodId == period.Id
+    ///
+    /// Lines with no schedule contribute zero baseline across all
+    /// periods (line not "supposed" to be spending at any specific
+    /// date). Lines with no Budget contribute zero too.
+    /// </summary>
+    public async Task<CashflowByLineDto> GetCashflowByLineAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var project = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var periods = await db.CostPeriods
+            .Where(p => p.ProjectId == projectId)
+            .OrderBy(p => p.StartDate).ThenBy(p => p.Id)
+            .ToListAsync(ct);
+
+        var lines = await db.CostBreakdownItems
+            .Where(c => c.ProjectId == projectId)
+            .OrderBy(c => c.Code)
+            .ToListAsync(ct);
+
+        // Group actuals by (line, period) so we can join in-memory.
+        var actualSums = await db.ActualCosts
+            .Where(a => a.ProjectId == projectId)
+            .GroupBy(a => new { a.CostBreakdownItemId, a.PeriodId })
+            .Select(g => new { g.Key.CostBreakdownItemId, g.Key.PeriodId, Total = g.Sum(a => a.Amount) })
+            .ToListAsync(ct);
+        var actualByLinePeriod = actualSums.ToDictionary(
+            x => (x.CostBreakdownItemId, x.PeriodId), x => x.Total);
+
+        var series = new List<CashflowLineSeries>(lines.Count);
+        foreach (var line in lines)
+        {
+            var budget = line.Budget ?? 0m;
+            var points = new List<CashflowLinePeriodPoint>(periods.Count);
+            foreach (var p in periods)
+            {
+                var fraction = ScheduleOverlapFraction(
+                    p.StartDate, p.EndDate, line.ScheduledStart, line.ScheduledEnd);
+                var planned  = budget * fraction;
+                var actual   = actualByLinePeriod.TryGetValue((line.Id, p.Id), out var a) ? a : 0m;
+                points.Add(new CashflowLinePeriodPoint(
+                    PeriodId: p.Id, Label: p.Label,
+                    StartDate: p.StartDate, EndDate: p.EndDate,
+                    BaselinePlanned: planned, Actual: actual));
+            }
+            series.Add(new CashflowLineSeries(
+                ItemId: line.Id, Code: line.Code, Name: line.Name,
+                Budget: line.Budget,
+                ScheduledStart: line.ScheduledStart,
+                ScheduledEnd:   line.ScheduledEnd,
+                Points: points));
+        }
+
+        return new CashflowByLineDto(project.Currency, series);
+    }
+
     /// <summary>
     /// Project-level cashflow S-curve (T-S1-11). One point per
     /// CostPeriod, ordered by StartDate. For each point:
