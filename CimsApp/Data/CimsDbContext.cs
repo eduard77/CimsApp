@@ -189,6 +189,11 @@ public class CimsDbContext(
             // explicitly.
             e.HasOne(c => c.Parent).WithMany(c => c.Children)
              .HasForeignKey(c => c.ParentId).OnDelete(DeleteBehavior.NoAction);
+            // T-S1-04. decimal(18,2) per kickoff spec; Project.BudgetValue
+            // uses (15,2) but per-line CBS budgets aggregate independently
+            // and 18 digits of precision keeps headroom for very large
+            // works.
+            e.Property(c => c.Budget).HasPrecision(18, 2);
         });
 
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────

@@ -325,8 +325,6 @@ public class ProjectTemplate
 /// via self-referencing ParentId — a project's CBS is a tree of these
 /// rows. Tenant-scoped indirectly through Project.AppointingPartyId
 /// (query filter in CimsDbContext). Per PAFM-SD Appendix F.2 (S1 DoD).
-/// Budget at line level lands in T-S1-04 (separate property/entity);
-/// this row carries identity and structure only.
 /// </summary>
 public class CostBreakdownItem
 {
@@ -347,6 +345,11 @@ public class CostBreakdownItem
 
     /// <summary>Sort order among siblings of the same Parent.</summary>
     public int SortOrder { get; set; }
+
+    /// <summary>Planned budget at this CBS line (T-S1-04). Currency follows
+    /// Project.Currency; precision configured as decimal(18,2) in
+    /// CimsDbContext. Null = not yet budgeted.</summary>
+    public decimal? Budget { get; set; }
 
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
