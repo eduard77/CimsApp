@@ -156,4 +156,224 @@ public class CimsDbContextIsolationTests
         Assert.Equal(projectA, docs[0].ProjectId);
         Assert.Equal("PA-ORG-RP-0001", docs[0].DocumentNumber);
     }
+
+    // ── T-S1-13 sweep: per-entity runtime isolation for S1 cost-domain
+    //    additions. Each test mirrors the documents pattern above —
+    //    seed one row per tenant, open as tenant A, expect the
+    //    A-side row only. The CostBreakdownItem case is already
+    //    covered by CostBreakdownItemFilterTests; the five S1 entities
+    //    below complete the sweep.
+
+    [Fact]
+    public void Tenant_A_sees_only_its_own_commitments()
+    {
+        var (options, userA, userB, projectA, projectB) = SeedTwoTenants(Guid.NewGuid().ToString());
+        var seedTenant = new StubTenantContext
+        {
+            OrganisationId = OrgA, UserId = userA, GlobalRole = UserRole.SuperAdmin,
+        };
+        Guid lineA, lineB;
+        using (var seed = new CimsDbContext(options, seedTenant))
+        {
+            var lA = new CostBreakdownItem { ProjectId = projectA, Code = "1", Name = "A line" };
+            var lB = new CostBreakdownItem { ProjectId = projectB, Code = "1", Name = "B line" };
+            seed.CostBreakdownItems.AddRange(lA, lB);
+            seed.SaveChanges();
+            lineA = lA.Id; lineB = lB.Id;
+
+            seed.Commitments.AddRange(
+                new Commitment
+                {
+                    ProjectId = projectA, CostBreakdownItemId = lineA,
+                    Type = CommitmentType.PO, Reference = "PO-A-1",
+                    Counterparty = "Acme A", Amount = 100m,
+                },
+                new Commitment
+                {
+                    ProjectId = projectB, CostBreakdownItemId = lineB,
+                    Type = CommitmentType.Subcontract, Reference = "SC-B-1",
+                    Counterparty = "Beta B", Amount = 200m,
+                });
+            seed.SaveChanges();
+        }
+
+        using var db = OpenAs(options, OrgA, userA);
+        var rows = db.Commitments.ToList();
+
+        Assert.Single(rows);
+        Assert.Equal(projectA, rows[0].ProjectId);
+        Assert.Equal("PO-A-1", rows[0].Reference);
+    }
+
+    [Fact]
+    public void Tenant_A_sees_only_its_own_cost_periods()
+    {
+        var (options, userA, _, projectA, projectB) = SeedTwoTenants(Guid.NewGuid().ToString());
+        var seedTenant = new StubTenantContext
+        {
+            OrganisationId = OrgA, UserId = userA, GlobalRole = UserRole.SuperAdmin,
+        };
+        using (var seed = new CimsDbContext(options, seedTenant))
+        {
+            seed.CostPeriods.AddRange(
+                new CostPeriod
+                {
+                    ProjectId = projectA, Label = "A April",
+                    StartDate = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                    EndDate   = new DateTime(2026, 4, 30, 0, 0, 0, DateTimeKind.Utc),
+                },
+                new CostPeriod
+                {
+                    ProjectId = projectB, Label = "B April",
+                    StartDate = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                    EndDate   = new DateTime(2026, 4, 30, 0, 0, 0, DateTimeKind.Utc),
+                });
+            seed.SaveChanges();
+        }
+
+        using var db = OpenAs(options, OrgA, userA);
+        var rows = db.CostPeriods.ToList();
+
+        Assert.Single(rows);
+        Assert.Equal(projectA, rows[0].ProjectId);
+        Assert.Equal("A April", rows[0].Label);
+    }
+
+    [Fact]
+    public void Tenant_A_sees_only_its_own_actual_costs()
+    {
+        var (options, userA, _, projectA, projectB) = SeedTwoTenants(Guid.NewGuid().ToString());
+        var seedTenant = new StubTenantContext
+        {
+            OrganisationId = OrgA, UserId = userA, GlobalRole = UserRole.SuperAdmin,
+        };
+        using (var seed = new CimsDbContext(options, seedTenant))
+        {
+            // Both an ActualCost write and the supporting CBS line +
+            // CostPeriod must be seeded under the right project so the
+            // FK chain is honest.
+            var lineA = new CostBreakdownItem { ProjectId = projectA, Code = "1", Name = "A line" };
+            var lineB = new CostBreakdownItem { ProjectId = projectB, Code = "1", Name = "B line" };
+            var perA  = new CostPeriod
+            {
+                ProjectId = projectA, Label = "A Apr",
+                StartDate = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                EndDate   = new DateTime(2026, 4, 30, 0, 0, 0, DateTimeKind.Utc),
+            };
+            var perB = new CostPeriod
+            {
+                ProjectId = projectB, Label = "B Apr",
+                StartDate = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                EndDate   = new DateTime(2026, 4, 30, 0, 0, 0, DateTimeKind.Utc),
+            };
+            seed.CostBreakdownItems.AddRange(lineA, lineB);
+            seed.CostPeriods.AddRange(perA, perB);
+            seed.SaveChanges();
+
+            seed.ActualCosts.AddRange(
+                new ActualCost
+                {
+                    ProjectId = projectA, CostBreakdownItemId = lineA.Id,
+                    PeriodId  = perA.Id, Amount = 50m, Reference = "INV-A-1",
+                },
+                new ActualCost
+                {
+                    ProjectId = projectB, CostBreakdownItemId = lineB.Id,
+                    PeriodId  = perB.Id, Amount = 60m, Reference = "INV-B-1",
+                });
+            seed.SaveChanges();
+        }
+
+        using var db = OpenAs(options, OrgA, userA);
+        var rows = db.ActualCosts.ToList();
+
+        Assert.Single(rows);
+        Assert.Equal(projectA, rows[0].ProjectId);
+        Assert.Equal("INV-A-1", rows[0].Reference);
+    }
+
+    [Fact]
+    public void Tenant_A_sees_only_its_own_variations()
+    {
+        var (options, userA, userB, projectA, projectB) = SeedTwoTenants(Guid.NewGuid().ToString());
+        var seedTenant = new StubTenantContext
+        {
+            OrganisationId = OrgA, UserId = userA, GlobalRole = UserRole.SuperAdmin,
+        };
+        using (var seed = new CimsDbContext(options, seedTenant))
+        {
+            seed.Variations.AddRange(
+                new Variation
+                {
+                    ProjectId = projectA, VariationNumber = "VAR-0001",
+                    Title = "A change", State = VariationState.Raised,
+                    RaisedById = userA,
+                },
+                new Variation
+                {
+                    ProjectId = projectB, VariationNumber = "VAR-0001",
+                    Title = "B change", State = VariationState.Raised,
+                    RaisedById = userB,
+                });
+            seed.SaveChanges();
+        }
+
+        using var db = OpenAs(options, OrgA, userA);
+        var rows = db.Variations.ToList();
+
+        Assert.Single(rows);
+        Assert.Equal(projectA, rows[0].ProjectId);
+        Assert.Equal("A change", rows[0].Title);
+    }
+
+    [Fact]
+    public void Tenant_A_sees_only_its_own_payment_certificates()
+    {
+        var (options, userA, _, projectA, projectB) = SeedTwoTenants(Guid.NewGuid().ToString());
+        var seedTenant = new StubTenantContext
+        {
+            OrganisationId = OrgA, UserId = userA, GlobalRole = UserRole.SuperAdmin,
+        };
+        using (var seed = new CimsDbContext(options, seedTenant))
+        {
+            var perA = new CostPeriod
+            {
+                ProjectId = projectA, Label = "A Apr",
+                StartDate = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                EndDate   = new DateTime(2026, 4, 30, 0, 0, 0, DateTimeKind.Utc),
+            };
+            var perB = new CostPeriod
+            {
+                ProjectId = projectB, Label = "B Apr",
+                StartDate = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                EndDate   = new DateTime(2026, 4, 30, 0, 0, 0, DateTimeKind.Utc),
+            };
+            seed.CostPeriods.AddRange(perA, perB);
+            seed.SaveChanges();
+
+            seed.PaymentCertificates.AddRange(
+                new PaymentCertificate
+                {
+                    ProjectId = projectA, PeriodId = perA.Id,
+                    CertificateNumber = "PC-0001",
+                    State = PaymentCertificateState.Draft,
+                    CumulativeValuation = 100m, RetentionPercent = 3m,
+                },
+                new PaymentCertificate
+                {
+                    ProjectId = projectB, PeriodId = perB.Id,
+                    CertificateNumber = "PC-0001",
+                    State = PaymentCertificateState.Draft,
+                    CumulativeValuation = 200m, RetentionPercent = 3m,
+                });
+            seed.SaveChanges();
+        }
+
+        using var db = OpenAs(options, OrgA, userA);
+        var rows = db.PaymentCertificates.ToList();
+
+        Assert.Single(rows);
+        Assert.Equal(projectA, rows[0].ProjectId);
+        Assert.Equal(100m, rows[0].CumulativeValuation);
+    }
 }
