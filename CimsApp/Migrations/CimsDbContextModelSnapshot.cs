@@ -77,6 +77,48 @@ namespace CimsApp.Migrations
                     b.ToTable("ActionItems");
                 });
 
+            modelBuilder.Entity("CimsApp.Models.ActualCost", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid>("CostBreakdownItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("PeriodId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CostBreakdownItemId");
+
+                    b.HasIndex("PeriodId");
+
+                    b.HasIndex("ProjectId", "CostBreakdownItemId");
+
+                    b.HasIndex("ProjectId", "PeriodId");
+
+                    b.ToTable("ActualCosts");
+                });
+
             modelBuilder.Entity("CimsApp.Models.AuditLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -286,6 +328,48 @@ namespace CimsApp.Migrations
                     b.HasIndex("ProjectId", "ParentId");
 
                     b.ToTable("CostBreakdownItems");
+                });
+
+            modelBuilder.Entity("CimsApp.Models.CostPeriod", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ClosedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ClosedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("EndDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsClosed")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("StartDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "StartDate");
+
+                    b.ToTable("CostPeriods");
                 });
 
             modelBuilder.Entity("CimsApp.Models.Document", b =>
@@ -987,6 +1071,33 @@ namespace CimsApp.Migrations
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("CimsApp.Models.ActualCost", b =>
+                {
+                    b.HasOne("CimsApp.Models.CostBreakdownItem", "CostBreakdownItem")
+                        .WithMany()
+                        .HasForeignKey("CostBreakdownItemId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("CimsApp.Models.CostPeriod", "Period")
+                        .WithMany("Actuals")
+                        .HasForeignKey("PeriodId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("CimsApp.Models.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("CostBreakdownItem");
+
+                    b.Navigation("Period");
+
+                    b.Navigation("Project");
+                });
+
             modelBuilder.Entity("CimsApp.Models.AuditLog", b =>
                 {
                     b.HasOne("CimsApp.Models.Document", "Document")
@@ -1056,6 +1167,17 @@ namespace CimsApp.Migrations
                         .IsRequired();
 
                     b.Navigation("Parent");
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("CimsApp.Models.CostPeriod", b =>
+                {
+                    b.HasOne("CimsApp.Models.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
 
                     b.Navigation("Project");
                 });
@@ -1261,6 +1383,11 @@ namespace CimsApp.Migrations
             modelBuilder.Entity("CimsApp.Models.CostBreakdownItem", b =>
                 {
                     b.Navigation("Children");
+                });
+
+            modelBuilder.Entity("CimsApp.Models.CostPeriod", b =>
+                {
+                    b.Navigation("Actuals");
                 });
 
             modelBuilder.Entity("CimsApp.Models.Document", b =>

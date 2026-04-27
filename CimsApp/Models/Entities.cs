@@ -357,6 +357,64 @@ public class CostBreakdownItem
 }
 
 /// <summary>
+/// A reporting / accounting period for a project (T-S1-06). Typically
+/// monthly but the entity does not enforce a calendar — pick whatever
+/// `[StartDate, EndDate]` window the project's commercial cycle uses.
+/// Once closed, no more ActualCost rows can be recorded against it
+/// (the close is the integrity boundary; corrective actuals go to a
+/// later open period). Re-open is intentionally not supported in v1.0.
+/// </summary>
+public class CostPeriod
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    [Required, MaxLength(50)] public string Label { get; set; } = "";
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+
+    public bool IsClosed { get; set; }
+    public DateTime? ClosedAt { get; set; }
+    public Guid? ClosedById { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<ActualCost> Actuals { get; set; } = [];
+}
+
+/// <summary>
+/// An actual cost recorded against a CBS line in a specific
+/// CostPeriod (T-S1-06). Currency follows Project.Currency. Once a
+/// CostPeriod is closed, no more ActualCost rows targeting it can be
+/// inserted (service-layer guard, not a DB constraint). Reference is
+/// optional and typically holds an invoice number or cost-system
+/// reference for traceability.
+/// </summary>
+public class ActualCost
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid CostBreakdownItemId { get; set; }
+    public CostBreakdownItem CostBreakdownItem { get; set; } = null!;
+
+    public Guid PeriodId { get; set; }
+    public CostPeriod Period { get; set; } = null!;
+
+    public decimal Amount { get; set; }
+
+    [MaxLength(100)] public string? Reference { get; set; }
+    public string? Description { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
 /// A monetary commitment (PO or Subcontract) issued against a CBS line
 /// (T-S1-05). Tenant-scoped indirectly through Project.AppointingPartyId
 /// like every other Cost-domain entity. Amount uses decimal(18,2);

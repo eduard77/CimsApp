@@ -40,6 +40,8 @@ public class CimsDbContext(
     public DbSet<Invitation>         Invitations         => Set<Invitation>();
     public DbSet<CostBreakdownItem>  CostBreakdownItems  => Set<CostBreakdownItem>();
     public DbSet<Commitment>         Commitments         => Set<Commitment>();
+    public DbSet<CostPeriod>         CostPeriods         => Set<CostPeriod>();
+    public DbSet<ActualCost>         ActualCosts         => Set<ActualCost>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -210,6 +212,29 @@ public class CimsDbContext(
              .HasForeignKey(c => c.CostBreakdownItemId).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<CostPeriod>(e =>
+        {
+            e.HasIndex(p => new { p.ProjectId, p.StartDate });
+            e.HasOne(p => p.Project).WithMany()
+             .HasForeignKey(p => p.ProjectId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<ActualCost>(e =>
+        {
+            // Two indices for the two natural rollup directions: per
+            // CBS line (the standard committed/actual rollup) and per
+            // period (cashflow / reporting at T-S1-11).
+            e.HasIndex(a => new { a.ProjectId, a.CostBreakdownItemId });
+            e.HasIndex(a => new { a.ProjectId, a.PeriodId });
+            e.Property(a => a.Amount).HasPrecision(18, 2);
+            e.HasOne(a => a.Project).WithMany()
+             .HasForeignKey(a => a.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(a => a.CostBreakdownItem).WithMany()
+             .HasForeignKey(a => a.CostBreakdownItemId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(a => a.Period).WithMany(p => p.Actuals)
+             .HasForeignKey(a => a.PeriodId).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -237,6 +262,8 @@ public class CimsDbContext(
         m.Entity<Invitation>().HasQueryFilter(i => i.OrganisationId == _tenant.OrganisationId);
         m.Entity<CostBreakdownItem>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<Commitment>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<CostPeriod>().HasQueryFilter(p => p.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<ActualCost>().HasQueryFilter(a => a.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
