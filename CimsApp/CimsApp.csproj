@@ -22,7 +22,7 @@
     </PackageReference>
 
     <!-- Blazor UI -->
-    <PackageReference Include="MudBlazor" Version="6.20.0" />
+    <PackageReference Include="MudBlazor" Version="9.4.0" />
 
     <!-- Swagger -->
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />

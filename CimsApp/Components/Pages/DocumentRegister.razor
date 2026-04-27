@@ -201,7 +201,8 @@ else
         _selectedSuitability = Iso19650Codes.SuitabilityCodes.First(s => s.Code == "S0");
     }
 
-    Task<IEnumerable<CodeItem>> SearchTypes(string value)
+    // MudBlazor 8+ added a CancellationToken to MudAutocomplete.SearchFunc<T>.
+    Task<IEnumerable<CodeItem>> SearchTypes(string value, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(value))
             return Task.FromResult(Iso19650Codes.DocumentTypes.AsEnumerable());

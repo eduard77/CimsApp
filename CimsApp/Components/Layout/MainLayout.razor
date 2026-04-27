@@ -79,19 +79,22 @@ else
 @code {
     private readonly MudTheme _theme = new()
     {
-        Palette = new Palette
+        // MudBlazor 7+ split Palette into PaletteLight / PaletteDark.
+        // CIMS is light-themed for v1.0; PaletteDark left at default.
+        PaletteLight = new PaletteLight
         {
-            Primary       = "#1B4F8A",
-            Secondary     = "#F5A623",
-            Background    = "#F4F6F9",
-            Surface       = "#FFFFFF",
+            Primary          = "#1B4F8A",
+            Secondary        = "#F5A623",
+            Background       = "#F4F6F9",
+            Surface          = "#FFFFFF",
             AppbarBackground = "#1B2B4B",
-            TextPrimary   = "#1A1F2E",
-            TextSecondary = "#64748B",
+            TextPrimary      = "#1A1F2E",
+            TextSecondary    = "#64748B",
         },
         Typography = new Typography
         {
-            Default = new Default { FontFamily = new[] { "Inter", "Segoe UI", "sans-serif" } }
+            // MudBlazor 7+ renamed `Default` to `DefaultTypography`.
+            Default = new DefaultTypography { FontFamily = new[] { "Inter", "Segoe UI", "sans-serif" } }
         }
     };
 
