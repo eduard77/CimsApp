@@ -491,6 +491,10 @@ public class CostPeriod
     public DateTime? ClosedAt { get; set; }
     public Guid? ClosedById { get; set; }
 
+    /// <summary>Planned cashflow for this period — manual baseline entry
+    /// (T-S1-11). Decimal(18,2). Null = no baseline set yet.</summary>
+    public decimal? PlannedCashflow { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 

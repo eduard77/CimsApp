@@ -217,6 +217,7 @@ public class CimsDbContext(
         m.Entity<CostPeriod>(e =>
         {
             e.HasIndex(p => new { p.ProjectId, p.StartDate });
+            e.Property(p => p.PlannedCashflow).HasPrecision(18, 2);
             e.HasOne(p => p.Project).WithMany()
              .HasForeignKey(p => p.ProjectId).OnDelete(DeleteBehavior.NoAction);
         });
