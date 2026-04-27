@@ -343,6 +343,191 @@ public class CostServiceTests
             svc.SetLineBudgetAsync(projectA, lineOnB, 100m, userId));
     }
 
+    // ── B-017 / T-S1-07 EVM service integration ────────────────────────────
+
+    [Fact]
+    public async Task GetEvmSnapshot_empty_project_returns_zeros()
+    {
+        var (options, tenant, _, _, projectId) = BuildFixture();
+
+        using var db = new CimsDbContext(options, tenant);
+        var svc = new CostService(db, new AuditService(db));
+        var snap = await svc.GetEvmSnapshotAsync(projectId, DateTime.UtcNow);
+
+        Assert.Equal(0m, snap.Bac);
+        Assert.Equal(0m, snap.Pv);
+        Assert.Equal(0m, snap.Ev);
+        Assert.Equal(0m, snap.Ac);
+        // Both CPI and SPI are null (zero divisor).
+        Assert.Null(snap.Cpi);
+        Assert.Null(snap.Spi);
+    }
+
+    [Fact]
+    public async Task GetEvmSnapshot_aggregates_BAC_EV_PV_and_AC_from_lines_and_actuals()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+
+        // Two-line fixture, 90-day schedule each (Apr 1 → Jun 30).
+        // Line 1: Budget 100, 50% complete.
+        // Line 2: Budget 200, 25% complete.
+        // Data date Apr 30: 30 / 90 = 1/3 of schedule elapsed on each.
+        // Expected:
+        //   BAC = 100 + 200 = 300
+        //   EV  = 100×0.5 + 200×0.25 = 50 + 50 = 100
+        //   PV  = 100×(1/3) + 200×(1/3) = 100  (≈ 33.333... + 66.666...)
+        //   AC  = 80 (one actual seeded)
+        var apr1  = new DateTime(2026, 4, 1,  0, 0, 0, DateTimeKind.Utc);
+        var jun30 = new DateTime(2026, 6, 30, 0, 0, 0, DateTimeKind.Utc);
+        var apr30 = new DateTime(2026, 4, 30, 0, 0, 0, DateTimeKind.Utc);
+        // 29 days from Apr 1 → Apr 30 (start of day to start of day).
+        // 90 days from Apr 1 → Jun 30. Fraction = 29 / 90.
+        var fraction = 29m / 90m;
+
+        Guid line1Id, line2Id, periodId;
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            var l1 = new CostBreakdownItem
+            {
+                ProjectId = projectId, Code = "1", Name = "Line 1",
+                Budget = 100m, PercentComplete = 0.5m,
+                ScheduledStart = apr1, ScheduledEnd = jun30,
+            };
+            var l2 = new CostBreakdownItem
+            {
+                ProjectId = projectId, Code = "2", Name = "Line 2",
+                Budget = 200m, PercentComplete = 0.25m,
+                ScheduledStart = apr1, ScheduledEnd = jun30,
+            };
+            var period = new CostPeriod
+            {
+                ProjectId = projectId, Label = "Apr",
+                StartDate = apr1, EndDate = jun30,
+            };
+            seed.CostBreakdownItems.AddRange(l1, l2);
+            seed.CostPeriods.Add(period);
+            seed.SaveChanges();
+            line1Id = l1.Id; line2Id = l2.Id; periodId = period.Id;
+        }
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            await svc.RecordActualAsync(projectId,
+                new RecordActualRequest(line1Id, periodId, 80m, null, null), userId);
+        }
+
+        Evm.EvmSnapshot snap;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            snap = await svc.GetEvmSnapshotAsync(projectId, apr30);
+        }
+
+        Assert.Equal(300m, snap.Bac);
+        Assert.Equal(100m, snap.Ev);            // 50 + 50
+        Assert.Equal(80m,  snap.Ac);
+        var expectedPv = 100m * fraction + 200m * fraction;
+        var pvDiff = snap.Pv - expectedPv;
+        if (pvDiff < 0m) pvDiff = -pvDiff;
+        Assert.True(pvDiff < 0.0001m, $"PV mismatch: expected {expectedPv}, got {snap.Pv}");
+        Assert.NotNull(snap.Cpi);
+        Assert.NotNull(snap.Spi);
+    }
+
+    [Fact]
+    public async Task GetEvmSnapshot_line_with_no_schedule_contributes_zero_PV()
+    {
+        var (options, tenant, _, _, projectId) = BuildFixture();
+
+        // Line has Budget + PercentComplete but no schedule — should
+        // contribute to BAC and EV but not to PV.
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            seed.CostBreakdownItems.Add(new CostBreakdownItem
+            {
+                ProjectId = projectId, Code = "1", Name = "L1",
+                Budget = 1000m, PercentComplete = 0.4m,
+                ScheduledStart = null, ScheduledEnd = null,
+            });
+            seed.SaveChanges();
+        }
+
+        using var db = new CimsDbContext(options, tenant);
+        var svc = new CostService(db, new AuditService(db));
+        var snap = await svc.GetEvmSnapshotAsync(projectId,
+            new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(1000m, snap.Bac);
+        Assert.Equal(400m,  snap.Ev);
+        Assert.Equal(0m,    snap.Pv);    // No schedule → no PV contribution.
+    }
+
+    [Fact]
+    public async Task GetEvmSnapshot_data_date_before_start_yields_zero_PV_after_end_yields_full()
+    {
+        var (options, tenant, _, _, projectId) = BuildFixture();
+
+        var start = new DateTime(2026, 4, 1,  0, 0, 0, DateTimeKind.Utc);
+        var end   = new DateTime(2026, 6, 30, 0, 0, 0, DateTimeKind.Utc);
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            seed.CostBreakdownItems.Add(new CostBreakdownItem
+            {
+                ProjectId = projectId, Code = "1", Name = "L1",
+                Budget = 500m, ScheduledStart = start, ScheduledEnd = end,
+            });
+            seed.SaveChanges();
+        }
+
+        using var db = new CimsDbContext(options, tenant);
+        var svc = new CostService(db, new AuditService(db));
+
+        var beforeStart = await svc.GetEvmSnapshotAsync(projectId,
+            new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        Assert.Equal(0m, beforeStart.Pv);
+
+        var afterEnd = await svc.GetEvmSnapshotAsync(projectId,
+            new DateTime(2026, 12, 31, 0, 0, 0, DateTimeKind.Utc));
+        Assert.Equal(500m, afterEnd.Pv);    // Full Budget — schedule has fully elapsed.
+    }
+
+    [Fact]
+    public async Task GetEvmSnapshot_cross_tenant_project_is_NotFound()
+    {
+        var dbName    = Guid.NewGuid().ToString();
+        var orgA      = Guid.NewGuid();
+        var orgB      = Guid.NewGuid();
+        var userA     = Guid.NewGuid();
+        var userB     = Guid.NewGuid();
+        var projectB  = Guid.NewGuid();
+
+        var tenantA = new StubTenantContext { OrganisationId = orgA, UserId = userA };
+        var tenantB = new StubTenantContext { OrganisationId = orgB, UserId = userB };
+
+        var optionsB = new DbContextOptionsBuilder<CimsDbContext>()
+            .UseInMemoryDatabase(dbName).Options;
+        using (var seed = new CimsDbContext(optionsB, tenantB))
+        {
+            seed.Organisations.AddRange(
+                new Organisation { Id = orgA, Name = "A", Code = "TA" },
+                new Organisation { Id = orgB, Name = "B", Code = "TB" });
+            seed.Projects.Add(new Project
+            {
+                Id = projectB, Name = "B", Code = "PB",
+                AppointingPartyId = orgB, Currency = "GBP",
+            });
+            seed.SaveChanges();
+        }
+
+        var optionsA = new DbContextOptionsBuilder<CimsDbContext>()
+            .UseInMemoryDatabase(dbName).Options;
+        using var dbA = new CimsDbContext(optionsA, tenantA);
+        var svc = new CostService(dbA, new AuditService(dbA));
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            svc.GetEvmSnapshotAsync(projectB,
+                new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc)));
+    }
+
     // ── B-017 SetLineScheduleAsync + SetLineProgressAsync ───────────────────
 
     [Fact]

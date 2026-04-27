@@ -704,6 +704,75 @@ public class CostService(CimsDbContext db, AuditService audit)
     }
 
     /// <summary>
+    /// Project-level EVM snapshot at a given data date — wires the
+    /// B-017 schedule + progress primitive into the pure math in
+    /// <see cref="Evm.Calculate"/>. Closes the EVM service-integration
+    /// half of T-S1-07.
+    ///
+    /// Per CBS line, given Budget, PercentComplete, ScheduledStart,
+    /// ScheduledEnd, the snapshot contributions are:
+    ///
+    ///   BAC contribution = Budget ?? 0
+    ///   EV  contribution = (Budget ?? 0) × (PercentComplete ?? 0)
+    ///   PV  contribution = (Budget ?? 0) × scheduleElapsed(dataDate,
+    ///                                                       Start,
+    ///                                                       End)
+    ///
+    /// where `scheduleElapsed` returns 0 when either schedule end is
+    /// null (no plan = no PV contribution), 0 before Start, 1 at or
+    /// after End, and a linear fraction in between. AC is summed
+    /// across every <see cref="ActualCost"/> on the project, ignoring
+    /// the data date — actuals don't have a "should-have-happened-by"
+    /// gate; what's been spent is what's been spent.
+    /// </summary>
+    public async Task<Evm.EvmSnapshot> GetEvmSnapshotAsync(
+        Guid projectId, DateTime dataDate, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var lines = await db.CostBreakdownItems
+            .Where(c => c.ProjectId == projectId)
+            .Select(c => new
+            {
+                c.Budget,
+                c.PercentComplete,
+                c.ScheduledStart,
+                c.ScheduledEnd,
+            })
+            .ToListAsync(ct);
+
+        decimal bac = 0m, ev = 0m, pv = 0m;
+        foreach (var l in lines)
+        {
+            var budget = l.Budget ?? 0m;
+            bac += budget;
+            ev  += budget * (l.PercentComplete ?? 0m);
+            pv  += budget * ScheduleFraction(dataDate, l.ScheduledStart, l.ScheduledEnd);
+        }
+
+        var ac = await db.ActualCosts
+            .Where(a => a.ProjectId == projectId)
+            .SumAsync(a => (decimal?)a.Amount, ct) ?? 0m;
+
+        return Evm.Calculate(pv: pv, ev: ev, ac: ac, bac: bac);
+    }
+
+    /// <summary>Linear schedule-elapsed fraction in [0, 1]. Returns 0
+    /// when either bound is unset — a line with no schedule contributes
+    /// no PV (it isn't "supposed" to be earning value at any specific
+    /// date).</summary>
+    private static decimal ScheduleFraction(DateTime dataDate, DateTime? start, DateTime? end)
+    {
+        if (!start.HasValue || !end.HasValue) return 0m;
+        if (dataDate <= start.Value) return 0m;
+        if (dataDate >= end.Value) return 1m;
+        var total   = (decimal)(end.Value - start.Value).TotalSeconds;
+        var elapsed = (decimal)(dataDate - start.Value).TotalSeconds;
+        return elapsed / total;
+    }
+
+    /// <summary>
     /// Project-level cashflow S-curve (T-S1-11). One point per
     /// CostPeriod, ordered by StartDate. For each point:
     ///   BaselinePlanned     = the period's manual PlannedCashflow (nullable).

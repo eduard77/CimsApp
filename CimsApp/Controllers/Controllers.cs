@@ -299,6 +299,24 @@ public class CashflowController(CostService svc, CimsDbContext db) : CimsControl
     }
 }
 
+[Route("api/v1/projects/{projectId:guid}/evm")]
+public class EvmController(CostService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> Get(
+        Guid projectId,
+        [FromQuery] DateTime? dataDate,
+        CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var snapshot = await svc.GetEvmSnapshotAsync(
+            projectId,
+            dataDate ?? DateTime.UtcNow,
+            ct);
+        return Ok(new { success = true, data = snapshot });
+    }
+}
+
 [Route("api/v1/projects/{projectId:guid}/actuals")]
 public class ActualsController(CostService svc, CimsDbContext db) : CimsControllerBase
 {
