@@ -343,6 +343,145 @@ public class CostServiceTests
             svc.SetLineBudgetAsync(projectA, lineOnB, 100m, userId));
     }
 
+    // ── B-017 SetLineScheduleAsync + SetLineProgressAsync ───────────────────
+
+    [Fact]
+    public async Task SetLineSchedule_writes_dates_and_emits_audit()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var lineId = SeedSingleLine(options, tenant, projectId);
+
+        var start = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc);
+        var end   = new DateTime(2026, 6, 30, 0, 0, 0, DateTimeKind.Utc);
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            await svc.SetLineScheduleAsync(projectId, lineId,
+                new SetLineScheduleRequest(start, end), userId);
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var line = verify.CostBreakdownItems.Single(c => c.Id == lineId);
+        Assert.Equal(start, line.ScheduledStart);
+        Assert.Equal(end,   line.ScheduledEnd);
+
+        var audit = Assert.Single(verify.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.Action == "cbs.line_schedule_set"));
+        Assert.Equal("CostBreakdownItem", audit.Entity);
+        Assert.Contains("\"previousStart\":null", audit.Detail);
+        Assert.Contains("\"previousEnd\":null", audit.Detail);
+    }
+
+    [Fact]
+    public async Task SetLineSchedule_start_must_be_before_end_when_both_set()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var lineId = SeedSingleLine(options, tenant, projectId);
+
+        var start = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+        var end   = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc);
+        using var db = new CimsDbContext(options, tenant);
+        var svc = new CostService(db, new AuditService(db));
+        var ex = await Assert.ThrowsAsync<ValidationException>(() =>
+            svc.SetLineScheduleAsync(projectId, lineId,
+                new SetLineScheduleRequest(start, end), userId));
+        Assert.Contains("ScheduledStart must be before ScheduledEnd", ex.Errors[0]);
+    }
+
+    [Fact]
+    public async Task SetLineSchedule_one_sided_is_allowed()
+    {
+        // Setting only Start (or only End) is allowed — the assessor
+        // may know one bound before the other firms up.
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var lineId = SeedSingleLine(options, tenant, projectId);
+
+        using var db = new CimsDbContext(options, tenant);
+        var svc = new CostService(db, new AuditService(db));
+        await svc.SetLineScheduleAsync(projectId, lineId,
+            new SetLineScheduleRequest(new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc), null),
+            userId);
+        await svc.SetLineScheduleAsync(projectId, lineId,
+            new SetLineScheduleRequest(null, new DateTime(2026, 6, 30, 0, 0, 0, DateTimeKind.Utc)),
+            userId);
+    }
+
+    [Fact]
+    public async Task SetLineProgress_writes_value_and_emits_audit()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var lineId = SeedSingleLine(options, tenant, projectId);
+
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new CostService(db, new AuditService(db));
+            await svc.SetLineProgressAsync(projectId, lineId,
+                new SetLineProgressRequest(0.25m), userId);
+            await svc.SetLineProgressAsync(projectId, lineId,
+                new SetLineProgressRequest(0.6m), userId);
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        Assert.Equal(0.6m, verify.CostBreakdownItems.Single(c => c.Id == lineId).PercentComplete);
+
+        var audits = verify.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.Action == "cbs.line_progress_set")
+            .OrderBy(a => a.CreatedAt).ToList();
+        Assert.Equal(2, audits.Count);
+        Assert.Contains("\"previous\":null",   audits[0].Detail);
+        Assert.Contains("\"current\":0.25",    audits[0].Detail);
+        Assert.Contains("\"previous\":0.25",   audits[1].Detail);
+        Assert.Contains("\"current\":0.6",     audits[1].Detail);
+    }
+
+    [Fact]
+    public async Task SetLineProgress_value_outside_zero_to_one_is_rejected()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var lineId = SeedSingleLine(options, tenant, projectId);
+
+        using var db = new CimsDbContext(options, tenant);
+        var svc = new CostService(db, new AuditService(db));
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            svc.SetLineProgressAsync(projectId, lineId,
+                new SetLineProgressRequest(-0.1m), userId));
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            svc.SetLineProgressAsync(projectId, lineId,
+                new SetLineProgressRequest(1.5m), userId));
+    }
+
+    [Fact]
+    public async Task SetLineSchedule_line_in_wrong_project_is_NotFound()
+    {
+        var (options, tenant, orgId, userId, projectA) = BuildFixture();
+        var projectB = Guid.NewGuid();
+        Guid lineOnB;
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            seed.Projects.Add(new Project
+            {
+                Id = projectB, Name = "B", Code = "PR2",
+                AppointingPartyId = orgId, Currency = "GBP",
+            });
+            var l = new CostBreakdownItem { ProjectId = projectB, Code = "1", Name = "B" };
+            seed.CostBreakdownItems.Add(l);
+            seed.SaveChanges();
+            lineOnB = l.Id;
+        }
+
+        using var db = new CimsDbContext(options, tenant);
+        var svc = new CostService(db, new AuditService(db));
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            svc.SetLineScheduleAsync(projectA, lineOnB,
+                new SetLineScheduleRequest(
+                    new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                    new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc)),
+                userId));
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            svc.SetLineProgressAsync(projectA, lineOnB,
+                new SetLineProgressRequest(0.5m), userId));
+    }
+
     [Fact]
     public async Task SetLineBudget_cross_tenant_line_lookup_is_NotFound()
     {

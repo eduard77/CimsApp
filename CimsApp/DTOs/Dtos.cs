@@ -23,6 +23,8 @@ public record RespondRfiRequest(string Response, RfiStatus Status);
 public record CreateActionRequest(string Title, string? Description, string? Source, Priority Priority, Guid? AssigneeId, DateTime? DueDate);
 public record UpdateActionRequest(string? Title, string? Description, Priority? Priority, ActionStatus? Status, Guid? AssigneeId, DateTime? DueDate);
 public record SetLineBudgetRequest(decimal? Budget);
+public record SetLineScheduleRequest(DateTime? ScheduledStart, DateTime? ScheduledEnd);
+public record SetLineProgressRequest(decimal? PercentComplete);
 public record CreateCommitmentRequest(Guid CostBreakdownItemId, CommitmentType Type, string Reference, string Counterparty, decimal Amount, string? Description);
 // Variance is Budget - Committed (T-S1-05 semantic, preserved through
 // T-S1-06). Actual is the sum of all ActualCost rows on the line; the

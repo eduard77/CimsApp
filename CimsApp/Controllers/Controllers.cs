@@ -205,6 +205,30 @@ public class CostController(CostService svc, CimsDbContext db) : CimsControllerB
         await GetProjectRoleAsync(db, projectId);
         return Ok(new { success = true, data = await svc.GetCbsRollupAsync(projectId, ct) });
     }
+
+    [HttpPut("{itemId:guid}/schedule")]
+    public async Task<IActionResult> SetLineSchedule(
+        Guid projectId, Guid itemId, SetLineScheduleRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.SetLineScheduleAsync(projectId, itemId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
+
+    [HttpPut("{itemId:guid}/progress")]
+    public async Task<IActionResult> SetLineProgress(
+        Guid projectId, Guid itemId, SetLineProgressRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.SetLineProgressAsync(projectId, itemId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
 }
 
 [Route("api/v1/projects/{projectId:guid}/commitments")]

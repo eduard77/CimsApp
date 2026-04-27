@@ -395,6 +395,67 @@ public class CostService(CimsDbContext db, AuditService audit)
     }
 
     /// <summary>
+    /// Set or clear the scheduled date range for a CBS line (B-017).
+    /// Both ends nullable; if both are set, ScheduledStart must be
+    /// strictly before ScheduledEnd. Setting one without the other
+    /// is allowed — assessor may know the start before the end-date
+    /// estimate firms up. Clearing (null, null) is also allowed.
+    /// </summary>
+    public async Task SetLineScheduleAsync(
+        Guid projectId, Guid itemId, SetLineScheduleRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (req.ScheduledStart.HasValue && req.ScheduledEnd.HasValue
+            && req.ScheduledStart.Value >= req.ScheduledEnd.Value)
+            throw new ValidationException(["ScheduledStart must be before ScheduledEnd"]);
+
+        var item = await db.CostBreakdownItems
+            .FirstOrDefaultAsync(c => c.Id == itemId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CBS line");
+
+        var previousStart = item.ScheduledStart;
+        var previousEnd   = item.ScheduledEnd;
+        item.ScheduledStart = req.ScheduledStart;
+        item.ScheduledEnd   = req.ScheduledEnd;
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "cbs.line_schedule_set", "CostBreakdownItem",
+            itemId.ToString(), projectId,
+            detail: new
+            {
+                previousStart, previousEnd,
+                currentStart = req.ScheduledStart,
+                currentEnd   = req.ScheduledEnd,
+            }, ip: ip, ua: ua);
+    }
+
+    /// <summary>
+    /// Set or clear the percent-complete on a CBS line (B-017). Stored
+    /// as a fraction in [0, 1]. Null = not yet reported. The unblocker
+    /// for EVM EV (T-S1-07) and payment-cert valuation auto-derivation
+    /// (T-S1-09) — those wire-ups follow when there's appetite.
+    /// </summary>
+    public async Task SetLineProgressAsync(
+        Guid projectId, Guid itemId, SetLineProgressRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (req.PercentComplete is { } pc && (pc < 0m || pc > 1m))
+            throw new ValidationException(["PercentComplete must be between 0 and 1"]);
+
+        var item = await db.CostBreakdownItems
+            .FirstOrDefaultAsync(c => c.Id == itemId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CBS line");
+
+        var previous = item.PercentComplete;
+        item.PercentComplete = req.PercentComplete;
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "cbs.line_progress_set", "CostBreakdownItem",
+            itemId.ToString(), projectId,
+            detail: new { previous, current = req.PercentComplete }, ip: ip, ua: ua);
+    }
+
+    /// <summary>
     /// Record a monetary commitment (PO or subcontract) against a CBS
     /// line. T-S1-05, F.2 "Commitments (POs, subcontracts) tracked".
     /// Currency is implied by Project.Currency; the line carries the
