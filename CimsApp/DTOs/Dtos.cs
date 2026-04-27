@@ -62,4 +62,10 @@ public record PaymentCertificateDto(
     decimal RetentionPercent, decimal IncludedVariationsAmount,
     decimal CumulativeGross, decimal RetentionAmount,
     decimal CumulativeNet, decimal PreviouslyCertified, decimal AmountDue,
-    DateTime? IssuedAt);
+    DateTime? IssuedAt,
+    // T-S1-09 / B-017 valuation auto-derive (NEC4 PWDD per ADR-0013).
+    // Σ (CBS line Budget × PercentComplete) across the project, computed
+    // every read. Stored CumulativeValuation remains the source of truth
+    // (assessor-stated); this field surfaces the progress-derived value
+    // alongside it as a guide / preview.
+    decimal DerivedValuationFromProgress);

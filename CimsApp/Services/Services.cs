@@ -1113,6 +1113,16 @@ public class PaymentCertificatesService(CimsDbContext db, AuditService audit)
         var variationsAmount = cert.IncludedVariationsAmount
             ?? await SumApprovedVariationsAsync(cert.ProjectId, ct);
 
+        // T-S1-09 / B-017 valuation auto-derive — Σ (Budget × PercentComplete)
+        // across the project's CBS lines. NEC4 PWDD interpretation per
+        // ADR-0013. Stored CumulativeValuation remains source of truth;
+        // this is the progress-derived guide.
+        var derivedValuation = await db.CostBreakdownItems
+            .Where(c => c.ProjectId == cert.ProjectId
+                     && c.Budget != null
+                     && c.PercentComplete != null)
+            .SumAsync(c => (decimal?)(c.Budget!.Value * c.PercentComplete!.Value), ct) ?? 0m;
+
         // Cumulative chain: PreviouslyCertified is the **latest prior
         // Issued cert's CumulativeNet**, not the sum of prior
         // AmountDues. With cumulative PWDD valuations, each cert's
@@ -1150,10 +1160,11 @@ public class PaymentCertificatesService(CimsDbContext db, AuditService audit)
             IncludedVariationsAmount:  variationsAmount,
             CumulativeGross:           gross,
             RetentionAmount:           retentionAmount,
-            CumulativeNet:             net,
-            PreviouslyCertified:       previouslyCertified,
-            AmountDue:                 amountDue,
-            IssuedAt:                  cert.IssuedAt);
+            CumulativeNet:                  net,
+            PreviouslyCertified:            previouslyCertified,
+            AmountDue:                      amountDue,
+            IssuedAt:                       cert.IssuedAt,
+            DerivedValuationFromProgress:   derivedValuation);
     }
 
     /// <summary>NEC4 net for an Issued cert, used to compute the
