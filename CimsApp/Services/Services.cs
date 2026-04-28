@@ -424,6 +424,27 @@ public class ProjectsService(CimsDbContext db, AuditService audit, CimsApp.Servi
 
     public async Task AddMemberAsync(Guid projectId, Guid userId, UserRole role, Guid actorId)
     {
+        // SR-S0-05: verify the new member belongs to the project's
+        // appointing organisation. Without this check, a PM in Org A
+        // could add a User from Org B as a member — the row would
+        // persist but the user's tenant filter (Project filtered by
+        // AppointingPartyId == tenant.OrganisationId) would hide the
+        // project from them, leaving an orphan ProjectMember row.
+        // v1.0 model (ADR-0012): a project is owned by one org and
+        // its members are users in that org. B2B contractor
+        // membership via `ProjectAppointment` is a future post-v1.0
+        // expansion (the check would widen to "member's org is the
+        // AppointingParty OR is an appointed contractor on this
+        // project"); for v1.0 the strict same-org rule is correct.
+        var project = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId)
+            ?? throw new NotFoundException("Project");
+        var newMember = await db.Users.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(u => u.Id == userId)
+            ?? throw new NotFoundException("User");
+        if (newMember.OrganisationId != project.AppointingPartyId)
+            throw new ValidationException(
+                ["The user must belong to the project's appointing organisation"]);
+
         var existing = await db.ProjectMembers.FirstOrDefaultAsync(m => m.ProjectId == projectId && m.UserId == userId);
         if (existing != null) { existing.Role = role; existing.IsActive = true; }
         else db.ProjectMembers.Add(new ProjectMember { ProjectId = projectId, UserId = userId, Role = role });
