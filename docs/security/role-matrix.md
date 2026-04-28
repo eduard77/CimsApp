@@ -28,7 +28,7 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 | Method | Route | Global role | Project role | Comment |
 |---|---|---|---|---|
 | POST | `/api/v1/auth/register` | anonymous + invitation token | — | Sign-up. T-S0-11 closed SR-S0-01. Rate-limited to **10 / min per IP** (`anon-default` policy, B-002). |
-| POST | `/api/v1/auth/login` | anonymous | — | Issues JWT. Rate-limited to **5 / min per IP** (`anon-login` policy, B-002 — credential-testing target). |
+| POST | `/api/v1/auth/login` | anonymous | — | Issues JWT. Rate-limited to **5 / min per IP** (`anon-login` policy, B-002). Plus progressive back-off: **5 consecutive failures from one IP within a 15-min sliding window → 429 LOGIN_LOCKOUT** (B-002 close, `LoginAttemptTracker`). Reset on successful login. |
 | POST | `/api/v1/auth/refresh` | anonymous | — | Refresh-token-bearer auth. Rate-limited to **10 / min per IP** (`anon-default` policy, B-002). |
 | POST | `/api/v1/auth/logout` | anonymous | — | Revokes refresh token |
 | GET  | `/api/v1/auth/me` | authenticated | — | Profile self-read |

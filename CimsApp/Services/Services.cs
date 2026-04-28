@@ -12,8 +12,13 @@ using CimsApp.Models;
 namespace CimsApp.Services;
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
-public class AuthService(CimsDbContext db, IConfiguration cfg, InvitationService invitations)
+public class AuthService(
+    CimsDbContext db,
+    IConfiguration cfg,
+    InvitationService invitations,
+    CimsApp.Services.Auth.ILoginAttemptTracker loginTracker)
 {
+
     private string AccessSecret  => cfg["Jwt:AccessSecret"]!;
     private string RefreshSecret => cfg["Jwt:RefreshSecret"]!;
     private string Issuer        => cfg["Jwt:Issuer"]!;
@@ -80,17 +85,41 @@ public class AuthService(CimsDbContext db, IConfiguration cfg, InvitationService
         if (string.IsNullOrEmpty(req.Email) || string.IsNullOrEmpty(req.Password))
             throw new AppException("Invalid credentials", 401, "INVALID_CREDENTIALS");
 
-        // Pre-auth: tenant is not yet known. Bypass the User query filter.
-        var user = await db.Users.IgnoreQueryFilters().Include(u => u.Organisation)
-            .FirstOrDefaultAsync(u => u.Email == req.Email.ToLowerInvariant() && u.IsActive)
-            ?? throw new AppException("Invalid credentials", 401, "INVALID_CREDENTIALS");
-        if (!BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
-            throw new AppException("Invalid credentials", 401, "INVALID_CREDENTIALS");
-        user.LastLoginAt = DateTime.UtcNow;
-        var access  = GenerateAccess(user);
-        var refresh = await CreateRefreshAsync(user.Id, ua, ip);
-        await db.SaveChangesAsync();
-        return new AuthResponse(access, refresh.Token, Map(user, user.Organisation));
+        // B-002 progressive back-off: short-circuit BEFORE any DB work
+        // when the caller's IP is locked out. Tighter than the
+        // anon-login rate limiter (5/min hard cap) — locks out for the
+        // remaining 15-minute sliding window after 5 consecutive
+        // failures from this IP. A successful login resets the
+        // counter at the bottom of this method.
+        if (!string.IsNullOrEmpty(ip) && loginTracker.IsLockedOut(ip))
+            throw new AppException(
+                "Too many failed login attempts. Try again later.",
+                429, "LOGIN_LOCKOUT");
+
+        try
+        {
+            // Pre-auth: tenant is not yet known. Bypass the User query filter.
+            var user = await db.Users.IgnoreQueryFilters().Include(u => u.Organisation)
+                .FirstOrDefaultAsync(u => u.Email == req.Email.ToLowerInvariant() && u.IsActive)
+                ?? throw new AppException("Invalid credentials", 401, "INVALID_CREDENTIALS");
+            if (!BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
+                throw new AppException("Invalid credentials", 401, "INVALID_CREDENTIALS");
+            user.LastLoginAt = DateTime.UtcNow;
+            var access  = GenerateAccess(user);
+            var refresh = await CreateRefreshAsync(user.Id, ua, ip);
+            await db.SaveChangesAsync();
+            if (!string.IsNullOrEmpty(ip)) loginTracker.RecordSuccess(ip);
+            return new AuthResponse(access, refresh.Token, Map(user, user.Organisation));
+        }
+        catch (AppException ex) when (ex.StatusCode == 401)
+        {
+            // Only credential-class failures count toward lockout.
+            // Validation/server errors don't tighten the limiter
+            // (operator typos shouldn't help an attacker accelerate
+            // a discovery they wouldn't otherwise get).
+            if (!string.IsNullOrEmpty(ip)) loginTracker.RecordFailure(ip);
+            throw;
+        }
     }
 
     public async Task<(string Access, string Refresh)> RefreshAsync(string token)
