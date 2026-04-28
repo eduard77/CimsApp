@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using CimsApp.Core;
 using CimsApp.Data;
@@ -29,15 +30,15 @@ public abstract class CimsControllerBase : ControllerBase
 [AllowAnonymous, Route("api/v1/auth")]
 public class AuthController(AuthService svc) : ControllerBase
 {
-    [HttpPost("register")]
+    [HttpPost("register"), EnableRateLimiting("anon-default")]
     public async Task<IActionResult> Register(RegisterRequest req) =>
         Created("", new { success = true, data = await svc.RegisterAsync(req) });
 
-    [HttpPost("login")]
+    [HttpPost("login"), EnableRateLimiting("anon-login")]
     public async Task<IActionResult> Login(LoginRequest req) =>
         Ok(new { success = true, data = await svc.LoginAsync(req, Request.Headers.UserAgent.ToString(), HttpContext.Connection.RemoteIpAddress?.ToString()) });
 
-    [HttpPost("refresh")]
+    [HttpPost("refresh"), EnableRateLimiting("anon-default")]
     public async Task<IActionResult> Refresh(RefreshRequest req)
     { var (a, r) = await svc.RefreshAsync(req.RefreshToken); return Ok(new { success = true, data = new { accessToken = a, refreshToken = r } }); }
 
@@ -70,7 +71,7 @@ public class OrganisationsController(
     }
 
     [HttpPost]
-    [AllowAnonymous]
+    [AllowAnonymous, EnableRateLimiting("anon-default")]
     public async Task<IActionResult> Create(CreateOrgRequest req)
     {
         if (await db.Organisations.AnyAsync(o => o.Code == req.Code.ToUpperInvariant()))
