@@ -353,6 +353,39 @@ public class PaymentCertificatesServiceTests
     }
 
     [Fact]
+    public async Task Get_dto_carries_DerivedValuationFromProgress_for_T_S1_09_auto_derive()
+    {
+        // T-S1-09 / B-017 valuation auto-derive (NEC4 PWDD per ADR-0013).
+        // Three CBS lines with Budget × PercentComplete:
+        //   Line A: 1000 × 0.50 = 500
+        //   Line B: 2000 × 0.25 = 500
+        //   Line C: 500  × null = 0   (no progress reported → contributes 0)
+        // Σ = 1000.
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var periodId = await SeedPeriodAsync(options, tenant, projectId,
+            "Apr", Utc(2026, 4, 1), Utc(2026, 4, 30), userId);
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            seed.CostBreakdownItems.AddRange(
+                new CostBreakdownItem { ProjectId = projectId, Code = "A", Name = "A", Budget = 1000m, PercentComplete = 0.5m },
+                new CostBreakdownItem { ProjectId = projectId, Code = "B", Name = "B", Budget = 2000m, PercentComplete = 0.25m },
+                new CostBreakdownItem { ProjectId = projectId, Code = "C", Name = "C", Budget = 500m,  PercentComplete = null });
+            seed.SaveChanges();
+        }
+
+        using var db = new CimsDbContext(options, tenant);
+        var svc = new PaymentCertificatesService(db, new AuditService(db));
+        // Manually-stated valuation 950 — DIFFERENT from the derived 1000 —
+        // so we can prove the two fields are independent (stored remains
+        // source of truth; derived is the progress-based guide).
+        var dto = await svc.CreateDraftAsync(projectId,
+            new CreatePaymentCertificateDraftRequest(periodId, 950m, 0m, 3m), userId);
+
+        Assert.Equal(950m,  dto.CumulativeValuation);            // assessor-stated.
+        Assert.Equal(1000m, dto.DerivedValuationFromProgress);   // Σ Budget × PC.
+    }
+
+    [Fact]
     public async Task Cross_tenant_certificate_lookup_is_NotFound()
     {
         var dbName    = Guid.NewGuid().ToString();

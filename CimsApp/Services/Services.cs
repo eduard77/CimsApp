@@ -395,6 +395,67 @@ public class CostService(CimsDbContext db, AuditService audit)
     }
 
     /// <summary>
+    /// Set or clear the scheduled date range for a CBS line (B-017).
+    /// Both ends nullable; if both are set, ScheduledStart must be
+    /// strictly before ScheduledEnd. Setting one without the other
+    /// is allowed — assessor may know the start before the end-date
+    /// estimate firms up. Clearing (null, null) is also allowed.
+    /// </summary>
+    public async Task SetLineScheduleAsync(
+        Guid projectId, Guid itemId, SetLineScheduleRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (req.ScheduledStart.HasValue && req.ScheduledEnd.HasValue
+            && req.ScheduledStart.Value >= req.ScheduledEnd.Value)
+            throw new ValidationException(["ScheduledStart must be before ScheduledEnd"]);
+
+        var item = await db.CostBreakdownItems
+            .FirstOrDefaultAsync(c => c.Id == itemId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CBS line");
+
+        var previousStart = item.ScheduledStart;
+        var previousEnd   = item.ScheduledEnd;
+        item.ScheduledStart = req.ScheduledStart;
+        item.ScheduledEnd   = req.ScheduledEnd;
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "cbs.line_schedule_set", "CostBreakdownItem",
+            itemId.ToString(), projectId,
+            detail: new
+            {
+                previousStart, previousEnd,
+                currentStart = req.ScheduledStart,
+                currentEnd   = req.ScheduledEnd,
+            }, ip: ip, ua: ua);
+    }
+
+    /// <summary>
+    /// Set or clear the percent-complete on a CBS line (B-017). Stored
+    /// as a fraction in [0, 1]. Null = not yet reported. The unblocker
+    /// for EVM EV (T-S1-07) and payment-cert valuation auto-derivation
+    /// (T-S1-09) — those wire-ups follow when there's appetite.
+    /// </summary>
+    public async Task SetLineProgressAsync(
+        Guid projectId, Guid itemId, SetLineProgressRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (req.PercentComplete is { } pc && (pc < 0m || pc > 1m))
+            throw new ValidationException(["PercentComplete must be between 0 and 1"]);
+
+        var item = await db.CostBreakdownItems
+            .FirstOrDefaultAsync(c => c.Id == itemId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CBS line");
+
+        var previous = item.PercentComplete;
+        item.PercentComplete = req.PercentComplete;
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync(actorId, "cbs.line_progress_set", "CostBreakdownItem",
+            itemId.ToString(), projectId,
+            detail: new { previous, current = req.PercentComplete }, ip: ip, ua: ua);
+    }
+
+    /// <summary>
     /// Record a monetary commitment (PO or subcontract) against a CBS
     /// line. T-S1-05, F.2 "Commitments (POs, subcontracts) tracked".
     /// Currency is implied by Project.Currency; the line carries the
@@ -640,6 +701,160 @@ public class CostService(CimsDbContext db, AuditService audit)
                 reference = req.Reference,
             }, ip: ip, ua: ua);
         return actual;
+    }
+
+    /// <summary>
+    /// Project-level EVM snapshot at a given data date — wires the
+    /// B-017 schedule + progress primitive into the pure math in
+    /// <see cref="Evm.Calculate"/>. Closes the EVM service-integration
+    /// half of T-S1-07.
+    ///
+    /// Per CBS line, given Budget, PercentComplete, ScheduledStart,
+    /// ScheduledEnd, the snapshot contributions are:
+    ///
+    ///   BAC contribution = Budget ?? 0
+    ///   EV  contribution = (Budget ?? 0) × (PercentComplete ?? 0)
+    ///   PV  contribution = (Budget ?? 0) × scheduleElapsed(dataDate,
+    ///                                                       Start,
+    ///                                                       End)
+    ///
+    /// where `scheduleElapsed` returns 0 when either schedule end is
+    /// null (no plan = no PV contribution), 0 before Start, 1 at or
+    /// after End, and a linear fraction in between. AC is summed
+    /// across every <see cref="ActualCost"/> on the project, ignoring
+    /// the data date — actuals don't have a "should-have-happened-by"
+    /// gate; what's been spent is what's been spent.
+    /// </summary>
+    public async Task<Evm.EvmSnapshot> GetEvmSnapshotAsync(
+        Guid projectId, DateTime dataDate, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var lines = await db.CostBreakdownItems
+            .Where(c => c.ProjectId == projectId)
+            .Select(c => new
+            {
+                c.Budget,
+                c.PercentComplete,
+                c.ScheduledStart,
+                c.ScheduledEnd,
+            })
+            .ToListAsync(ct);
+
+        decimal bac = 0m, ev = 0m, pv = 0m;
+        foreach (var l in lines)
+        {
+            var budget = l.Budget ?? 0m;
+            bac += budget;
+            ev  += budget * (l.PercentComplete ?? 0m);
+            pv  += budget * ScheduleFraction(dataDate, l.ScheduledStart, l.ScheduledEnd);
+        }
+
+        var ac = await db.ActualCosts
+            .Where(a => a.ProjectId == projectId)
+            .SumAsync(a => (decimal?)a.Amount, ct) ?? 0m;
+
+        return Evm.Calculate(pv: pv, ev: ev, ac: ac, bac: bac);
+    }
+
+    /// <summary>Linear schedule-elapsed fraction in [0, 1]. Returns 0
+    /// when either bound is unset — a line with no schedule contributes
+    /// no PV (it isn't "supposed" to be earning value at any specific
+    /// date).</summary>
+    private static decimal ScheduleFraction(DateTime dataDate, DateTime? start, DateTime? end)
+    {
+        if (!start.HasValue || !end.HasValue) return 0m;
+        if (dataDate <= start.Value) return 0m;
+        if (dataDate >= end.Value) return 1m;
+        var total   = (decimal)(end.Value - start.Value).TotalSeconds;
+        var elapsed = (decimal)(dataDate - start.Value).TotalSeconds;
+        return elapsed / total;
+    }
+
+    /// <summary>Linear overlap of [periodStart, periodEnd] with the
+    /// schedule [scheduleStart, scheduleEnd], expressed as a fraction
+    /// of the schedule's total duration. Returns 0 when the line has
+    /// no schedule. Used to distribute a CBS line's Budget across
+    /// CostPeriods for the per-line cashflow breakdown (T-S1-11
+    /// wire-up).</summary>
+    private static decimal ScheduleOverlapFraction(
+        DateTime periodStart, DateTime periodEnd,
+        DateTime? scheduleStart, DateTime? scheduleEnd)
+    {
+        if (!scheduleStart.HasValue || !scheduleEnd.HasValue) return 0m;
+        if (scheduleEnd.Value <= scheduleStart.Value) return 0m;
+        var overlapStart = periodStart > scheduleStart.Value ? periodStart : scheduleStart.Value;
+        var overlapEnd   = periodEnd   < scheduleEnd.Value   ? periodEnd   : scheduleEnd.Value;
+        if (overlapEnd <= overlapStart) return 0m;
+        var total   = (decimal)(scheduleEnd.Value - scheduleStart.Value).TotalSeconds;
+        var overlap = (decimal)(overlapEnd - overlapStart).TotalSeconds;
+        return overlap / total;
+    }
+
+    /// <summary>
+    /// Per-CBS-line cashflow breakdown (T-S1-11 wire-up via B-017).
+    /// One series per CBS line, each carrying one point per CostPeriod.
+    ///
+    ///   BaselinePlanned(line, period) = Budget × overlapFraction(
+    ///     period.[Start, End], line.[ScheduledStart, ScheduledEnd])
+    ///   Actual(line, period)          = Σ ActualCost.Amount where
+    ///     CostBreakdownItemId == line.Id AND PeriodId == period.Id
+    ///
+    /// Lines with no schedule contribute zero baseline across all
+    /// periods (line not "supposed" to be spending at any specific
+    /// date). Lines with no Budget contribute zero too.
+    /// </summary>
+    public async Task<CashflowByLineDto> GetCashflowByLineAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var project = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var periods = await db.CostPeriods
+            .Where(p => p.ProjectId == projectId)
+            .OrderBy(p => p.StartDate).ThenBy(p => p.Id)
+            .ToListAsync(ct);
+
+        var lines = await db.CostBreakdownItems
+            .Where(c => c.ProjectId == projectId)
+            .OrderBy(c => c.Code)
+            .ToListAsync(ct);
+
+        // Group actuals by (line, period) so we can join in-memory.
+        var actualSums = await db.ActualCosts
+            .Where(a => a.ProjectId == projectId)
+            .GroupBy(a => new { a.CostBreakdownItemId, a.PeriodId })
+            .Select(g => new { g.Key.CostBreakdownItemId, g.Key.PeriodId, Total = g.Sum(a => a.Amount) })
+            .ToListAsync(ct);
+        var actualByLinePeriod = actualSums.ToDictionary(
+            x => (x.CostBreakdownItemId, x.PeriodId), x => x.Total);
+
+        var series = new List<CashflowLineSeries>(lines.Count);
+        foreach (var line in lines)
+        {
+            var budget = line.Budget ?? 0m;
+            var points = new List<CashflowLinePeriodPoint>(periods.Count);
+            foreach (var p in periods)
+            {
+                var fraction = ScheduleOverlapFraction(
+                    p.StartDate, p.EndDate, line.ScheduledStart, line.ScheduledEnd);
+                var planned  = budget * fraction;
+                var actual   = actualByLinePeriod.TryGetValue((line.Id, p.Id), out var a) ? a : 0m;
+                points.Add(new CashflowLinePeriodPoint(
+                    PeriodId: p.Id, Label: p.Label,
+                    StartDate: p.StartDate, EndDate: p.EndDate,
+                    BaselinePlanned: planned, Actual: actual));
+            }
+            series.Add(new CashflowLineSeries(
+                ItemId: line.Id, Code: line.Code, Name: line.Name,
+                Budget: line.Budget,
+                ScheduledStart: line.ScheduledStart,
+                ScheduledEnd:   line.ScheduledEnd,
+                Points: points));
+        }
+
+        return new CashflowByLineDto(project.Currency, series);
     }
 
     /// <summary>
@@ -983,6 +1198,16 @@ public class PaymentCertificatesService(CimsDbContext db, AuditService audit)
         var variationsAmount = cert.IncludedVariationsAmount
             ?? await SumApprovedVariationsAsync(cert.ProjectId, ct);
 
+        // T-S1-09 / B-017 valuation auto-derive — Σ (Budget × PercentComplete)
+        // across the project's CBS lines. NEC4 PWDD interpretation per
+        // ADR-0013. Stored CumulativeValuation remains source of truth;
+        // this is the progress-derived guide.
+        var derivedValuation = await db.CostBreakdownItems
+            .Where(c => c.ProjectId == cert.ProjectId
+                     && c.Budget != null
+                     && c.PercentComplete != null)
+            .SumAsync(c => (decimal?)(c.Budget!.Value * c.PercentComplete!.Value), ct) ?? 0m;
+
         // Cumulative chain: PreviouslyCertified is the **latest prior
         // Issued cert's CumulativeNet**, not the sum of prior
         // AmountDues. With cumulative PWDD valuations, each cert's
@@ -1020,10 +1245,11 @@ public class PaymentCertificatesService(CimsDbContext db, AuditService audit)
             IncludedVariationsAmount:  variationsAmount,
             CumulativeGross:           gross,
             RetentionAmount:           retentionAmount,
-            CumulativeNet:             net,
-            PreviouslyCertified:       previouslyCertified,
-            AmountDue:                 amountDue,
-            IssuedAt:                  cert.IssuedAt);
+            CumulativeNet:                  net,
+            PreviouslyCertified:            previouslyCertified,
+            AmountDue:                      amountDue,
+            IssuedAt:                       cert.IssuedAt,
+            DerivedValuationFromProgress:   derivedValuation);
     }
 
     /// <summary>NEC4 net for an Issued cert, used to compute the

@@ -199,6 +199,11 @@ public class CimsDbContext(
             // and 18 digits of precision keeps headroom for very large
             // works.
             e.Property(c => c.Budget).HasPrecision(18, 2);
+            // B-017. PercentComplete is a fraction in [0, 1]; (5, 4)
+            // gives 0.0001 granularity which is finer than any sensible
+            // assessor would report. ScheduledStart / ScheduledEnd use
+            // the default datetime2 mapping (no special precision needed).
+            e.Property(c => c.PercentComplete).HasPrecision(5, 4);
         });
 
         m.Entity<Commitment>(e =>

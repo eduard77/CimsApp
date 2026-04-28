@@ -351,6 +351,23 @@ public class CostBreakdownItem
     /// CimsDbContext. Null = not yet budgeted.</summary>
     public decimal? Budget { get; set; }
 
+    /// <summary>Scheduled start of work on this line (B-017). Null until
+    /// the schedule baseline is set. Together with <see cref="ScheduledEnd"/>
+    /// gives the date range used to distribute the line's Budget across
+    /// CostPeriods for cashflow / EVM PV.</summary>
+    public DateTime? ScheduledStart { get; set; }
+
+    /// <summary>Scheduled end of work on this line (B-017). Null until set.
+    /// Service layer enforces ScheduledStart &lt; ScheduledEnd.</summary>
+    public DateTime? ScheduledEnd { get; set; }
+
+    /// <summary>Percent complete on this line, stored as a decimal in
+    /// [0, 1] (B-017). Null = not yet reported. Drives EV (Earned
+    /// Value) at T-S1-07 and the auto-derived valuation at T-S1-09
+    /// when wired up. Service layer enforces 0 ≤ value ≤ 1; precision
+    /// decimal(5, 4) is enough for 0.0001 granularity.</summary>
+    public decimal? PercentComplete { get; set; }
+
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

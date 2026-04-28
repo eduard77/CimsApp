@@ -23,6 +23,8 @@ public record RespondRfiRequest(string Response, RfiStatus Status);
 public record CreateActionRequest(string Title, string? Description, string? Source, Priority Priority, Guid? AssigneeId, DateTime? DueDate);
 public record UpdateActionRequest(string? Title, string? Description, Priority? Priority, ActionStatus? Status, Guid? AssigneeId, DateTime? DueDate);
 public record SetLineBudgetRequest(decimal? Budget);
+public record SetLineScheduleRequest(DateTime? ScheduledStart, DateTime? ScheduledEnd);
+public record SetLineProgressRequest(decimal? PercentComplete);
 public record CreateCommitmentRequest(Guid CostBreakdownItemId, CommitmentType Type, string Reference, string Counterparty, decimal Amount, string? Description);
 // Variance is Budget - Committed (T-S1-05 semantic, preserved through
 // T-S1-06). Actual is the sum of all ActualCost rows on the line; the
@@ -42,6 +44,20 @@ public record CashflowPeriodPoint(
     decimal Actual, decimal CumulativeActual,
     decimal? Forecast);
 public record CashflowDto(string ProjectCurrency, List<CashflowPeriodPoint> Points);
+// Per-CBS-line cashflow breakdown (T-S1-11 wire-up via B-017). For
+// each (line, period) the BaselinePlanned is the line's Budget
+// distributed across the period by linear overlap of the line's
+// schedule range with the period's date range. Actual is summed from
+// ActualCost where line+period match.
+public record CashflowLinePeriodPoint(
+    Guid PeriodId, string Label, DateTime StartDate, DateTime EndDate,
+    decimal BaselinePlanned, decimal Actual);
+public record CashflowLineSeries(
+    Guid ItemId, string Code, string Name,
+    decimal? Budget, DateTime? ScheduledStart, DateTime? ScheduledEnd,
+    List<CashflowLinePeriodPoint> Points);
+public record CashflowByLineDto(
+    string ProjectCurrency, List<CashflowLineSeries> Lines);
 public record RaiseVariationRequest(string Title, string? Description, string? Reason, decimal? EstimatedCostImpact, int? EstimatedTimeImpactDays, Guid? CostBreakdownItemId);
 public record VariationDecisionRequest(string? DecisionNote);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
@@ -60,4 +76,10 @@ public record PaymentCertificateDto(
     decimal RetentionPercent, decimal IncludedVariationsAmount,
     decimal CumulativeGross, decimal RetentionAmount,
     decimal CumulativeNet, decimal PreviouslyCertified, decimal AmountDue,
-    DateTime? IssuedAt);
+    DateTime? IssuedAt,
+    // T-S1-09 / B-017 valuation auto-derive (NEC4 PWDD per ADR-0013).
+    // Σ (CBS line Budget × PercentComplete) across the project, computed
+    // every read. Stored CumulativeValuation remains the source of truth
+    // (assessor-stated); this field surfaces the progress-derived value
+    // alongside it as a guide / preview.
+    decimal DerivedValuationFromProgress);

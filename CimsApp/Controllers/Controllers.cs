@@ -205,6 +205,30 @@ public class CostController(CostService svc, CimsDbContext db) : CimsControllerB
         await GetProjectRoleAsync(db, projectId);
         return Ok(new { success = true, data = await svc.GetCbsRollupAsync(projectId, ct) });
     }
+
+    [HttpPut("{itemId:guid}/schedule")]
+    public async Task<IActionResult> SetLineSchedule(
+        Guid projectId, Guid itemId, SetLineScheduleRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.SetLineScheduleAsync(projectId, itemId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
+
+    [HttpPut("{itemId:guid}/progress")]
+    public async Task<IActionResult> SetLineProgress(
+        Guid projectId, Guid itemId, SetLineProgressRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.SetLineProgressAsync(projectId, itemId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
 }
 
 [Route("api/v1/projects/{projectId:guid}/commitments")]
@@ -272,6 +296,32 @@ public class CashflowController(CostService svc, CimsDbContext db) : CimsControl
         await GetProjectRoleAsync(db, projectId);
         var dto = await svc.GetCashflowAsync(projectId, ct);
         return Ok(new { success = true, data = dto });
+    }
+
+    [HttpGet("by-line")]
+    public async Task<IActionResult> GetByLine(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetCashflowByLineAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+}
+
+[Route("api/v1/projects/{projectId:guid}/evm")]
+public class EvmController(CostService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> Get(
+        Guid projectId,
+        [FromQuery] DateTime? dataDate,
+        CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var snapshot = await svc.GetEvmSnapshotAsync(
+            projectId,
+            dataDate ?? DateTime.UtcNow,
+            ct);
+        return Ok(new { success = true, data = snapshot });
     }
 }
 
