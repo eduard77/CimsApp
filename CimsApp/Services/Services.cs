@@ -1474,9 +1474,21 @@ public class RfiService(CimsDbContext db, AuditService audit)
         return rfi;
     }
 
-    public async Task<Rfi> RespondAsync(Guid rfiId, Guid projectId, RespondRfiRequest req, Guid userId, string? ip, string? ua)
+    public async Task<Rfi> RespondAsync(Guid rfiId, Guid projectId, RespondRfiRequest req, Guid userId, UserRole role, string? ip, string? ua)
     {
         var rfi = await db.Rfis.FirstOrDefaultAsync(r => r.Id == rfiId && r.ProjectId == projectId) ?? throw new NotFoundException("RFI");
+
+        // B-006: responder verification. If the RFI has an assigned
+        // responder, only that user OR an InformationManager+ on the
+        // project may respond — IMs are the natural escalation path
+        // when an assigned responder is unavailable. RFIs without an
+        // AssignedToId remain open for any TaskTeamMember+ (the floor
+        // enforced at the controller) to respond.
+        if (rfi.AssignedToId.HasValue
+            && rfi.AssignedToId.Value != userId
+            && !CdeStateMachine.HasMinimumRole(role, UserRole.InformationManager))
+            throw new ForbiddenException("Only the assigned responder or an InformationManager+ may respond to this RFI");
+
         rfi.Response = req.Response; rfi.Status = req.Status;
         if (req.Status == RfiStatus.Closed) rfi.ClosedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
@@ -1505,9 +1517,22 @@ public class ActionsService(CimsDbContext db, AuditService audit)
         return a;
     }
 
-    public async Task<ActionItem> UpdateAsync(Guid actionId, Guid projectId, UpdateActionRequest req, Guid userId, string? ip, string? ua)
+    public async Task<ActionItem> UpdateAsync(Guid actionId, Guid projectId, UpdateActionRequest req, Guid userId, UserRole role, string? ip, string? ua)
     {
         var a = await db.ActionItems.FirstOrDefaultAsync(x => x.Id == actionId && x.ProjectId == projectId) ?? throw new NotFoundException("Action item");
+
+        // B-005: assignee ownership check. Caller must be the action's
+        // assignee OR ProjectManager+ on the project (PM-level override:
+        // PMs can correct or close any action regardless of assignment,
+        // which is needed for re-assignments and stale-action cleanup).
+        // Unassigned actions can be updated by any TaskTeamMember+
+        // (the floor enforced at the controller) so the gap-of-ownership
+        // case doesn't grind.
+        if (a.AssigneeId.HasValue
+            && a.AssigneeId.Value != userId
+            && !CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException("Only the action's assignee or a ProjectManager+ may update it");
+
         if (req.Title != null)       a.Title       = req.Title;
         if (req.Description != null) a.Description = req.Description;
         if (req.Priority != null)    a.Priority    = req.Priority.Value;
