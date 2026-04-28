@@ -151,12 +151,13 @@ public class AuthService(
         ?? throw new NotFoundException("User");
 
     /// <summary>
-    /// B-001: self-service revoke. Bumps the caller's own
-    /// <see cref="User.TokenInvalidationCutoff"/> to UtcNow so all
-    /// other access tokens minted before this moment are rejected by
-    /// the JwtBearer `OnTokenValidated` hook. The caller's CURRENT
-    /// access token is also invalidated — they will need to log in
-    /// again. By design: "log out everywhere" includes "this device".
+    /// B-001 / ADR-0014: self-service revoke. Bumps the caller's
+    /// <see cref="User.TokenInvalidationCutoff"/> AND revokes every
+    /// active refresh token (B-019). The caller's current access
+    /// token is invalidated by the cutoff; their refresh tokens by
+    /// `RevokedAt`, so a multi-device user can't refresh on another
+    /// device after calling this. "Log out everywhere" actually means
+    /// everywhere.
     /// </summary>
     public async Task RevokeOwnTokensAsync(Guid actorId)
     {
@@ -166,14 +167,16 @@ public class AuthService(
             .FirstOrDefaultAsync(u => u.Id == actorId)
             ?? throw new NotFoundException("User");
         user.TokenInvalidationCutoff = DateTime.UtcNow;
+        await SweepActiveRefreshTokensAsync(actorId);
         await db.SaveChangesAsync();
     }
 
     /// <summary>
     /// B-001 / ADR-0014: admin revoke. Bumps the target user's
-    /// <see cref="User.TokenInvalidationCutoff"/>. The lookup respects
-    /// the tenant query filter — OrgAdmin can only target users in
-    /// their own organisation; SuperAdmin bypasses the filter via
+    /// <see cref="User.TokenInvalidationCutoff"/> AND revokes every
+    /// active refresh token (B-019). The User lookup respects the
+    /// tenant query filter — OrgAdmin can only target users in their
+    /// own organisation; SuperAdmin bypasses the filter via
     /// IgnoreQueryFilters per ADR-0007. Cross-tenant attempts 404.
     /// </summary>
     public async Task RevokeUserTokensAsync(Guid userId, CimsApp.Services.Tenancy.ITenantContext tenant)
@@ -184,17 +187,17 @@ public class AuthService(
         var user = await query.FirstOrDefaultAsync(u => u.Id == userId)
             ?? throw new NotFoundException("User");
         user.TokenInvalidationCutoff = DateTime.UtcNow;
+        await SweepActiveRefreshTokensAsync(userId);
         await db.SaveChangesAsync();
     }
 
     /// <summary>
     /// B-001 / ADR-0014: deactivate a user AND revoke their tokens
-    /// atomically. Sets `IsActive = false` (which the
-    /// `TokenRevocation.IsRevoked` helper checks first — independent
-    /// of cutoff, so an inactive user's JWT is rejected regardless
-    /// of timing) and bumps the cutoff (belt-and-braces; also covers
-    /// any future code path that re-activates a user but should still
-    /// reject tokens issued during the inactive window).
+    /// (B-019 sweeps refresh tokens too). The IsActive=false flip is
+    /// the primary kill-switch (rejected at every authenticated
+    /// request via `TokenRevocation.IsRevoked`); cutoff bump and
+    /// refresh-token sweep are belt-and-braces, also surviving any
+    /// future reactivate path.
     /// </summary>
     public async Task DeactivateUserAsync(Guid userId, CimsApp.Services.Tenancy.ITenantContext tenant)
     {
@@ -205,7 +208,32 @@ public class AuthService(
             ?? throw new NotFoundException("User");
         user.IsActive = false;
         user.TokenInvalidationCutoff = DateTime.UtcNow;
+        await SweepActiveRefreshTokensAsync(userId);
         await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// B-019: bulk-revoke every active refresh token for a user.
+    /// Sets `RevokedAt = UtcNow` on each row, which flips the
+    /// computed `RefreshToken.IsActive` to false and causes
+    /// `RefreshAsync` to throw TOKEN_REVOKED on subsequent attempts.
+    /// IgnoreQueryFilters because refresh-token rows route through
+    /// the User filter and this helper is called from contexts
+    /// (self-service revoke; SuperAdmin admin revoke) where bypassing
+    /// is correct. The User-level revoke methods above are
+    /// responsible for tenant scoping at the User row; once the user
+    /// is found, sweeping their refresh tokens is unconditional.
+    /// SaveChanges is batched into the calling method's
+    /// SaveChangesAsync.
+    /// </summary>
+    private async Task SweepActiveRefreshTokensAsync(Guid userId)
+    {
+        var now = DateTime.UtcNow;
+        var active = await db.RefreshTokens.IgnoreQueryFilters()
+            .Where(r => r.UserId == userId && r.RevokedAt == null && r.ExpiresAt > now)
+            .ToListAsync();
+        foreach (var t in active)
+            t.RevokedAt = now;
     }
 
     private string GenerateAccess(User user)
