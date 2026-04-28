@@ -45,7 +45,7 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 
 | Method | Route | Global role | Project role | Comment |
 |---|---|---|---|---|
-| GET  | `/api/v1/organisations` | authenticated | — | Tenant query filter scopes the list |
+| GET  | `/api/v1/organisations` | authenticated | — | B-007. **Non-SuperAdmin callers see only their own organisation** (controller-level scoping; ADR-0003 leaves Organisation intentionally unfiltered at the DbContext level since it's the tenant anchor used during pre-auth flows). SuperAdmin sees every active organisation per ADR-0007. |
 | POST | `/api/v1/organisations` | anonymous | — | Sign-up flow creates an org **and** mints a 24h bootstrap invitation token in the response. ADR-0011. Rate-limited to **10 / min per IP** (`anon-default` policy, B-002). |
 | POST | `/api/v1/organisations/{orgId}/invitations` | `OrgAdmin`, `SuperAdmin` | — | Mint a 7-day invitation token (max 30) for a future user. OrgAdmin can only mint for their own organisation; SuperAdmin can mint for any (mirrors ADR-0012). Body: `{ email?, expiresInDays? }`. ADR-0011, commit `3839468`. |
 
@@ -146,10 +146,14 @@ hardening candidates in future sprints.
   intended responder (if any).~~ **Closed by B-006 (2026-04-28).**
   When `AssignedToId` is set, caller must be that user OR an
   `InformationManager+`; unassigned RFIs remain open to the floor.
-- `GET /api/v1/organisations` returns all organisations visible
-  through the tenant query filter; for ordinary users this is their
-  own org, for `SuperAdmin` this is all orgs. Acceptable by ADR-0003
-  but worth revisiting if an admin UI is built.
+- ~~`GET /api/v1/organisations` returns all organisations visible
+  through the tenant query filter~~ — **the prior text was
+  factually wrong; Organisation is intentionally unfiltered per
+  ADR-0003, so the endpoint exposed every other org's Name/Code
+  to any authenticated caller. Closed by B-007 (2026-04-28).**
+  Non-SuperAdmin callers are now scoped to their own organisation
+  at the controller layer; SuperAdmin retains the wider view per
+  ADR-0007.
 - ~~No rate limiting on `POST /auth/login` or `/auth/refresh`~~ —
   **Closed by B-002 (2026-04-28).** Per-IP fixed-window limits
   added: `login` 5 / min, `register` / `refresh` /

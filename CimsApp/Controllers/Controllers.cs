@@ -80,7 +80,21 @@ public class OrganisationsController(
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] string? search = null)
     {
+        // B-007: scope non-SuperAdmin callers to their own organisation
+        // only. ADR-0003 leaves Organisation intentionally unfiltered at
+        // the DbContext level (it's the tenant anchor itself, used during
+        // pre-auth flows like sign-up and login), so the scoping has to
+        // happen at the controller. Without this, any authenticated
+        // OrgAdmin in Org A could enumerate every other organisation's
+        // Name and Code via this endpoint. SuperAdmin retains the wider
+        // view per ADR-0007.
         var q = db.Organisations.Where(o => o.IsActive);
+        if (!tenant.IsSuperAdmin)
+        {
+            var callerOrgId = tenant.OrganisationId
+                ?? throw new ForbiddenException("No tenant context");
+            q = q.Where(o => o.Id == callerOrgId);
+        }
         if (!string.IsNullOrEmpty(search)) q = q.Where(o => o.Name.Contains(search));
         return Ok(new { success = true, data = await q.OrderBy(o => o.Name).ToListAsync() });
     }
