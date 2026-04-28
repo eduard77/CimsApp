@@ -488,7 +488,7 @@ public class RfisController(RfiService svc, CimsDbContext db) : CimsControllerBa
     {
         var role = await GetProjectRoleAsync(db, projectId);
         if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember)) throw new ForbiddenException();
-        return Ok(new { success = true, data = await svc.RespondAsync(rfiId, projectId, req, CurrentUserId, ClientIp, ClientAgent) });
+        return Ok(new { success = true, data = await svc.RespondAsync(rfiId, projectId, req, CurrentUserId, role, ClientIp, ClientAgent) });
     }
 }
 
@@ -517,7 +517,7 @@ public class ActionsController(ActionsService svc, CimsDbContext db) : CimsContr
     {
         var role = await GetProjectRoleAsync(db, projectId);
         if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember)) throw new ForbiddenException();
-        return Ok(new { success = true, data = await svc.UpdateAsync(actionId, projectId, req, CurrentUserId, ClientIp, ClientAgent) });
+        return Ok(new { success = true, data = await svc.UpdateAsync(actionId, projectId, req, CurrentUserId, role, ClientIp, ClientAgent) });
     }
 }
 

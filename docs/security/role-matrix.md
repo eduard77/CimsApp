@@ -97,7 +97,7 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 |---|---|---|---|---|
 | GET  | `/api/v1/projects/{projectId}/rfis` | authenticated | membership | |
 | POST | `/api/v1/projects/{projectId}/rfis` | authenticated | `TaskTeamMember+` | T-S0-08 |
-| POST | `/api/v1/projects/{projectId}/rfis/{rfiId}/respond` | authenticated | `TaskTeamMember+` | T-S0-08 |
+| POST | `/api/v1/projects/{projectId}/rfis/{rfiId}/respond` | authenticated | `TaskTeamMember+` | T-S0-08 floor + **B-006** ownership: if `AssignedToId` is set, only that user OR an `InformationManager+` may respond. Unassigned RFIs remain open to any caller at the floor. |
 
 ## Actions
 
@@ -105,7 +105,7 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 |---|---|---|---|---|
 | GET  | `/api/v1/projects/{projectId}/actions` | authenticated | membership | |
 | POST | `/api/v1/projects/{projectId}/actions` | authenticated | `TaskTeamMember+` | T-S0-08 |
-| PATCH | `/api/v1/projects/{projectId}/actions/{actionId}` | authenticated | `TaskTeamMember+` | T-S0-08; assignee ownership check deferred |
+| PATCH | `/api/v1/projects/{projectId}/actions/{actionId}` | authenticated | `TaskTeamMember+` | T-S0-08 floor + **B-005** ownership: if `AssigneeId` is set, only that user OR a `ProjectManager+` may update. Unassigned actions remain open to any caller at the floor. |
 
 ## Audit
 
@@ -130,11 +130,14 @@ prefix, predates the `api/v1/` convention).
 These are *not* bugs per current ADR-0010 scope, but likely ADR or
 hardening candidates in future sprints.
 
-- `PATCH actions/{actionId}` does not verify the caller is the
-  action's assignee. `TaskTeamMember+` covers the minimum floor;
-  service-level assignee check is deferred.
-- `POST rfis/{rfiId}/respond` does not verify the caller is the
-  intended responder (if any). Same reasoning.
+- ~~`PATCH actions/{actionId}` does not verify the caller is the
+  action's assignee.~~ **Closed by B-005 (2026-04-28).** Caller
+  must be the assignee OR `ProjectManager+`; unassigned actions
+  remain open to the floor.
+- ~~`POST rfis/{rfiId}/respond` does not verify the caller is the
+  intended responder (if any).~~ **Closed by B-006 (2026-04-28).**
+  When `AssignedToId` is set, caller must be that user OR an
+  `InformationManager+`; unassigned RFIs remain open to the floor.
 - `GET /api/v1/organisations` returns all organisations visible
   through the tenant query filter; for ordinary users this is their
   own org, for `SuperAdmin` this is all orgs. Acceptable by ADR-0003
