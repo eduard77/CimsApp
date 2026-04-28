@@ -131,4 +131,63 @@ public class AuthServiceInputValidationTests
                 Email: "a@b.com", Password: "x", FirstName: null!, LastName: "B",
                 JobTitle: null, InvitationToken: "tok")));
     }
+
+    // ── B-001 RevokeUserTokensAsync ─────────────────────────────────────────
+
+    [Fact]
+    public async Task RevokeUserTokens_sets_cutoff_to_UtcNow_on_existing_user()
+    {
+        var orgId  = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var tenant = new StubTenantContext
+        {
+            OrganisationId = orgId, UserId = userId,
+            GlobalRole     = UserRole.OrgAdmin,
+        };
+        var options = new DbContextOptionsBuilder<CimsDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            seed.Organisations.Add(new Organisation { Id = orgId, Name = "O", Code = "O" });
+            seed.Users.Add(new User
+            {
+                Id = userId, Email = $"u-{Guid.NewGuid():N}@e.com",
+                PasswordHash = "x", FirstName = "U", LastName = "U",
+                OrganisationId = orgId,
+            });
+            seed.SaveChanges();
+        }
+
+        var cfg = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Jwt:AccessSecret"]  = new string('a', 64),
+                ["Jwt:RefreshSecret"] = new string('b', 64),
+                ["Jwt:Issuer"]        = "I", ["Jwt:Audience"] = "A",
+                ["Jwt:AccessExpiresMinutes"] = "60", ["Jwt:RefreshExpiresDays"] = "7",
+            }).Build();
+
+        var before = DateTime.UtcNow;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new AuthService(db, cfg, new InvitationService(db));
+            await svc.RevokeUserTokensAsync(userId);
+        }
+        var after = DateTime.UtcNow;
+
+        using var verify = new CimsDbContext(options, tenant);
+        var u = verify.Users.IgnoreQueryFilters().Single(x => x.Id == userId);
+        Assert.NotNull(u.TokenInvalidationCutoff);
+        Assert.InRange(u.TokenInvalidationCutoff!.Value, before, after);
+    }
+
+    [Fact]
+    public async Task RevokeUserTokens_unknown_user_throws_NotFound()
+    {
+        var svc = BuildService();
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            svc.RevokeUserTokensAsync(Guid.NewGuid()));
+    }
 }

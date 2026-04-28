@@ -37,6 +37,13 @@ public class User
     // whose only roles live on ProjectMember. SuperAdmin is permitted
     // cross-tenant visibility (see ADR-0003, PAFM F.1).
     public UserRole? GlobalRole { get; set; }
+
+    /// <summary>B-001: any access token issued before this cutoff is
+    /// rejected by `JwtBearerEvents.OnTokenValidated`. Bumped on
+    /// explicit revoke (e.g. role demotion, deactivation, password
+    /// reset). Null = no cutoff applied. The matching `IsActive == false`
+    /// case is also rejected at the same hook regardless of cutoff.</summary>
+    public DateTime? TokenInvalidationCutoff { get; set; }
     [NotMapped] public string FullName => $"{FirstName} {LastName}";
     public ICollection<ProjectMember> ProjectMemberships { get; set; } = [];
     public ICollection<RefreshToken> RefreshTokens { get; set; } = [];
