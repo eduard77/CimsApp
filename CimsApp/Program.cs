@@ -35,6 +35,17 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateIssuer           = true,  ValidIssuer   = builder.Configuration["Jwt:Issuer"],
             ValidateAudience         = true,  ValidAudience = builder.Configuration["Jwt:Audience"],
             ValidateLifetime         = true,  ClockSkew     = TimeSpan.Zero,
+            // SR-S0-03 / ADR-0010: ASP.NET reads the role claim from
+            // "cims:role" (CIMS GlobalRole) instead of the default
+            // ClaimTypes.Role. Required for `[Authorize(Roles = ...)]`
+            // gates to honour our enum-string roles. Side effect:
+            // anything else that calls `User.IsInRole(...)` /
+            // `FindFirst(ClaimTypes.Role)` will see only the cims:role
+            // claim, not any standard-claim role. If federated SSO
+            // lands (B-009), the IdP may emit `ClaimTypes.Role` and
+            // those roles would silently be ignored — revisit then,
+            // possibly via a claims-transformer that maps external
+            // roles onto cims:role.
             RoleClaimType            = CimsApp.Services.Tenancy.HttpTenantContext.GlobalRoleClaimType,
         };
         // B-001: per-user revocation hook. After JWT signature /
