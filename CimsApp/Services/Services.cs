@@ -121,6 +121,20 @@ public class AuthService(CimsDbContext db, IConfiguration cfg, InvitationService
         await db.Users.Include(u => u.Organisation).FirstOrDefaultAsync(u => u.Id == id && u.IsActive)
         ?? throw new NotFoundException("User");
 
+    /// <summary>
+    /// B-001: bump <see cref="User.TokenInvalidationCutoff"/> to UtcNow
+    /// so any access token issued before this moment is rejected by
+    /// the JwtBearer `OnTokenValidated` hook. Caller is responsible
+    /// for the gating (admin or self-service) at the controller layer.
+    /// </summary>
+    public async Task RevokeUserTokensAsync(Guid userId)
+    {
+        var user = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == userId)
+            ?? throw new NotFoundException("User");
+        user.TokenInvalidationCutoff = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+    }
+
     private string GenerateAccess(User user)
     {
         var key   = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(AccessSecret));

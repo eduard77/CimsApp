@@ -26,14 +26,45 @@ builder.Services.AddScoped<CimsApp.Services.Iso19650.Iso19650FilenameValidator>(
 // ── JWT Auth ──────────────────────────────────────────────────────────────────
 var jwtKey = builder.Configuration["Jwt:AccessSecret"]!;
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(o => o.TokenValidationParameters = new TokenValidationParameters
+    .AddJwtBearer(o =>
     {
-        ValidateIssuerSigningKey = true,
-        IssuerSigningKey         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-        ValidateIssuer           = true,  ValidIssuer   = builder.Configuration["Jwt:Issuer"],
-        ValidateAudience         = true,  ValidAudience = builder.Configuration["Jwt:Audience"],
-        ValidateLifetime         = true,  ClockSkew     = TimeSpan.Zero,
-        RoleClaimType            = CimsApp.Services.Tenancy.HttpTenantContext.GlobalRoleClaimType,
+        o.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            ValidateIssuer           = true,  ValidIssuer   = builder.Configuration["Jwt:Issuer"],
+            ValidateAudience         = true,  ValidAudience = builder.Configuration["Jwt:Audience"],
+            ValidateLifetime         = true,  ClockSkew     = TimeSpan.Zero,
+            RoleClaimType            = CimsApp.Services.Tenancy.HttpTenantContext.GlobalRoleClaimType,
+        };
+        // B-001: per-user revocation hook. After JWT signature /
+        // issuer / audience / lifetime pass, look up the User and
+        // run the TokenRevocation rules (inactive user, or token
+        // issued before TokenInvalidationCutoff). The pure rule
+        // logic lives in `CimsApp.Services.Auth.TokenRevocation`
+        // for unit testing.
+        o.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
+        {
+            OnTokenValidated = async ctx =>
+            {
+                var sub = ctx.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                if (!Guid.TryParse(sub, out var userId))
+                {
+                    ctx.Fail("missing user id claim");
+                    return;
+                }
+                var db = ctx.HttpContext.RequestServices.GetRequiredService<CimsDbContext>();
+                var user = await db.Users.IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(u => u.Id == userId);
+                var iat = (ctx.SecurityToken as System.IdentityModel.Tokens.Jwt.JwtSecurityToken)
+                    ?.IssuedAt
+                    ?? DateTime.MinValue;
+                if (CimsApp.Services.Auth.TokenRevocation.IsRevoked(user, iat))
+                {
+                    ctx.Fail("token revoked");
+                }
+            }
+        };
     });
 builder.Services.AddAuthorization();
 
