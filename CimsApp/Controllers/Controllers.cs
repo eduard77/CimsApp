@@ -42,7 +42,7 @@ public class AuthController(AuthService svc) : ControllerBase
     public async Task<IActionResult> Refresh(RefreshRequest req)
     { var (a, r) = await svc.RefreshAsync(req.RefreshToken); return Ok(new { success = true, data = new { accessToken = a, refreshToken = r } }); }
 
-    [HttpPost("logout")]
+    [HttpPost("logout"), EnableRateLimiting("anon-default")]
     public async Task<IActionResult> Logout(RefreshRequest req)
     { await svc.LogoutAsync(req.RefreshToken); return Ok(new { success = true }); }
 
