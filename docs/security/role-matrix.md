@@ -32,6 +32,14 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 | POST | `/api/v1/auth/refresh` | anonymous | — | Refresh-token-bearer auth. Rate-limited to **10 / min per IP** (`anon-default` policy, B-002). |
 | POST | `/api/v1/auth/logout` | anonymous | — | Revokes refresh token |
 | GET  | `/api/v1/auth/me` | authenticated | — | Profile self-read |
+| POST | `/api/v1/auth/logout-everywhere` | authenticated | — | B-001 / ADR-0014. Self-service. Bumps caller's `TokenInvalidationCutoff`; all access tokens — including the one in this request — are rejected at the next authenticated request. |
+
+## Users (admin)
+
+| Method | Route | Global role | Project role | Comment |
+|---|---|---|---|---|
+| POST | `/api/v1/users/{userId}/revoke-tokens` | `OrgAdmin`, `SuperAdmin` | — | B-001 / ADR-0014. Bumps target user's `TokenInvalidationCutoff`. OrgAdmin can target users in their own org only (tenant query filter); SuperAdmin can target any user (`IsSuperAdmin` branch in service uses `IgnoreQueryFilters` per ADR-0007). Cross-org attempts return 404 (existence not leaked). |
+| POST | `/api/v1/users/{userId}/deactivate` | `OrgAdmin`, `SuperAdmin` | — | B-001 / ADR-0014. Atomically sets `IsActive = false` AND bumps `TokenInvalidationCutoff`. The IsActive flip kills every active session via the `TokenRevocation.IsRevoked` IsActive short-circuit; the cutoff is belt-and-braces. Same tenant-scoping as revoke-tokens. |
 
 ## Organisations
 

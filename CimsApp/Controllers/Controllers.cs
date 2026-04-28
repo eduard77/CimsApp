@@ -53,6 +53,21 @@ public class AuthController(AuthService svc) : ControllerBase
         var user   = await svc.GetUserAsync(userId);
         return Ok(new { success = true, data = new UserSummaryDto(user.Id, user.Email, user.FirstName, user.LastName, user.JobTitle, new OrgSummaryDto(user.Organisation.Id, user.Organisation.Name, user.Organisation.Code)) });
     }
+
+    /// <summary>
+    /// B-001 / ADR-0014: self-service "log out everywhere". Bumps the
+    /// caller's own <see cref="User.TokenInvalidationCutoff"/>; all
+    /// access tokens minted before this moment — including the one
+    /// in the request that called this endpoint — are rejected at
+    /// the next authenticated request.
+    /// </summary>
+    [Authorize, HttpPost("logout-everywhere")]
+    public async Task<IActionResult> LogoutEverywhere()
+    {
+        var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        await svc.RevokeOwnTokensAsync(userId);
+        return Ok(new { success = true });
+    }
 }
 
 // ── Organisations ─────────────────────────────────────────────────────────────
@@ -123,6 +138,34 @@ public class OrganisationsController(
             success = true,
             data = new InvitationDto(inv.Id, inv.Token, inv.ExpiresAt, false, req.Email),
         });
+    }
+}
+
+// ── Users (admin) ─────────────────────────────────────────────────────────────
+// B-001 / ADR-0014: admin user-management endpoints that consume the
+// revocation primitive. OrgAdmin can target users in their own
+// organisation only (tenant query filter on the User lookup);
+// SuperAdmin can target any user (IgnoreQueryFilters via the
+// `IsSuperAdmin` branch in the service).
+[Route("api/v1/users")]
+public class UsersController(
+    AuthService svc,
+    CimsApp.Services.Tenancy.ITenantContext tenant) : CimsControllerBase
+{
+    [HttpPost("{userId:guid}/revoke-tokens")]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
+    public async Task<IActionResult> RevokeTokens(Guid userId)
+    {
+        await svc.RevokeUserTokensAsync(userId, tenant);
+        return Ok(new { success = true });
+    }
+
+    [HttpPost("{userId:guid}/deactivate")]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
+    public async Task<IActionResult> Deactivate(Guid userId)
+    {
+        await svc.DeactivateUserAsync(userId, tenant);
+        return Ok(new { success = true });
     }
 }
 

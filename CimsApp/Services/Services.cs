@@ -122,15 +122,59 @@ public class AuthService(CimsDbContext db, IConfiguration cfg, InvitationService
         ?? throw new NotFoundException("User");
 
     /// <summary>
-    /// B-001: bump <see cref="User.TokenInvalidationCutoff"/> to UtcNow
-    /// so any access token issued before this moment is rejected by
-    /// the JwtBearer `OnTokenValidated` hook. Caller is responsible
-    /// for the gating (admin or self-service) at the controller layer.
+    /// B-001: self-service revoke. Bumps the caller's own
+    /// <see cref="User.TokenInvalidationCutoff"/> to UtcNow so all
+    /// other access tokens minted before this moment are rejected by
+    /// the JwtBearer `OnTokenValidated` hook. The caller's CURRENT
+    /// access token is also invalidated — they will need to log in
+    /// again. By design: "log out everywhere" includes "this device".
     /// </summary>
-    public async Task RevokeUserTokensAsync(Guid userId)
+    public async Task RevokeOwnTokensAsync(Guid actorId)
     {
-        var user = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == userId)
+        // IgnoreQueryFilters because the caller IS the target — there
+        // is no tenant-scope concern when revoking your own sessions.
+        var user = await db.Users.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(u => u.Id == actorId)
             ?? throw new NotFoundException("User");
+        user.TokenInvalidationCutoff = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// B-001 / ADR-0014: admin revoke. Bumps the target user's
+    /// <see cref="User.TokenInvalidationCutoff"/>. The lookup respects
+    /// the tenant query filter — OrgAdmin can only target users in
+    /// their own organisation; SuperAdmin bypasses the filter via
+    /// IgnoreQueryFilters per ADR-0007. Cross-tenant attempts 404.
+    /// </summary>
+    public async Task RevokeUserTokensAsync(Guid userId, CimsApp.Services.Tenancy.ITenantContext tenant)
+    {
+        var query = tenant.IsSuperAdmin
+            ? db.Users.IgnoreQueryFilters()
+            : db.Users.AsQueryable();
+        var user = await query.FirstOrDefaultAsync(u => u.Id == userId)
+            ?? throw new NotFoundException("User");
+        user.TokenInvalidationCutoff = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// B-001 / ADR-0014: deactivate a user AND revoke their tokens
+    /// atomically. Sets `IsActive = false` (which the
+    /// `TokenRevocation.IsRevoked` helper checks first — independent
+    /// of cutoff, so an inactive user's JWT is rejected regardless
+    /// of timing) and bumps the cutoff (belt-and-braces; also covers
+    /// any future code path that re-activates a user but should still
+    /// reject tokens issued during the inactive window).
+    /// </summary>
+    public async Task DeactivateUserAsync(Guid userId, CimsApp.Services.Tenancy.ITenantContext tenant)
+    {
+        var query = tenant.IsSuperAdmin
+            ? db.Users.IgnoreQueryFilters()
+            : db.Users.AsQueryable();
+        var user = await query.FirstOrDefaultAsync(u => u.Id == userId)
+            ?? throw new NotFoundException("User");
+        user.IsActive = false;
         user.TokenInvalidationCutoff = DateTime.UtcNow;
         await db.SaveChangesAsync();
     }
