@@ -2,6 +2,7 @@ using CimsApp.Core;
 using CimsApp.Data;
 using CimsApp.Models;
 using CimsApp.Services;
+using CimsApp.Services.Audit;
 using CimsApp.Services.Auth;
 using CimsApp.Tests.TestDoubles;
 using Microsoft.EntityFrameworkCore;
@@ -64,7 +65,7 @@ public class RefreshTokenSweepTests
     {
         var db = new CimsDbContext(options, tenant);
         var tracker = new LoginAttemptTracker(new MemoryCache(new MemoryCacheOptions()));
-        return new AuthService(db, cfg, new InvitationService(db), tracker);
+        return new AuthService(db, cfg, new InvitationService(db), tracker, new AuditService(db));
     }
 
     private static (Guid activeId, Guid alreadyRevokedId, Guid expiredId)

@@ -54,7 +54,7 @@ public class AuthServiceInputValidationTests
             })
             .Build();
 
-        return new AuthService(db, cfg, new InvitationService(db), NewTracker());
+        return new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
     }
 
     private static ILoginAttemptTracker NewTracker() =>
@@ -186,7 +186,7 @@ public class AuthServiceInputValidationTests
         var before = DateTime.UtcNow;
         using (var db = new CimsDbContext(options, tenant))
         {
-            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker());
+            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
             await svc.RevokeOwnTokensAsync(userInA);
         }
         var after = DateTime.UtcNow;
@@ -217,7 +217,7 @@ public class AuthServiceInputValidationTests
 
         using (var db = new CimsDbContext(options, orgAdmin))
         {
-            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker());
+            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
             await svc.RevokeUserTokensAsync(userInA, orgAdmin);
         }
 
@@ -241,7 +241,7 @@ public class AuthServiceInputValidationTests
         };
 
         using var db = new CimsDbContext(options, orgAdmin);
-        var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker());
+        var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
         await Assert.ThrowsAsync<NotFoundException>(() =>
             svc.RevokeUserTokensAsync(userInB, orgAdmin));
     }
@@ -258,7 +258,7 @@ public class AuthServiceInputValidationTests
 
         using (var db = new CimsDbContext(options, superAdmin))
         {
-            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker());
+            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
             await svc.RevokeUserTokensAsync(userInB, superAdmin);
         }
 
@@ -279,7 +279,7 @@ public class AuthServiceInputValidationTests
         var before = DateTime.UtcNow;
         using (var db = new CimsDbContext(options, orgAdmin))
         {
-            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker());
+            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
             await svc.DeactivateUserAsync(userInA, orgAdmin);
         }
         var after = DateTime.UtcNow;
@@ -289,6 +289,108 @@ public class AuthServiceInputValidationTests
         Assert.False(u.IsActive);
         Assert.NotNull(u.TokenInvalidationCutoff);
         Assert.InRange(u.TokenInvalidationCutoff!.Value, before, after);
+    }
+
+    // ── B-021 structured auth-domain audit events ───────────────────────────
+
+    [Fact]
+    public async Task RevokeOwnTokens_emits_auth_user_self_revoke_audit()
+    {
+        var (options, cfg, orgA, _, userInA, _) = BuildTwoTenantFixture();
+        var tenant = new StubTenantContext { OrganisationId = orgA, UserId = userInA };
+
+        // Seed two active refresh tokens so the swept count is > 0.
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            seed.RefreshTokens.AddRange(
+                new RefreshToken { Token = $"t1-{Guid.NewGuid():N}", UserId = userInA, ExpiresAt = DateTime.UtcNow.AddDays(7) },
+                new RefreshToken { Token = $"t2-{Guid.NewGuid():N}", UserId = userInA, ExpiresAt = DateTime.UtcNow.AddDays(7) });
+            seed.SaveChanges();
+        }
+
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
+            await svc.RevokeOwnTokensAsync(userInA);
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var audit = Assert.Single(verify.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.Action == "auth.user_self_revoke"));
+        Assert.Equal("User", audit.Entity);
+        Assert.Equal(userInA.ToString(), audit.EntityId);
+        Assert.Equal(userInA, audit.UserId);
+        Assert.Contains("\"refreshTokensSwept\":2", audit.Detail);
+    }
+
+    [Fact]
+    public async Task RevokeUserTokens_admin_emits_auth_user_admin_revoke_audit()
+    {
+        var (options, cfg, orgA, _, userInA, _) = BuildTwoTenantFixture();
+        var adminId  = Guid.NewGuid();
+        var orgAdmin = new StubTenantContext
+        {
+            OrganisationId = orgA, UserId = adminId,
+            GlobalRole     = UserRole.OrgAdmin,
+        };
+        using (var seed = new CimsDbContext(options, orgAdmin))
+        {
+            seed.Users.Add(new User
+            {
+                Id = adminId, Email = $"adm-{Guid.NewGuid():N}@e.com",
+                PasswordHash = "x", FirstName = "Adm", LastName = "U",
+                OrganisationId = orgA,
+            });
+            seed.SaveChanges();
+        }
+
+        using (var db = new CimsDbContext(options, orgAdmin))
+        {
+            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
+            await svc.RevokeUserTokensAsync(userInA, orgAdmin);
+        }
+
+        using var verify = new CimsDbContext(options, orgAdmin);
+        var audit = Assert.Single(verify.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.Action == "auth.user_admin_revoke"));
+        Assert.Equal(userInA.ToString(), audit.EntityId);
+        Assert.Equal(adminId, audit.UserId);
+        Assert.Contains($"\"targetUserId\":\"{userInA}\"", audit.Detail);
+    }
+
+    [Fact]
+    public async Task DeactivateUser_emits_auth_user_deactivated_audit()
+    {
+        var (options, cfg, orgA, _, userInA, _) = BuildTwoTenantFixture();
+        var adminId  = Guid.NewGuid();
+        var orgAdmin = new StubTenantContext
+        {
+            OrganisationId = orgA, UserId = adminId,
+            GlobalRole     = UserRole.OrgAdmin,
+        };
+        using (var seed = new CimsDbContext(options, orgAdmin))
+        {
+            seed.Users.Add(new User
+            {
+                Id = adminId, Email = $"adm-{Guid.NewGuid():N}@e.com",
+                PasswordHash = "x", FirstName = "Adm", LastName = "U",
+                OrganisationId = orgA,
+            });
+            seed.SaveChanges();
+        }
+
+        using (var db = new CimsDbContext(options, orgAdmin))
+        {
+            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
+            await svc.DeactivateUserAsync(userInA, orgAdmin);
+        }
+
+        using var verify = new CimsDbContext(options, orgAdmin);
+        var audit = Assert.Single(verify.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.Action == "auth.user_deactivated"));
+        Assert.Equal(userInA.ToString(), audit.EntityId);
+        Assert.Equal(adminId, audit.UserId);
+        Assert.Contains($"\"targetUserId\":\"{userInA}\"", audit.Detail);
     }
 
     [Fact]
@@ -302,7 +404,7 @@ public class AuthServiceInputValidationTests
         };
 
         using var db = new CimsDbContext(options, orgAdmin);
-        var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker());
+        var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
         await Assert.ThrowsAsync<NotFoundException>(() =>
             svc.DeactivateUserAsync(userInB, orgAdmin));
 

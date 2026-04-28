@@ -3,6 +3,7 @@ using CimsApp.Data;
 using CimsApp.DTOs;
 using CimsApp.Models;
 using CimsApp.Services;
+using CimsApp.Services.Audit;
 using CimsApp.Services.Auth;
 using CimsApp.Tests.TestDoubles;
 using Microsoft.EntityFrameworkCore;
@@ -74,7 +75,7 @@ public class LoginProgressiveBackOffTests
 
         var db      = new CimsDbContext(options, tenant);
         var tracker = new StubTracker();
-        var svc     = new AuthService(db, cfg, new InvitationService(db), tracker);
+        var svc     = new AuthService(db, cfg, new InvitationService(db), tracker, new AuditService(db));
         return (svc, tracker, userId);
     }
 
@@ -192,7 +193,7 @@ public class LoginProgressiveBackOffTests
         var tracker = new LoginAttemptTracker(
             new MemoryCache(new MemoryCacheOptions()),
             lockoutThreshold: 5, window: TimeSpan.FromMinutes(15));
-        var svc = new AuthService(db, cfg, new InvitationService(db), tracker);
+        var svc = new AuthService(db, cfg, new InvitationService(db), tracker, new AuditService(db));
 
         // Five failures from the same IP — each returns the standard
         // INVALID_CREDENTIALS 401.

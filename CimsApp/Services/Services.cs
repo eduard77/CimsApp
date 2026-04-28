@@ -16,7 +16,8 @@ public class AuthService(
     CimsDbContext db,
     IConfiguration cfg,
     InvitationService invitations,
-    CimsApp.Services.Auth.ILoginAttemptTracker loginTracker)
+    CimsApp.Services.Auth.ILoginAttemptTracker loginTracker,
+    AuditService audit)
 {
 
     private string AccessSecret  => cfg["Jwt:AccessSecret"]!;
@@ -167,8 +168,15 @@ public class AuthService(
             .FirstOrDefaultAsync(u => u.Id == actorId)
             ?? throw new NotFoundException("User");
         user.TokenInvalidationCutoff = DateTime.UtcNow;
-        await SweepActiveRefreshTokensAsync(actorId);
+        var swept = await SweepActiveRefreshTokensAsync(actorId);
         await db.SaveChangesAsync();
+        // B-021: structured audit-twin event. Per-row audit is
+        // captured by AuditInterceptor; this adds the semantic
+        // action name + refresh-token sweep count for log-discoverable
+        // forensics.
+        await audit.WriteAsync(actorId, "auth.user_self_revoke",
+            "User", actorId.ToString(),
+            detail: new { refreshTokensSwept = swept });
     }
 
     /// <summary>
@@ -187,8 +195,13 @@ public class AuthService(
         var user = await query.FirstOrDefaultAsync(u => u.Id == userId)
             ?? throw new NotFoundException("User");
         user.TokenInvalidationCutoff = DateTime.UtcNow;
-        await SweepActiveRefreshTokensAsync(userId);
+        var swept = await SweepActiveRefreshTokensAsync(userId);
         await db.SaveChangesAsync();
+        // B-021. actorId is the admin's UserId from the tenant
+        // context; targetUserId is the user being revoked.
+        await audit.WriteAsync(tenant.UserId ?? Guid.Empty,
+            "auth.user_admin_revoke", "User", userId.ToString(),
+            detail: new { targetUserId = userId, refreshTokensSwept = swept });
     }
 
     /// <summary>
@@ -208,8 +221,15 @@ public class AuthService(
             ?? throw new NotFoundException("User");
         user.IsActive = false;
         user.TokenInvalidationCutoff = DateTime.UtcNow;
-        await SweepActiveRefreshTokensAsync(userId);
+        var swept = await SweepActiveRefreshTokensAsync(userId);
         await db.SaveChangesAsync();
+        // B-021. The IsActive flip + cutoff bump + refresh sweep are
+        // all captured by AuditInterceptor as per-row Updates; this
+        // structured event ties them together with a single
+        // discoverable action name.
+        await audit.WriteAsync(tenant.UserId ?? Guid.Empty,
+            "auth.user_deactivated", "User", userId.ToString(),
+            detail: new { targetUserId = userId, refreshTokensSwept = swept });
     }
 
     /// <summary>
@@ -226,7 +246,7 @@ public class AuthService(
     /// SaveChanges is batched into the calling method's
     /// SaveChangesAsync.
     /// </summary>
-    private async Task SweepActiveRefreshTokensAsync(Guid userId)
+    private async Task<int> SweepActiveRefreshTokensAsync(Guid userId)
     {
         var now = DateTime.UtcNow;
         var active = await db.RefreshTokens.IgnoreQueryFilters()
@@ -234,6 +254,7 @@ public class AuthService(
             .ToListAsync();
         foreach (var t in active)
             t.RevokedAt = now;
+        return active.Count;
     }
 
     private string GenerateAccess(User user)
