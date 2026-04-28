@@ -1,10 +1,11 @@
 # ADR-0014 — Access-token residual-authority SLA
 
-**Status:** Accepted (2026-04-28, post-S1, B-001 closeout)
+**Status:** Accepted (2026-04-28, post-S1, B-001 closeout) — §3
+amended same day, see Amendment log below.
 **Supersedes:** —
 **Related:** B-001 (Access-token lifetime + role-change revocation),
-ADR-0010 (two-tier role authorization), ADR-0011 (invitation-token
-user provisioning).
+B-019 (Refresh-token bulk-revoke), ADR-0010 (two-tier role
+authorization), ADR-0011 (invitation-token user provisioning).
 
 ## Context
 
@@ -69,15 +70,27 @@ When the call is made, the residual-authority window collapses to
 zero — the mutated user's existing JWT is rejected at the next
 authenticated request via the `OnTokenValidated` hook.
 
-### 3. Refresh tokens are NOT in scope of this SLA
+### 3. Refresh tokens ARE in scope of this SLA *(amended)*
 
-`TokenInvalidationCutoff` does not affect refresh tokens directly.
-Refresh tokens have their own `RevokedAt` field per
-`RefreshToken` entity, and `AuthService.LogoutAsync` handles the
-single-token revoke. A "log out everywhere" implementation that
-revokes ALL of a user's refresh tokens is a v1.1 hardening item
-(see B-019 / future entry); the access-token cutoff is sufficient
-for v1.0 since access tokens are short-lived.
+`TokenInvalidationCutoff` does not affect refresh tokens directly,
+but the three revoke entry points
+(`RevokeOwnTokensAsync`, `RevokeUserTokensAsync`,
+`DeactivateUserAsync`) sweep the user's active refresh tokens
+alongside the cutoff bump (B-019). Without the sweep, a
+multi-device user could refresh on another device after the
+cutoff bump and mint a fresh access token whose `iat` is strictly
+greater than the cutoff — defeating "log out everywhere".
+
+The original §3 reasoning ("access tokens are short-lived")
+was incomplete: refresh tokens produce fresh access tokens, so
+the relevant lifetime is `RefreshExpiresDays` (default 7), not
+`AccessExpiresMinutes`. Sweeping at revoke time collapses both
+to zero residual authority.
+
+`AuthService.LogoutAsync` continues to handle the
+single-token revoke for normal sign-out (the user knowingly ends
+one session); the bulk sweep is for the security-sensitive paths
+where every session should die.
 
 ### 4. The `IsActive` short-circuit is permanent
 
@@ -129,3 +142,14 @@ is the deactivation mechanism. They are belt-and-braces.
   signing key per user).** Rejected: would require per-user
   signing-key infrastructure for marginal benefit over the
   per-request DB lookup in `OnTokenValidated`.
+
+## Amendment log
+
+- **2026-04-28** — §3 amended. Refresh-token sweep added to
+  the three revoke entry points to close a "log out everywhere"
+  gap that the original §3 elided. Backlog item B-019
+  (originally a v1.1 candidate) implemented same day; ADR
+  rationale updated to match the implementation. The
+  alternative-considered "refresh tokens NOT in scope" is no
+  longer an alternative — it was a planning omission rather than
+  an active choice.
