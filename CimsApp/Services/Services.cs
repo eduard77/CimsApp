@@ -23,6 +23,15 @@ public class AuthService(CimsDbContext db, IConfiguration cfg, InvitationService
 
     public async Task<UserSummaryDto> RegisterAsync(RegisterRequest req)
     {
+        // Defensive null/empty guard on the request shape. Same fix-class
+        // as LoginAsync — without it, downstream code (`.Trim()` in
+        // InvitationService.ValidateAsync, `.ToLowerInvariant()` in the
+        // duplicate-email check) throws NRE and the operator sees a 500
+        // instead of the 400 / 409 the API contract promises.
+        if (string.IsNullOrEmpty(req.Email) || string.IsNullOrEmpty(req.Password)
+            || string.IsNullOrEmpty(req.FirstName) || string.IsNullOrEmpty(req.LastName))
+            throw new ValidationException(["Email, Password, FirstName, LastName are required"]);
+
         // Closes SR-S0-01: tenant ownership of the new User is no longer
         // attacker-supplied. The invitation token determines OrganisationId
         // and (for bootstrap tokens minted at org-creation time) the
@@ -62,6 +71,15 @@ public class AuthService(CimsDbContext db, IConfiguration cfg, InvitationService
 
     public async Task<AuthResponse> LoginAsync(LoginRequest req, string? ua, string? ip)
     {
+        // Defensive null/empty guard on the request shape. Without it,
+        // the LINQ expression below evaluates `req.Email.ToLowerInvariant()`
+        // as a query parameter inline and a null Email throws a
+        // NullReferenceException deep inside EF's expression interpreter
+        // — the operator sees a 500 instead of the 401 the API contract
+        // promises for any malformed credential payload.
+        if (string.IsNullOrEmpty(req.Email) || string.IsNullOrEmpty(req.Password))
+            throw new AppException("Invalid credentials", 401, "INVALID_CREDENTIALS");
+
         // Pre-auth: tenant is not yet known. Bypass the User query filter.
         var user = await db.Users.IgnoreQueryFilters().Include(u => u.Organisation)
             .FirstOrDefaultAsync(u => u.Email == req.Email.ToLowerInvariant() && u.IsActive)
