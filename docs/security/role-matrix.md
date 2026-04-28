@@ -56,7 +56,7 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 | GET  | `/api/v1/projects` | authenticated | — | Service filters to caller's memberships |
 | POST | `/api/v1/projects` | `OrgAdmin`, `SuperAdmin` | — | Admin-only (T-S0-08, commit `37013fc`). `AppointingPartyId` locked to caller's organisation; `SuperAdmin` may create under any org (audited with `project.created.superadmin_bypass`) — see ADR-0012 and commit `c83a8a9`. |
 | GET  | `/api/v1/projects/{projectId}` | authenticated | — | Service enforces membership |
-| POST | `/api/v1/projects/{projectId}/members` | authenticated | `ProjectManager+` | |
+| POST | `/api/v1/projects/{projectId}/members` | authenticated | `ProjectManager+` | Service-layer guard (SR-S0-05 close): the new member's `User.OrganisationId` must equal the project's `AppointingPartyId`. Cross-org attempts throw `ValidationException`. v1.0 simple model per ADR-0012; B2B contractor membership via `ProjectAppointment` is post-v1.0. |
 
 ## CDE
 
