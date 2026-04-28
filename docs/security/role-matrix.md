@@ -30,7 +30,7 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 | POST | `/api/v1/auth/register` | anonymous + invitation token | — | Sign-up. T-S0-11 closed SR-S0-01. Rate-limited to **10 / min per IP** (`anon-default` policy, B-002). |
 | POST | `/api/v1/auth/login` | anonymous | — | Issues JWT. Rate-limited to **5 / min per IP** (`anon-login` policy, B-002). Plus progressive back-off: **5 consecutive failures from one IP within a 15-min sliding window → 429 LOGIN_LOCKOUT** (B-002 close, `LoginAttemptTracker`). Reset on successful login. |
 | POST | `/api/v1/auth/refresh` | anonymous | — | Refresh-token-bearer auth. Rate-limited to **10 / min per IP** (`anon-default` policy, B-002). |
-| POST | `/api/v1/auth/logout` | anonymous | — | Revokes refresh token |
+| POST | `/api/v1/auth/logout` | anonymous | — | Revokes the supplied refresh token. Rate-limited to **10 / min per IP** (`anon-default` policy, B-002 follow-on) — the endpoint does a DB lookup per call and was missing the rate limit applied to the other anonymous endpoints. |
 | GET  | `/api/v1/auth/me` | authenticated | — | Profile self-read |
 | POST | `/api/v1/auth/logout-everywhere` | authenticated | — | B-001 / ADR-0014. Self-service. Bumps caller's `TokenInvalidationCutoff`; all access tokens — including the one in this request — are rejected at the next authenticated request. |
 
