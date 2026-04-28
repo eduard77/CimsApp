@@ -27,9 +27,9 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 
 | Method | Route | Global role | Project role | Comment |
 |---|---|---|---|---|
-| POST | `/api/v1/auth/register` | anonymous + invitation token | — | Sign-up. T-S0-11 closed SR-S0-01: caller-supplied `OrganisationId` removed from request, replaced with `InvitationToken`. Tenant is server-derived from the invitation. See ADR-0011. |
-| POST | `/api/v1/auth/login` | anonymous | — | Issues JWT |
-| POST | `/api/v1/auth/refresh` | anonymous | — | Refresh-token-bearer auth |
+| POST | `/api/v1/auth/register` | anonymous + invitation token | — | Sign-up. T-S0-11 closed SR-S0-01. Rate-limited to **10 / min per IP** (`anon-default` policy, B-002). |
+| POST | `/api/v1/auth/login` | anonymous | — | Issues JWT. Rate-limited to **5 / min per IP** (`anon-login` policy, B-002 — credential-testing target). |
+| POST | `/api/v1/auth/refresh` | anonymous | — | Refresh-token-bearer auth. Rate-limited to **10 / min per IP** (`anon-default` policy, B-002). |
 | POST | `/api/v1/auth/logout` | anonymous | — | Revokes refresh token |
 | GET  | `/api/v1/auth/me` | authenticated | — | Profile self-read |
 
@@ -38,7 +38,7 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 | Method | Route | Global role | Project role | Comment |
 |---|---|---|---|---|
 | GET  | `/api/v1/organisations` | authenticated | — | Tenant query filter scopes the list |
-| POST | `/api/v1/organisations` | anonymous | — | Sign-up flow creates an org **and** mints a 24h bootstrap invitation token in the response. The first registrant who consumes the bootstrap token becomes the org's first OrgAdmin. ADR-0011, commit `3839468`. |
+| POST | `/api/v1/organisations` | anonymous | — | Sign-up flow creates an org **and** mints a 24h bootstrap invitation token in the response. ADR-0011. Rate-limited to **10 / min per IP** (`anon-default` policy, B-002). |
 | POST | `/api/v1/organisations/{orgId}/invitations` | `OrgAdmin`, `SuperAdmin` | — | Mint a 7-day invitation token (max 30) for a future user. OrgAdmin can only mint for their own organisation; SuperAdmin can mint for any (mirrors ADR-0012). Body: `{ email?, expiresInDays? }`. ADR-0011, commit `3839468`. |
 
 ## Projects
@@ -142,8 +142,12 @@ hardening candidates in future sprints.
   through the tenant query filter; for ordinary users this is their
   own org, for `SuperAdmin` this is all orgs. Acceptable by ADR-0003
   but worth revisiting if an admin UI is built.
-- No rate limiting on `POST /auth/login` or `/auth/refresh`; out of
-  S0 scope, candidate for a later hardening sprint.
+- ~~No rate limiting on `POST /auth/login` or `/auth/refresh`~~ —
+  **Closed by B-002 (2026-04-28).** Per-IP fixed-window limits
+  added: `login` 5 / min, `register` / `refresh` /
+  `organisations create` 10 / min. CAPTCHA + email-verification
+  remain v1.1 candidates (separate item if pre-customer onboarding
+  warrants them).
 
 ## Update protocol
 

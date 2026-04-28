@@ -1,5 +1,7 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -34,6 +36,43 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         RoleClaimType            = CimsApp.Services.Tenancy.HttpTenantContext.GlobalRoleClaimType,
     });
 builder.Services.AddAuthorization();
+
+// ── Rate limiting (B-002) ─────────────────────────────────────────────────────
+// Per-IP fixed-window limits on the four anonymous endpoints. Two
+// policies — "anon-login" is tighter because it's the credential-testing
+// target; "anon-default" covers register / refresh / organisation
+// creation. Authenticated routes are NOT rate-limited at this layer
+// (cross-cutting hardening for those is B-001 / a future per-user
+// throttle). 429 is returned with Retry-After.
+//
+// CAPTCHA / email-verification on organisation creation are NOT in this
+// task — separate v1.1 items if pre-customer onboarding warrants them.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.AddPolicy("anon-login", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit       = 5,
+                Window            = TimeSpan.FromMinutes(1),
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit        = 0,
+            }));
+
+    options.AddPolicy("anon-default", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit       = 10,
+                Window            = TimeSpan.FromMinutes(1),
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit        = 0,
+            }));
+});
 
 // ── API controllers ───────────────────────────────────────────────────────────
 builder.Services.AddControllers()
@@ -101,6 +140,8 @@ app.UseStaticFiles();
 app.UseAntiforgery();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();    // B-002 — must follow Authentication so policies
+                         // can partition on IP after the connection is set.
 app.MapControllers();
 app.MapRazorComponents<CimsApp.Components.App>()
    .AddInteractiveServerRenderMode();
