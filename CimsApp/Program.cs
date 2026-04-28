@@ -131,6 +131,12 @@ builder.Services.AddHttpContextAccessor();
 
 // ── App Services ──────────────────────────────────────────────────────────────
 builder.Services.AddScoped<AuditService>();
+// B-002 progressive back-off: tracker holds the per-IP failed-attempt
+// counter in IMemoryCache. Singleton because the cache state must
+// persist across requests.
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<CimsApp.Services.Auth.ILoginAttemptTracker,
+    CimsApp.Services.Auth.LoginAttemptTracker>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<InvitationService>();
 builder.Services.AddScoped<ProjectsService>();
