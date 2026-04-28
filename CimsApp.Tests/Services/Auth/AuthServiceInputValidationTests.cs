@@ -132,34 +132,35 @@ public class AuthServiceInputValidationTests
                 JobTitle: null, InvitationToken: "tok")));
     }
 
-    // ── B-001 RevokeUserTokensAsync ─────────────────────────────────────────
+    // ── B-001 / ADR-0014 revocation endpoints ────────────────────────────────
 
-    [Fact]
-    public async Task RevokeUserTokens_sets_cutoff_to_UtcNow_on_existing_user()
+    private static (DbContextOptions<CimsDbContext> options, IConfiguration cfg, Guid orgA, Guid orgB, Guid userInA, Guid userInB)
+        BuildTwoTenantFixture()
     {
-        var orgId  = Guid.NewGuid();
-        var userId = Guid.NewGuid();
-        var tenant = new StubTenantContext
+        var orgA    = Guid.NewGuid();
+        var orgB    = Guid.NewGuid();
+        var userInA = Guid.NewGuid();
+        var userInB = Guid.NewGuid();
+        var seedTenant = new StubTenantContext
         {
-            OrganisationId = orgId, UserId = userId,
-            GlobalRole     = UserRole.OrgAdmin,
+            OrganisationId = orgA, UserId = userInA,
+            GlobalRole     = UserRole.SuperAdmin,
         };
         var options = new DbContextOptionsBuilder<CimsDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
-
-        using (var seed = new CimsDbContext(options, tenant))
+        using (var seed = new CimsDbContext(options, seedTenant))
         {
-            seed.Organisations.Add(new Organisation { Id = orgId, Name = "O", Code = "O" });
-            seed.Users.Add(new User
-            {
-                Id = userId, Email = $"u-{Guid.NewGuid():N}@e.com",
-                PasswordHash = "x", FirstName = "U", LastName = "U",
-                OrganisationId = orgId,
-            });
+            seed.Organisations.AddRange(
+                new Organisation { Id = orgA, Name = "A", Code = "TA" },
+                new Organisation { Id = orgB, Name = "B", Code = "TB" });
+            seed.Users.AddRange(
+                new User { Id = userInA, Email = $"a-{Guid.NewGuid():N}@e.com",
+                    PasswordHash = "x", FirstName = "A", LastName = "U", OrganisationId = orgA },
+                new User { Id = userInB, Email = $"b-{Guid.NewGuid():N}@e.com",
+                    PasswordHash = "x", FirstName = "B", LastName = "U", OrganisationId = orgB });
             seed.SaveChanges();
         }
-
         var cfg = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -168,26 +169,142 @@ public class AuthServiceInputValidationTests
                 ["Jwt:Issuer"]        = "I", ["Jwt:Audience"] = "A",
                 ["Jwt:AccessExpiresMinutes"] = "60", ["Jwt:RefreshExpiresDays"] = "7",
             }).Build();
+        return (options, cfg, orgA, orgB, userInA, userInB);
+    }
+
+    [Fact]
+    public async Task RevokeOwnTokens_sets_cutoff_to_UtcNow()
+    {
+        var (options, cfg, orgA, _, userInA, _) = BuildTwoTenantFixture();
+        var tenant = new StubTenantContext { OrganisationId = orgA, UserId = userInA };
 
         var before = DateTime.UtcNow;
         using (var db = new CimsDbContext(options, tenant))
         {
             var svc = new AuthService(db, cfg, new InvitationService(db));
-            await svc.RevokeUserTokensAsync(userId);
+            await svc.RevokeOwnTokensAsync(userInA);
         }
         var after = DateTime.UtcNow;
 
         using var verify = new CimsDbContext(options, tenant);
-        var u = verify.Users.IgnoreQueryFilters().Single(x => x.Id == userId);
+        var u = verify.Users.IgnoreQueryFilters().Single(x => x.Id == userInA);
         Assert.NotNull(u.TokenInvalidationCutoff);
         Assert.InRange(u.TokenInvalidationCutoff!.Value, before, after);
     }
 
     [Fact]
-    public async Task RevokeUserTokens_unknown_user_throws_NotFound()
+    public async Task RevokeOwnTokens_unknown_user_throws_NotFound()
     {
         var svc = BuildService();
         await Assert.ThrowsAsync<NotFoundException>(() =>
-            svc.RevokeUserTokensAsync(Guid.NewGuid()));
+            svc.RevokeOwnTokensAsync(Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task RevokeUserTokens_admin_OrgAdmin_can_target_own_org_user()
+    {
+        var (options, cfg, orgA, _, userInA, _) = BuildTwoTenantFixture();
+        var orgAdmin = new StubTenantContext
+        {
+            OrganisationId = orgA, UserId = Guid.NewGuid(),
+            GlobalRole     = UserRole.OrgAdmin,
+        };
+
+        using (var db = new CimsDbContext(options, orgAdmin))
+        {
+            var svc = new AuthService(db, cfg, new InvitationService(db));
+            await svc.RevokeUserTokensAsync(userInA, orgAdmin);
+        }
+
+        using var verify = new CimsDbContext(options, orgAdmin);
+        Assert.NotNull(verify.Users.IgnoreQueryFilters().Single(x => x.Id == userInA).TokenInvalidationCutoff);
+    }
+
+    [Fact]
+    public async Task RevokeUserTokens_admin_OrgAdmin_cannot_target_other_org_user()
+    {
+        // Cross-tenant attempt: OrgAdmin in A tries to revoke a user
+        // in B. The lookup uses the tenant query filter (filter
+        // u.OrganisationId == orgA), so the userInB row is not
+        // visible — service returns NotFound, not Forbidden, so the
+        // existence of the cross-org user doesn't leak.
+        var (options, cfg, orgA, _, _, userInB) = BuildTwoTenantFixture();
+        var orgAdmin = new StubTenantContext
+        {
+            OrganisationId = orgA, UserId = Guid.NewGuid(),
+            GlobalRole     = UserRole.OrgAdmin,
+        };
+
+        using var db = new CimsDbContext(options, orgAdmin);
+        var svc = new AuthService(db, cfg, new InvitationService(db));
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            svc.RevokeUserTokensAsync(userInB, orgAdmin));
+    }
+
+    [Fact]
+    public async Task RevokeUserTokens_admin_SuperAdmin_can_target_any_org_user()
+    {
+        var (options, cfg, orgA, _, _, userInB) = BuildTwoTenantFixture();
+        var superAdmin = new StubTenantContext
+        {
+            OrganisationId = orgA, UserId = Guid.NewGuid(),
+            GlobalRole     = UserRole.SuperAdmin,
+        };
+
+        using (var db = new CimsDbContext(options, superAdmin))
+        {
+            var svc = new AuthService(db, cfg, new InvitationService(db));
+            await svc.RevokeUserTokensAsync(userInB, superAdmin);
+        }
+
+        using var verify = new CimsDbContext(options, superAdmin);
+        Assert.NotNull(verify.Users.IgnoreQueryFilters().Single(x => x.Id == userInB).TokenInvalidationCutoff);
+    }
+
+    [Fact]
+    public async Task DeactivateUser_sets_IsActive_false_and_bumps_cutoff()
+    {
+        var (options, cfg, orgA, _, userInA, _) = BuildTwoTenantFixture();
+        var orgAdmin = new StubTenantContext
+        {
+            OrganisationId = orgA, UserId = Guid.NewGuid(),
+            GlobalRole     = UserRole.OrgAdmin,
+        };
+
+        var before = DateTime.UtcNow;
+        using (var db = new CimsDbContext(options, orgAdmin))
+        {
+            var svc = new AuthService(db, cfg, new InvitationService(db));
+            await svc.DeactivateUserAsync(userInA, orgAdmin);
+        }
+        var after = DateTime.UtcNow;
+
+        using var verify = new CimsDbContext(options, orgAdmin);
+        var u = verify.Users.IgnoreQueryFilters().Single(x => x.Id == userInA);
+        Assert.False(u.IsActive);
+        Assert.NotNull(u.TokenInvalidationCutoff);
+        Assert.InRange(u.TokenInvalidationCutoff!.Value, before, after);
+    }
+
+    [Fact]
+    public async Task DeactivateUser_OrgAdmin_cannot_target_other_org_user()
+    {
+        var (options, cfg, orgA, _, _, userInB) = BuildTwoTenantFixture();
+        var orgAdmin = new StubTenantContext
+        {
+            OrganisationId = orgA, UserId = Guid.NewGuid(),
+            GlobalRole     = UserRole.OrgAdmin,
+        };
+
+        using var db = new CimsDbContext(options, orgAdmin);
+        var svc = new AuthService(db, cfg, new InvitationService(db));
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            svc.DeactivateUserAsync(userInB, orgAdmin));
+
+        // Confirm the target user wasn't mutated.
+        using var verify = new CimsDbContext(options, orgAdmin);
+        var u = verify.Users.IgnoreQueryFilters().Single(x => x.Id == userInB);
+        Assert.True(u.IsActive);
+        Assert.Null(u.TokenInvalidationCutoff);
     }
 }
