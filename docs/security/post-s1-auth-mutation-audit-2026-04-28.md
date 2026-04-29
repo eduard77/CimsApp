@@ -170,6 +170,18 @@ revoke primitive, and the other security-sensitive mutations
 risk is dormant pending future endpoints (role-demote, password
 reset, both natural fits for v1.1 / S14).
 
+**Follow-on finding (2026-04-29).** A defense-in-depth gap was
+later identified in the AuditInterceptor itself: `User.PasswordHash`
+and `Invitation.TokenHash` were being serialised verbatim into
+the audit `BeforeValue` / `AfterValue` JSON. Bcrypt'd hashes
+and SHA-256 token hashes are not plaintext but should not leak
+into the audit log's wider blast radius. Closed by adding a
+`SkippedFieldNames` set to `AuditInterceptor.SerialiseState`
+that filters those property names out of every audited entity,
+plus regression tests in `AuditInterceptorBehaviourTests` that
+seed Users with a recognisable bcrypt prefix and assert it
+does not appear in the audit JSON.
+
 Two refinements identified and promoted to backlog as B-021
 (structured auth-domain audit events) and B-022 (per-request
 DB lookup performance). Neither is a defect; both are quality

@@ -192,6 +192,85 @@ public class AuditInterceptorBehaviourTests
     }
 
     [Fact]
+    public async Task User_audit_row_does_not_contain_PasswordHash()
+    {
+        // Defense-in-depth: bcrypt'd hashes are not plaintext but
+        // the audit log has a wider blast radius than the User
+        // table. The interceptor's SkippedFieldNames must keep
+        // PasswordHash out of every BeforeValue / AfterValue JSON.
+        var (options, tenant, orgId, _) = BuildFixture();
+
+        Guid newUserId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var u = new User
+            {
+                Email = $"new-{Guid.NewGuid():N}@example.com",
+                PasswordHash = "$2a$11$verysecretbcryptdigeststring",
+                FirstName = "New", LastName = "User",
+                OrganisationId = orgId,
+            };
+            db.Users.Add(u);
+            await db.SaveChangesAsync();
+            newUserId = u.Id;
+            // Mutate so we exercise BOTH AfterValue (from Insert)
+            // AND BeforeValue (from Update — original is the
+            // post-insert state).
+            u.FirstName = "Renamed";
+            await db.SaveChangesAsync();
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var audits = verify.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.Entity == "User" && a.EntityId == newUserId.ToString())
+            .ToList();
+        Assert.Equal(2, audits.Count);
+        foreach (var a in audits)
+        {
+            // Neither the literal field name nor the bcrypt prefix
+            // may appear in the JSON. The literal-prefix check
+            // catches "the secret leaked under a different key
+            // name" regressions.
+            Assert.DoesNotContain("PasswordHash", a.BeforeValue ?? "");
+            Assert.DoesNotContain("PasswordHash", a.AfterValue ?? "");
+            Assert.DoesNotContain("$2a$11$", a.BeforeValue ?? "");
+            Assert.DoesNotContain("$2a$11$", a.AfterValue ?? "");
+        }
+    }
+
+    [Fact]
+    public async Task Invitation_audit_row_does_not_contain_TokenHash()
+    {
+        // Same defense-in-depth as PasswordHash. TokenHash is the
+        // SHA-256 of the once-shown plaintext invitation token; the
+        // plaintext is not recoverable from the hash, but exposing
+        // the hash to audit-log readers needlessly widens the
+        // attack surface for an offline brute-force search across
+        // the limited entropy space of plaintext tokens.
+        var (options, tenant, orgId, _) = BuildFixture();
+
+        Guid invId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var inv = new Invitation
+            {
+                OrganisationId = orgId,
+                TokenHash = "F0E1D2C3B4A5968778695A4B3C2D1E0F",
+                ExpiresAt = DateTime.UtcNow.AddDays(7),
+            };
+            db.Invitations.Add(inv);
+            await db.SaveChangesAsync();
+            invId = inv.Id;
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var audit = Assert.Single(verify.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.Entity == "Invitation" && a.EntityId == invId.ToString()));
+        Assert.DoesNotContain("TokenHash", audit.AfterValue ?? "");
+        Assert.DoesNotContain("F0E1D2C3B4A5968778695A4B3C2D1E0F", audit.AfterValue ?? "");
+    }
+
+    [Fact]
     public async Task Anonymous_tenant_context_skips_audit_capture()
     {
         // Build options with an interceptor bound to an anonymous tenant

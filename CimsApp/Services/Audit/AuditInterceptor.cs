@@ -28,6 +28,21 @@ public sealed class AuditInterceptor(
         typeof(Notification),
     ];
 
+    // Field names that must NEVER appear in the BeforeValue /
+    // AfterValue JSON, regardless of which entity is being audited.
+    // Defense-in-depth: even though `PasswordHash` is a bcrypt'd
+    // value (not plaintext) and `TokenHash` is a SHA-256 of an
+    // already-shown-once invitation token (not recoverable to the
+    // plaintext), the audit log is a wider blast radius than the
+    // User / Invitation tables and these values should not leak
+    // outward via audit-log exports or read-only audit dashboards.
+    internal static readonly HashSet<string> SkippedFieldNames =
+        new(StringComparer.Ordinal)
+        {
+            nameof(User.PasswordHash),
+            nameof(Invitation.TokenHash),
+        };
+
     public override InterceptionResult<int> SavingChanges(
         DbContextEventData eventData,
         InterceptionResult<int> result)
@@ -116,6 +131,7 @@ public sealed class AuditInterceptor(
         foreach (var p in entry.Properties)
         {
             if (p.Metadata.IsShadowProperty()) continue;
+            if (SkippedFieldNames.Contains(p.Metadata.Name)) continue;
             dict[p.Metadata.Name] = current ? p.CurrentValue : p.OriginalValue;
         }
         return JsonSerializer.Serialize(dict);
