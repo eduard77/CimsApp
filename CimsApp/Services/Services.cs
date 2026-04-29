@@ -1604,7 +1604,14 @@ public class DocumentsService(CimsDbContext db, AuditService audit)
         var errors = DocumentNaming.Validate(req.ProjectCode, req.Originator, req.DocType, req.Number);
         if (errors.Count > 0) throw new ValidationException(errors);
         var docNum = DocumentNaming.Build(req.ProjectCode, req.Originator, req.Volume, req.Level, req.DocType, req.Role, req.Number);
-        if (await db.Documents.AnyAsync(d => d.DocumentNumber == docNum)) throw new ConflictException($"Document {docNum} already exists");
+        // DocumentNumber uniqueness is per-project (matches the
+        // (ProjectId, DocumentNumber) unique index). Without the
+        // explicit projectId filter here the tenant query filter
+        // already narrows reads to the caller's tenant, but tying
+        // the check to the same shape as the constraint keeps the
+        // two layers in sync.
+        if (await db.Documents.AnyAsync(d => d.ProjectId == projectId && d.DocumentNumber == docNum))
+            throw new ConflictException($"Document {docNum} already exists");
         var doc = new Document { ProjectId = projectId, ContainerId = req.ContainerId, ProjectCode = req.ProjectCode.ToUpperInvariant(), Originator = req.Originator.ToUpperInvariant(), Volume = req.Volume?.ToUpperInvariant(), Level = req.Level?.ToUpperInvariant(), DocType = req.DocType.ToUpperInvariant(), Role = req.Role?.ToUpperInvariant(), Number = req.Number.ToString("D4"), DocumentNumber = docNum, Title = req.Title, Description = req.Description, Type = req.Type ?? DocumentType.Other, Tags = req.Tags ?? [], CreatorId = userId, CurrentState = CdeState.WorkInProgress };
         db.Documents.Add(doc);
         await db.SaveChangesAsync();

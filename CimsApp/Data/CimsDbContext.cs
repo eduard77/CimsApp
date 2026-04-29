@@ -96,7 +96,20 @@ public class CimsDbContext(
 
         m.Entity<Document>(e =>
         {
-            e.HasIndex(d => d.DocumentNumber).IsUnique();
+            // DocumentNumber is unique WITHIN A PROJECT. Two tenants
+            // can each have a Project with the same Code (project Code
+            // is per-tenant unique via (AppointingPartyId, Code)), so
+            // both can legitimately derive identical DocumentNumbers
+            // from `PROJ-ORIG-VOL-LVL-TYPE-ROLE-NNNN`. The original
+            // global unique index allowed only the first such number
+            // to land — the second tenant's SaveChanges threw a
+            // unique-index violation and the user saw HTTP 500.
+            // Scoping the uniqueness to (ProjectId, DocumentNumber)
+            // matches the project-level convention and lets both
+            // tenants coexist; same-project duplicates are still
+            // prevented and surface as the existing
+            // ConflictException at the service layer.
+            e.HasIndex(d => new { d.ProjectId, d.DocumentNumber }).IsUnique();
             e.HasIndex(d => new { d.ProjectId, d.CurrentState });
             e.Ignore(d => d.Tags); // handled via TagsCsv
             e.HasOne(d => d.Project).WithMany(p => p.Documents)
