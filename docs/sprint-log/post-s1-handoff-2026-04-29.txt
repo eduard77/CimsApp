@@ -298,6 +298,41 @@ valuable findings. Continuing to walk the bootstrap →
 register → login → project create → CDE / cost / RFI
 chain is recommended before any deploy.
 
+PR #43 fix(refresh) — third real production bug from the
+smoke test. CreateRefreshAsync mints opaque hex strings
+(Guid.NewGuid().ToString("N") × 2 = 64 chars), but
+RefreshAsync was calling Validate(token, RefreshSecret) to
+JWT-validate the input. Opaque hex is NOT a JWT, so the
+validate always returned null, so /auth/refresh threw 401
+INVALID_REFRESH on EVERY call since the initial commit.
+100% latent because no unit test exercised RefreshAsync.
+
+Fix: drop the JWT-validate step. The DB lookup IS the
+authentication — rows rotate on every refresh. Use
+stored.UserId to find the user. 5 new RefreshTokenAuthTests
+pin every edge.
+
+THREE CONSECUTIVE BUGS FROM ONE SMOKE TEST PASS:
+  #41: AuditLog.UserId FK violation (anon flow broken)
+  #42: AuthController missing [ApiController] (auth surface
+       100% broken) + PasswordHash leak in Project response
+  #43: RefreshAsync calls JWT-validate on opaque tokens
+       (refresh 100% broken)
+
+B-027 (SQL Server smoke test in CI) is now massively
+justified. The unit-test-only gap is concretely
+demonstrated three times over. Re-running the smoke test
+on master is the FIRST thing the next session should do
+before doing anything else.
+
+Smoke walk completed for the auth + project + CDE +
+documents + RFI + actions + cost-period + variation +
+EVM + cashflow + rollup paths — all 200 / 201 with no
+secrets leaked. Variation approve/reject, payment cert
+draft/issue, CBS import, and document.transition paths
+have NOT been exercised live yet — those are the
+remaining smoke targets.
+
 OPERATIONAL NOTES
 ------------------
 - gh CLI on bash needs the full path:

@@ -124,6 +124,26 @@ the same commit. No active sprint scope at the moment.
   [JsonIgnore] on User.PasswordHash, RefreshToken.Token,
   Invitation.TokenHash. Three new EntitySerializationTests
   pin the contract.
+- **RefreshAsync opaque-token validation (PR #43) — third
+  real, latent production bug from the smoke test.**
+  CreateRefreshAsync mints opaque hex (Guid×2 = 64 chars),
+  but RefreshAsync was JWT-validating tokens via
+  `Validate(token, RefreshSecret)`. Opaque hex is not a JWT,
+  so /auth/refresh threw 401 INVALID_REFRESH on every call
+  since the initial commit. 100% latent because no unit
+  test exercised RefreshAsync. Fix: drop the JWT validate;
+  use the DB lookup as the authentication (rows rotate on
+  every refresh); pull stored.UserId for the user lookup.
+  Five new RefreshTokenAuthTests cover happy path + unknown
+  / revoked / expired / null-empty edges.
+
+**Three consecutive smoke-test PRs (#41, #42, #43) found
+real, latent production bugs that EF in-memory unit testing
+fundamentally cannot catch (FK constraints, body binding,
+serialization, JWT mismatch). B-027 (SQL Server smoke test
+in CI) is now massively justified — the unit-test gap is no
+longer theoretical, it is concretely demonstrated three
+times over.**
 
 **Post-S1 audits landed (all clean / dormant findings only
 beyond the items above):**
