@@ -269,6 +269,35 @@ schema change since the last handoff.
 Promoted B-027 (SQL Server smoke test in CI) to the v1.1
 backlog. The unit-test-only gap is no longer theoretical.
 
+PR #42 fix(auth+secrets) — two MORE real production bugs
+from continuing the smoke test:
+
+  (a) AuthController missing [ApiController]. The attribute
+  lives on CimsControllerBase, but AuthController extends
+  ControllerBase directly to bypass the [Authorize] baseline
+  and lost [ApiController] in the process. Without it the
+  model binder does NOT infer [FromBody] for complex
+  parameters, so register / login / refresh / logout all
+  silently received default records (every string == "")
+  and the defensive null-guards fired on every request. The
+  ENTIRE authenticated surface was inaccessible in production
+  since the initial commit. 100% latent because unit tests
+  construct DTOs directly, never exercising binding.
+
+  (b) Project responses serialised Members[].User in full,
+  leaking User.PasswordHash (bcrypt) on every project read.
+  Any authenticated project member could read every other
+  member's hash. Fix: [JsonIgnore] on User.PasswordHash,
+  RefreshToken.Token, Invitation.TokenHash. Three new
+  EntitySerializationTests pin the contract so a future
+  "remove the attribute to debug serialization" change is
+  caught immediately.
+
+The smoke-test forward path is now producing seriously
+valuable findings. Continuing to walk the bootstrap →
+register → login → project create → CDE / cost / RFI
+chain is recommended before any deploy.
+
 OPERATIONAL NOTES
 ------------------
 - gh CLI on bash needs the full path:

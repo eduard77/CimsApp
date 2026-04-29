@@ -110,6 +110,20 @@ the same commit. No active sprint scope at the moment.
   migration `AuditLogUserIdNullable`. Promoted **B-027**:
   add SQL Server smoke test to CI to catch this class of
   bug pre-merge.
+- **AuthController body binding + 3 secret leaks (PR #42) —
+  two more real, latent production bugs from continuing the
+  smoke test.** (a) AuthController extends ControllerBase
+  directly to bypass [Authorize] but lost [ApiController]
+  in the process; without it the model binder doesn't infer
+  [FromBody] and every auth endpoint received an empty DTO,
+  so register / login / refresh were all silently broken
+  100% of the time in production. (b) Project responses
+  serialised Members[].User including User.PasswordHash;
+  any authenticated member could read every other member's
+  bcrypt hash. Fix: [ApiController] on AuthController +
+  [JsonIgnore] on User.PasswordHash, RefreshToken.Token,
+  Invitation.TokenHash. Three new EntitySerializationTests
+  pin the contract.
 
 **Post-S1 audits landed (all clean / dormant findings only
 beyond the items above):**
