@@ -446,9 +446,23 @@ public class ProjectsService(CimsDbContext db, AuditService audit, CimsApp.Servi
                 ["The user must belong to the project's appointing organisation"]);
 
         var existing = await db.ProjectMembers.FirstOrDefaultAsync(m => m.ProjectId == projectId && m.UserId == userId);
+        var wasReactivated = existing != null;
         if (existing != null) { existing.Role = role; existing.IsActive = true; }
         else db.ProjectMembers.Add(new ProjectMember { ProjectId = projectId, UserId = userId, Role = role });
         await db.SaveChangesAsync();
+        // Audit-twin: AuditInterceptor captures the per-row Insert /
+        // Update on ProjectMember; this structured event names the
+        // semantic action and carries the granted role + reactivation
+        // flag so a "who joined / was promoted on this project"
+        // audit-log search lands on a single discoverable row.
+        await audit.WriteAsync(actorId, "project.member_added",
+            "ProjectMember", $"{projectId}:{userId}", projectId,
+            detail: new
+            {
+                targetUserId = userId,
+                grantedRole  = role.ToString(),
+                reactivated  = wasReactivated,
+            });
     }
 }
 
