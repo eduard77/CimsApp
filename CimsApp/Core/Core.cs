@@ -87,15 +87,6 @@ public static class DocumentNaming
     private static string Clean(string s) => new(s.Trim().Where(char.IsLetterOrDigit).ToArray());
 }
 
-// ── Pagination ────────────────────────────────────────────────────────────────
-public record PaginationParams { public int Page = 1; public int Limit = 20; public int Skip => (Page - 1) * Limit; }
-public record PagedResult<T>(IEnumerable<T> Data, int Total, int Page, int Limit)
-{
-    public int  TotalPages => (int)Math.Ceiling((double)Total / Limit);
-    public bool HasNext    => Page * Limit < Total;
-    public bool HasPrev    => Page > 1;
-}
-
 // ── Audit ─────────────────────────────────────────────────────────────────────
 public class AuditService(CimsDbContext db)
 {
