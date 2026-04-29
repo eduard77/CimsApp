@@ -65,6 +65,29 @@ the same commit. No active sprint scope at the moment.
 - RegisterAsync transaction wrap (User insert + invitation
   consume now atomic — closes a "one-invitation-two-users"
   crash window; PR #29).
+- Variation-omission test: payment-cert valuation correctly
+  nets a negative EstimatedCostImpact against approved
+  additions (PR #32 — pinned a documented-but-untested
+  contract).
+- **Audit-twin atomicity refactor (PR #33).** Every
+  business mutation used to produce two transactions
+  (entity save + audit save). `AuditService.WriteAsync` now
+  adds the AuditLog row to the change tracker without
+  saving; 28 call sites flipped so a single SaveChanges
+  commits both halves of the audit-twin atomically. Closes
+  the "structured event lost on crash between two saves"
+  discoverability gap.
+- Document.TransitionAsync transaction wrap (PR #34) —
+  same shape as the RegisterAsync wrap, covers the
+  ExecuteUpdateAsync (revision publish) + SaveChanges (doc
+  state) pair.
+- OrganisationsController.Create transaction wrap (PR #35)
+  — same shape, covers the org save + bootstrap-invitation
+  save pair. Closes a "Code reserved but no bootstrap
+  invitation, retry impossible" stuck-state.
+- Audit-twin coverage tests (PR #36) for
+  payment_certificate.draft_updated /
+  payment_certificate.issued / document.state_transition.
 
 **Post-S1 audits landed (all clean / dormant findings only
 beyond the items above):**
