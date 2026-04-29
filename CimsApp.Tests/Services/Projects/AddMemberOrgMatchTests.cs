@@ -128,6 +128,77 @@ public class AddMemberOrgMatchTests
     }
 
     [Fact]
+    public async Task AddMember_emits_project_member_added_audit_with_role_and_reactivated_flag()
+    {
+        var (options, tenant, _, _, userInA, _, projectInA) = BuildFixture();
+        using (var seed = new CimsDbContext(options, tenant))
+        {
+            seed.ProjectMembers.Add(new ProjectMember
+            {
+                ProjectId = projectInA, UserId = userInA,
+                Role = UserRole.TaskTeamMember, IsActive = false,
+            });
+            seed.SaveChanges();
+        }
+
+        var actor = Guid.NewGuid();
+        var svc = NewService(options, tenant, out var db);
+        await using (db)
+        {
+            await svc.AddMemberAsync(projectInA, userInA, UserRole.ProjectManager,
+                actorId: actor);
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var audit = Assert.Single(verify.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.Action == "project.member_added"));
+        Assert.Equal("ProjectMember", audit.Entity);
+        Assert.Equal($"{projectInA}:{userInA}", audit.EntityId);
+        Assert.Equal(projectInA, audit.ProjectId);
+        Assert.Equal(actor, audit.UserId);
+        Assert.Contains($"\"targetUserId\":\"{userInA}\"", audit.Detail);
+        Assert.Contains("\"grantedRole\":\"ProjectManager\"", audit.Detail);
+        // Re-add over an existing inactive membership → reactivated:true.
+        Assert.Contains("\"reactivated\":true", audit.Detail);
+    }
+
+    [Fact]
+    public async Task AddMember_first_time_emits_audit_with_reactivated_false()
+    {
+        var (options, tenant, _, _, userInA, _, projectInA) = BuildFixture();
+        var actor = Guid.NewGuid();
+        var svc = NewService(options, tenant, out var db);
+        await using (db)
+        {
+            await svc.AddMemberAsync(projectInA, userInA, UserRole.TaskTeamMember,
+                actorId: actor);
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var audit = Assert.Single(verify.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.Action == "project.member_added"));
+        Assert.Contains("\"reactivated\":false", audit.Detail);
+    }
+
+    [Fact]
+    public async Task AddMember_cross_org_attempt_does_not_emit_audit()
+    {
+        // Cross-org rejection should leave NO audit row — the
+        // ValidationException fires before SaveChanges, so the
+        // explicit audit.WriteAsync is never reached.
+        var (options, tenant, _, _, _, userInB, projectInA) = BuildFixture();
+        var svc = NewService(options, tenant, out var db);
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            svc.AddMemberAsync(projectInA, userInB, UserRole.TaskTeamMember,
+                actorId: Guid.NewGuid()));
+        await db.DisposeAsync();
+
+        using var verify = new CimsDbContext(options, tenant);
+        Assert.Empty(verify.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.Action == "project.member_added"));
+    }
+
+    [Fact]
     public async Task AddMember_idempotent_re_adds_reactivate_existing_membership()
     {
         // Existing member, re-added with a new role: the row updates
