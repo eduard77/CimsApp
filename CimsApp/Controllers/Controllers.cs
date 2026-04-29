@@ -27,6 +27,23 @@ public abstract class CimsControllerBase : ControllerBase
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
+// [ApiController] is REQUIRED here. Without it, the model binder
+// does NOT infer [FromBody] for complex action parameters, so
+// RegisterRequest / LoginRequest / RefreshRequest arrive as default
+// records (all string fields == ""), the null-guards fire on every
+// request, and every auth endpoint silently returns the same
+// "Invalid credentials" / "required fields" error regardless of the
+// actual JSON body. This was latent because:
+//   - Unit tests construct DTOs directly, never exercising binding.
+//   - Both an empty body and a real body produce the same response
+//     code (401 / 400) thanks to the defensive guards, so a casual
+//     curl smoke would not notice.
+// AuthController extends ControllerBase directly (NOT
+// CimsControllerBase) to bypass the [Authorize] baseline; that's
+// why we have to repeat [ApiController] explicitly here. Found by
+// running the bootstrap → register flow against real SQL Server
+// (2026-04-29).
+[ApiController]
 [AllowAnonymous, Route("api/v1/auth")]
 public class AuthController(AuthService svc) : ControllerBase
 {

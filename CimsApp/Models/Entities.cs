@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
 
 namespace CimsApp.Models;
 
@@ -22,6 +23,13 @@ public class User
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     [Required, MaxLength(200)] public string Email { get; set; } = "";
+    // [JsonIgnore]: never appear in API responses. The bcrypt hash is
+    // used for BCrypt.Verify only — not output. Without this, any
+    // endpoint that returns a User (directly or via a navigation
+    // chain like Project.Members[0].User) leaks the hash. Found
+    // when a real-DB smoke test of POST /api/v1/projects returned
+    // "passwordHash":"$2a$11$..." in the response body (2026-04-29).
+    [JsonIgnore]
     [Required] public string PasswordHash { get; set; } = "";
     [Required, MaxLength(100)] public string FirstName { get; set; } = "";
     [Required, MaxLength(100)] public string LastName { get; set; } = "";
@@ -57,6 +65,11 @@ public class User
 public class RefreshToken
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    // [JsonIgnore]: the literal refresh token grants a fresh access
+    // session; it must never appear in any response other than the
+    // auth endpoints' explicit AuthResponse DTO. Defense-in-depth
+    // alongside User.PasswordHash and Invitation.TokenHash.
+    [JsonIgnore]
     [Required] public string Token { get; set; } = "";
     public Guid UserId { get; set; }
     public User User { get; set; } = null!;
@@ -611,6 +624,11 @@ public class Invitation
 
     /// <summary>SHA-256 hash of the plaintext token. The plaintext is shown
     /// once at creation time and never persisted.</summary>
+    // [JsonIgnore]: the hash is not the plaintext, but exposing it
+    // narrows the brute-force search space against the limited-entropy
+    // plaintext token alphabet. Same defense-in-depth posture as
+    // User.PasswordHash and the matching AuditInterceptor SkippedFieldNames.
+    [JsonIgnore]
     [Required, MaxLength(128)]
     public string TokenHash { get; set; } = "";
 
