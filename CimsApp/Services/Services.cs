@@ -180,14 +180,16 @@ public class AuthService(
             ?? throw new NotFoundException("User");
         user.TokenInvalidationCutoff = DateTime.UtcNow;
         var swept = await SweepActiveRefreshTokensAsync(actorId);
-        await db.SaveChangesAsync();
         // B-021: structured audit-twin event. Per-row audit is
         // captured by AuditInterceptor; this adds the semantic
         // action name + refresh-token sweep count for log-discoverable
-        // forensics.
+        // forensics. Added to the change tracker BEFORE SaveChanges so
+        // both the User update and the structured event commit in one
+        // transaction.
         await audit.WriteAsync(actorId, "auth.user_self_revoke",
             "User", actorId.ToString(),
             detail: new { refreshTokensSwept = swept });
+        await db.SaveChangesAsync();
     }
 
     /// <summary>
@@ -207,12 +209,14 @@ public class AuthService(
             ?? throw new NotFoundException("User");
         user.TokenInvalidationCutoff = DateTime.UtcNow;
         var swept = await SweepActiveRefreshTokensAsync(userId);
-        await db.SaveChangesAsync();
         // B-021. actorId is the admin's UserId from the tenant
-        // context; targetUserId is the user being revoked.
+        // context; targetUserId is the user being revoked. Audit-twin
+        // atomic with the User + RefreshToken updates via the single
+        // SaveChanges below.
         await audit.WriteAsync(tenant.UserId ?? Guid.Empty,
             "auth.user_admin_revoke", "User", userId.ToString(),
             detail: new { targetUserId = userId, refreshTokensSwept = swept });
+        await db.SaveChangesAsync();
     }
 
     /// <summary>
@@ -233,14 +237,15 @@ public class AuthService(
         user.IsActive = false;
         user.TokenInvalidationCutoff = DateTime.UtcNow;
         var swept = await SweepActiveRefreshTokensAsync(userId);
-        await db.SaveChangesAsync();
         // B-021. The IsActive flip + cutoff bump + refresh sweep are
         // all captured by AuditInterceptor as per-row Updates; this
         // structured event ties them together with a single
-        // discoverable action name.
+        // discoverable action name. Atomic with the entity writes via
+        // the single SaveChanges below.
         await audit.WriteAsync(tenant.UserId ?? Guid.Empty,
             "auth.user_deactivated", "User", userId.ToString(),
             detail: new { targetUserId = userId, refreshTokensSwept = swept });
+        await db.SaveChangesAsync();
     }
 
     /// <summary>
@@ -343,7 +348,6 @@ public class InvitationService(CimsDbContext db, AuditService audit)
             CreatedById    = createdById,
         };
         db.Invitations.Add(invitation);
-        await db.SaveChangesAsync();
 
         // Audit-twin. Bootstrap invitations are minted by anonymous
         // org-creation flow (no caller); attribute the audit row to
@@ -352,7 +356,8 @@ public class InvitationService(CimsDbContext db, AuditService audit)
         // captured as a flag rather than the email itself — the
         // address is already on the row's BeforeValue/AfterValue
         // via the AuditInterceptor and including it here would
-        // double up.
+        // double up. Atomic with the Invitation insert via the
+        // single SaveChanges below.
         await audit.WriteAsync(createdById ?? Guid.Empty,
             "invitation.created", "Invitation",
             invitation.Id.ToString(),
@@ -363,6 +368,7 @@ public class InvitationService(CimsDbContext db, AuditService audit)
                 expiresAt         = invitation.ExpiresAt,
                 hasEmailBind      = invitation.Email is not null,
             });
+        await db.SaveChangesAsync();
 
         return new CreateResult(invitation.Id, plaintext, invitation.ExpiresAt);
     }
@@ -412,11 +418,17 @@ public class InvitationService(CimsDbContext db, AuditService audit)
         // a race where another caller already consumed the token
         // returns rows==0 and we don't emit (no work happened, no
         // audit). Actor = the consumer (the new User who just
-        // registered).
+        // registered). Explicit SaveChanges here because the
+        // Invitation update was an ExecuteUpdateAsync (which doesn't
+        // go through the change tracker), so adding the audit row
+        // alone would leave it unsaved without this call.
         if (rows == 1)
+        {
             await audit.WriteAsync(consumerUserId, "invitation.consumed",
                 "Invitation", invitationId.ToString(),
                 detail: new { consumerUserId });
+            await db.SaveChangesAsync();
+        }
         return rows == 1;
     }
 
@@ -457,8 +469,8 @@ public class ProjectsService(CimsDbContext db, AuditService audit, CimsApp.Servi
             throw new ForbiddenException("AppointingPartyId must match the caller's organisation");
         var p = new Project { Name = req.Name, Code = req.Code.ToUpperInvariant(), Description = req.Description, AppointingPartyId = appointingPartyId, StartDate = req.StartDate, EndDate = req.EndDate, Location = req.Location, Country = req.Country, Currency = req.Currency ?? "GBP", BudgetValue = req.BudgetValue, Sector = req.Sector, Sponsor = req.Sponsor, EirRef = req.EirRef, Members = [new ProjectMember { UserId = userId, Role = UserRole.ProjectManager }] };
         db.Projects.Add(p);
-        await db.SaveChangesAsync();
         await audit.WriteAsync(userId, tenant.IsSuperAdmin ? "project.created.superadmin_bypass" : "project.created", "Project", p.Id.ToString(), p.Id, ip: ip, ua: ua);
+        await db.SaveChangesAsync();
         return p;
     }
 
@@ -489,12 +501,12 @@ public class ProjectsService(CimsDbContext db, AuditService audit, CimsApp.Servi
         var wasReactivated = existing != null;
         if (existing != null) { existing.Role = role; existing.IsActive = true; }
         else db.ProjectMembers.Add(new ProjectMember { ProjectId = projectId, UserId = userId, Role = role });
-        await db.SaveChangesAsync();
         // Audit-twin: AuditInterceptor captures the per-row Insert /
         // Update on ProjectMember; this structured event names the
         // semantic action and carries the granted role + reactivation
         // flag so a "who joined / was promoted on this project"
-        // audit-log search lands on a single discoverable row.
+        // audit-log search lands on a single discoverable row. Atomic
+        // with the entity write via the single SaveChanges below.
         await audit.WriteAsync(actorId, "project.member_added",
             "ProjectMember", $"{projectId}:{userId}", projectId,
             detail: new
@@ -503,6 +515,7 @@ public class ProjectsService(CimsDbContext db, AuditService audit, CimsApp.Servi
                 grantedRole  = role.ToString(),
                 reactivated  = wasReactivated,
             });
+        await db.SaveChangesAsync();
     }
 }
 
@@ -583,10 +596,9 @@ public class CostService(CimsDbContext db, AuditService audit)
         if (errors.Count > 0) throw new ValidationException(errors);
 
         db.CostBreakdownItems.AddRange(entities);
-        await db.SaveChangesAsync(ct);
-
         await audit.WriteAsync(actorId, "cbs.imported", "CostBreakdownItem", projectId.ToString(), projectId,
             detail: new { rowCount = entities.Count }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
 
         return new ImportResult(entities.Count);
     }
@@ -612,15 +624,15 @@ public class CostService(CimsDbContext db, AuditService audit)
 
         var previous = item.Budget;
         item.Budget = budget;
-        await db.SaveChangesAsync(ct);
-
         // Per-row Update audit is captured automatically by AuditInterceptor;
         // the explicit cbs.line_budget_set entry below carries the
         // before/after pair as a structured detail for cost-domain
-        // reporting (separate from the field-level audit).
+        // reporting (separate from the field-level audit). Atomic with
+        // the entity write via the single SaveChanges below.
         await audit.WriteAsync(actorId, "cbs.line_budget_set", "CostBreakdownItem",
             itemId.ToString(), projectId,
             detail: new { previous, current = budget }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>
@@ -646,8 +658,6 @@ public class CostService(CimsDbContext db, AuditService audit)
         var previousEnd   = item.ScheduledEnd;
         item.ScheduledStart = req.ScheduledStart;
         item.ScheduledEnd   = req.ScheduledEnd;
-        await db.SaveChangesAsync(ct);
-
         await audit.WriteAsync(actorId, "cbs.line_schedule_set", "CostBreakdownItem",
             itemId.ToString(), projectId,
             detail: new
@@ -656,6 +666,7 @@ public class CostService(CimsDbContext db, AuditService audit)
                 currentStart = req.ScheduledStart,
                 currentEnd   = req.ScheduledEnd,
             }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>
@@ -677,11 +688,10 @@ public class CostService(CimsDbContext db, AuditService audit)
 
         var previous = item.PercentComplete;
         item.PercentComplete = req.PercentComplete;
-        await db.SaveChangesAsync(ct);
-
         await audit.WriteAsync(actorId, "cbs.line_progress_set", "CostBreakdownItem",
             itemId.ToString(), projectId,
             detail: new { previous, current = req.PercentComplete }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>
@@ -720,8 +730,6 @@ public class CostService(CimsDbContext db, AuditService audit)
             Description         = req.Description,
         };
         db.Commitments.Add(commitment);
-        await db.SaveChangesAsync(ct);
-
         await audit.WriteAsync(actorId, "commitment.created", "Commitment",
             commitment.Id.ToString(), projectId,
             detail: new
@@ -731,6 +739,7 @@ public class CostService(CimsDbContext db, AuditService audit)
                 amount    = req.Amount,
                 reference = commitment.Reference,
             }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
         return commitment;
     }
 
@@ -820,12 +829,11 @@ public class CostService(CimsDbContext db, AuditService audit)
             PlannedCashflow = req.PlannedCashflow,
         };
         db.CostPeriods.Add(period);
-        await db.SaveChangesAsync(ct);
-
         await audit.WriteAsync(actorId, "cost_period.opened", "CostPeriod",
             period.Id.ToString(), projectId,
             detail: new { label = period.Label, period.StartDate, period.EndDate, period.PlannedCashflow },
             ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
         return period;
     }
 
@@ -848,12 +856,11 @@ public class CostService(CimsDbContext db, AuditService audit)
 
         var previous = period.PlannedCashflow;
         period.PlannedCashflow = req.PlannedCashflow;
-        await db.SaveChangesAsync(ct);
-
         await audit.WriteAsync(actorId, "cost_period.baseline_set", "CostPeriod",
             period.Id.ToString(), projectId,
             detail: new { period.Label, previous, current = req.PlannedCashflow },
             ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>
@@ -876,11 +883,10 @@ public class CostService(CimsDbContext db, AuditService audit)
         period.IsClosed   = true;
         period.ClosedAt   = DateTime.UtcNow;
         period.ClosedById = actorId;
-        await db.SaveChangesAsync(ct);
-
         await audit.WriteAsync(actorId, "cost_period.closed", "CostPeriod",
             period.Id.ToString(), projectId,
             detail: new { label = period.Label }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>
@@ -918,8 +924,6 @@ public class CostService(CimsDbContext db, AuditService audit)
             Description         = req.Description,
         };
         db.ActualCosts.Add(actual);
-        await db.SaveChangesAsync(ct);
-
         await audit.WriteAsync(actorId, "actual_cost.recorded", "ActualCost",
             actual.Id.ToString(), projectId,
             detail: new
@@ -929,6 +933,7 @@ public class CostService(CimsDbContext db, AuditService audit)
                 amount    = req.Amount,
                 reference = req.Reference,
             }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
         return actual;
     }
 
@@ -1301,8 +1306,6 @@ public class PaymentCertificatesService(CimsDbContext db, AuditService audit)
             IncludedVariationsAmount  = null,
         };
         db.PaymentCertificates.Add(cert);
-        await db.SaveChangesAsync(ct);
-
         await audit.WriteAsync(actorId, "payment_certificate.draft_created",
             "PaymentCertificate", cert.Id.ToString(), projectId,
             detail: new
@@ -1313,6 +1316,7 @@ public class PaymentCertificatesService(CimsDbContext db, AuditService audit)
                 materialsOnSite    = cert.CumulativeMaterialsOnSite,
                 retentionPercent   = cert.RetentionPercent,
             }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
 
         return await BuildDtoAsync(cert, ct);
     }
@@ -1334,8 +1338,6 @@ public class PaymentCertificatesService(CimsDbContext db, AuditService audit)
         cert.CumulativeValuation       = req.CumulativeValuation;
         cert.CumulativeMaterialsOnSite = req.CumulativeMaterialsOnSite;
         cert.RetentionPercent          = req.RetentionPercent;
-        await db.SaveChangesAsync(ct);
-
         await audit.WriteAsync(actorId, "payment_certificate.draft_updated",
             "PaymentCertificate", cert.Id.ToString(), projectId,
             detail: new
@@ -1345,6 +1347,7 @@ public class PaymentCertificatesService(CimsDbContext db, AuditService audit)
                 materialsOnSite    = cert.CumulativeMaterialsOnSite,
                 retentionPercent   = cert.RetentionPercent,
             }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
 
         return await BuildDtoAsync(cert, ct);
     }
@@ -1371,8 +1374,6 @@ public class PaymentCertificatesService(CimsDbContext db, AuditService audit)
         cert.State                    = PaymentCertificateState.Issued;
         cert.IssuedById               = actorId;
         cert.IssuedAt                 = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
-
         await audit.WriteAsync(actorId, "payment_certificate.issued",
             "PaymentCertificate", cert.Id.ToString(), projectId,
             detail: new
@@ -1383,6 +1384,7 @@ public class PaymentCertificatesService(CimsDbContext db, AuditService audit)
                 retentionPercent   = cert.RetentionPercent,
                 variationsIncluded = variationsAtIssue,
             }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
 
         return await BuildDtoAsync(cert, ct);
     }
@@ -1554,8 +1556,6 @@ public class VariationsService(CimsDbContext db, AuditService audit)
             State                   = VariationState.Raised,
         };
         db.Variations.Add(v);
-        await db.SaveChangesAsync(ct);
-
         await audit.WriteAsync(actorId, "variation.raised", "Variation",
             v.Id.ToString(), projectId,
             detail: new
@@ -1565,6 +1565,7 @@ public class VariationsService(CimsDbContext db, AuditService audit)
                 timeImpactDays  = req.EstimatedTimeImpactDays,
                 cbsLineId       = req.CostBreakdownItemId,
             }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
         return v;
     }
 
@@ -1601,8 +1602,6 @@ public class VariationsService(CimsDbContext db, AuditService audit)
         v.DecidedById  = actorId;
         v.DecidedAt    = DateTime.UtcNow;
         v.DecisionNote = req.DecisionNote;
-        await db.SaveChangesAsync(ct);
-
         var action = target == VariationState.Approved
             ? "variation.approved"
             : "variation.rejected";
@@ -1615,6 +1614,7 @@ public class VariationsService(CimsDbContext db, AuditService audit)
                 costImpact     = v.EstimatedCostImpact,
                 timeImpactDays = v.EstimatedTimeImpactDays,
             }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
     }
 }
 
@@ -1628,8 +1628,8 @@ public class CdeService(CimsDbContext db, AuditService audit)
     {
         var c = new CdeContainer { ProjectId = projectId, Name = req.Name, Originator = req.Originator.ToUpperInvariant(), Volume = req.Volume?.ToUpperInvariant(), Level = req.Level?.ToUpperInvariant(), Type = req.Type.ToUpperInvariant(), Discipline = req.Discipline?.ToUpperInvariant(), Description = req.Description };
         db.CdeContainers.Add(c);
-        await db.SaveChangesAsync();
         await audit.WriteAsync(userId, "cde.container_created", "CdeContainer", c.Id.ToString(), projectId, ip: ip, ua: ua);
+        await db.SaveChangesAsync();
         return c;
     }
 }
@@ -1668,8 +1668,8 @@ public class DocumentsService(CimsDbContext db, AuditService audit)
             throw new ConflictException($"Document {docNum} already exists");
         var doc = new Document { ProjectId = projectId, ContainerId = req.ContainerId, ProjectCode = req.ProjectCode.ToUpperInvariant(), Originator = req.Originator.ToUpperInvariant(), Volume = req.Volume?.ToUpperInvariant(), Level = req.Level?.ToUpperInvariant(), DocType = req.DocType.ToUpperInvariant(), Role = req.Role?.ToUpperInvariant(), Number = req.Number.ToString("D4"), DocumentNumber = docNum, Title = req.Title, Description = req.Description, Type = req.Type ?? DocumentType.Other, Tags = req.Tags ?? [], CreatorId = userId, CurrentState = CdeState.WorkInProgress };
         db.Documents.Add(doc);
-        await db.SaveChangesAsync();
         await audit.WriteAsync(userId, "document.created", "Document", doc.Id.ToString(), projectId, doc.Id, ip: ip, ua: ua);
+        await db.SaveChangesAsync();
         return doc;
     }
 
@@ -1683,8 +1683,8 @@ public class DocumentsService(CimsDbContext db, AuditService audit)
                 .ExecuteUpdateAsync(s => s.SetProperty(r => r.PublishedAt, DateTime.UtcNow).SetProperty(r => r.ApprovedById, userId).SetProperty(r => r.ApprovedAt, DateTime.UtcNow).SetProperty(r => r.Suitability, suitability ?? SuitabilityCode.S2));
         var from = doc.CurrentState;
         doc.CurrentState = toState;
-        await db.SaveChangesAsync();
         await audit.WriteAsync(userId, "document.state_transition", "Document", docId.ToString(), projectId, docId, new { from = from.ToString(), to = toState.ToString() }, ip, ua);
+        await db.SaveChangesAsync();
         return doc;
     }
 }
@@ -1705,8 +1705,8 @@ public class RfiService(CimsDbContext db, AuditService audit)
         var count = await db.Rfis.CountAsync(r => r.ProjectId == projectId);
         var rfi = new Rfi { ProjectId = projectId, RfiNumber = $"RFI-{(count + 1):D4}", Subject = req.Subject, Description = req.Description, Discipline = req.Discipline, Priority = req.Priority, AssignedToId = req.AssignedToId, DueDate = req.DueDate, RaisedById = userId, Status = RfiStatus.Open };
         db.Rfis.Add(rfi);
-        await db.SaveChangesAsync();
         await audit.WriteAsync(userId, "rfi.created", "Rfi", rfi.Id.ToString(), projectId, ip: ip, ua: ua);
+        await db.SaveChangesAsync();
         return rfi;
     }
 
@@ -1727,8 +1727,8 @@ public class RfiService(CimsDbContext db, AuditService audit)
 
         rfi.Response = req.Response; rfi.Status = req.Status;
         if (req.Status == RfiStatus.Closed) rfi.ClosedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync();
         await audit.WriteAsync(userId, "rfi.responded", "Rfi", rfiId.ToString(), projectId, ip: ip, ua: ua);
+        await db.SaveChangesAsync();
         return rfi;
     }
 }
@@ -1748,8 +1748,8 @@ public class ActionsService(CimsDbContext db, AuditService audit)
     {
         var a = new ActionItem { ProjectId = projectId, Title = req.Title, Description = req.Description, Source = req.Source, Priority = req.Priority, AssigneeId = req.AssigneeId, DueDate = req.DueDate, CreatedById = userId };
         db.ActionItems.Add(a);
-        await db.SaveChangesAsync();
         await audit.WriteAsync(userId, "action.created", "ActionItem", a.Id.ToString(), projectId, ip: ip, ua: ua);
+        await db.SaveChangesAsync();
         return a;
     }
 
@@ -1775,8 +1775,8 @@ public class ActionsService(CimsDbContext db, AuditService audit)
         if (req.Status != null)      { a.Status = req.Status.Value; if (req.Status == ActionStatus.Closed) a.ClosedAt = DateTime.UtcNow; }
         if (req.AssigneeId != null)  a.AssigneeId  = req.AssigneeId;
         if (req.DueDate != null)     a.DueDate     = req.DueDate;
-        await db.SaveChangesAsync();
         await audit.WriteAsync(userId, "action.updated", "ActionItem", actionId.ToString(), projectId, ip: ip, ua: ua);
+        await db.SaveChangesAsync();
         return a;
     }
 }
