@@ -438,6 +438,78 @@ public class PaymentCertificatesServiceTests
     }
 
     [Fact]
+    public async Task UpdateDraft_emits_payment_certificate_draft_updated_audit()
+    {
+        // Coverage gap: the audit-twin atomicity refactor (PR #33)
+        // changed every audit.WriteAsync site; without an explicit
+        // assertion on payment_certificate.draft_updated, a regression
+        // (typo'd action name, removed audit call) would only be
+        // visible to a forensic reviewer searching the audit log.
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var periodId = await SeedPeriodAsync(options, tenant, projectId,
+            "Apr", Utc(2026, 4, 1), Utc(2026, 4, 30), userId);
+
+        Guid certId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new PaymentCertificatesService(db, new AuditService(db));
+            var d = await svc.CreateDraftAsync(projectId,
+                new CreatePaymentCertificateDraftRequest(periodId, 1_000m, 0m, 3m), userId);
+            certId = d.Id;
+            await svc.UpdateDraftAsync(projectId, d.Id,
+                new UpdatePaymentCertificateDraftRequest(2_500m, 100m, 5m), userId);
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var audit = Assert.Single(verify.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.Action == "payment_certificate.draft_updated"));
+        Assert.Equal("PaymentCertificate", audit.Entity);
+        Assert.Equal(certId.ToString(), audit.EntityId);
+        Assert.Equal(userId, audit.UserId);
+        Assert.Contains("\"valuation\":2500", audit.Detail);
+        Assert.Contains("\"materialsOnSite\":100", audit.Detail);
+        Assert.Contains("\"retentionPercent\":5", audit.Detail);
+    }
+
+    [Fact]
+    public async Task Issue_emits_payment_certificate_issued_audit_with_variations_snapshot()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var periodId = await SeedPeriodAsync(options, tenant, projectId,
+            "Apr", Utc(2026, 4, 1), Utc(2026, 4, 30), userId);
+
+        // One approved variation so the audit detail's
+        // variationsIncluded carries a non-zero number.
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var vsvc = new VariationsService(db, new AuditService(db));
+            var v = await vsvc.RaiseAsync(projectId,
+                new RaiseVariationRequest("V", null, null, 1_000m, null, null), userId);
+            await vsvc.ApproveAsync(projectId, v.Id,
+                new VariationDecisionRequest("ok"), userId);
+        }
+
+        Guid certId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new PaymentCertificatesService(db, new AuditService(db));
+            var d = await svc.CreateDraftAsync(projectId,
+                new CreatePaymentCertificateDraftRequest(periodId, 5_000m, 0m, 3m), userId);
+            certId = d.Id;
+            await svc.IssueAsync(projectId, d.Id, userId);
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var audit = Assert.Single(verify.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.Action == "payment_certificate.issued"));
+        Assert.Equal("PaymentCertificate", audit.Entity);
+        Assert.Equal(certId.ToString(), audit.EntityId);
+        Assert.Equal(projectId, audit.ProjectId);
+        Assert.Equal(userId, audit.UserId);
+        Assert.Contains("\"variationsIncluded\":1000", audit.Detail);
+    }
+
+    [Fact]
     public async Task Cross_tenant_certificate_lookup_is_NotFound()
     {
         var dbName    = Guid.NewGuid().ToString();
