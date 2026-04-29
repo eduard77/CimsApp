@@ -106,6 +106,16 @@ public class OrganisationsController(
         if (await db.Organisations.AnyAsync(o => o.Code == req.Code.ToUpperInvariant()))
             throw new ConflictException($"Code '{req.Code}' already exists");
         var org = new Organisation { Name = req.Name, Code = req.Code.ToUpperInvariant(), Country = req.Country };
+        // Wrap the Organisation save and the bootstrap-invitation
+        // save in one transaction. Without this wrap, a process crash
+        // between the two saves would leave an Organisation created
+        // (Code reserved by the unique index) but no bootstrap
+        // invitation minted — the operator could not register against
+        // the new org and could not retry the create call (409 on the
+        // Code). The org row would be orphaned forever. Same shape
+        // as the RegisterAsync transaction wrap (PR #29). EF in-memory
+        // provider treats this as a no-op.
+        await using var tx = await db.Database.BeginTransactionAsync();
         db.Organisations.Add(org);
         await db.SaveChangesAsync();
         // Mint a 24-hour bootstrap invitation so the sign-up flow can
@@ -119,6 +129,7 @@ public class OrganisationsController(
             emailBind:      null,    // registrant chooses their own email
             expiresInDays:  1,
             isBootstrap:    true);
+        await tx.CommitAsync();
         return Created("", new
         {
             success = true,
