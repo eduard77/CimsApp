@@ -88,6 +88,16 @@ the same commit. No active sprint scope at the moment.
 - Audit-twin coverage tests (PR #36) for
   payment_certificate.draft_updated /
   payment_certificate.issued / document.state_transition.
+- Dormant entity scaffolds documented as B-025 (Notification
+  feature) and B-026 (ProjectAppointment / B2B contractor
+  membership) — surfaced during dead-code sweep, kept in
+  schema rather than deleted to avoid migration churn when
+  features land (PR #38).
+- Audit-twin coverage completion (PR #39) — six more action
+  names tested: project.created, document.created,
+  rfi.created, rfi.responded, action.created,
+  action.updated. Every structured audit-twin event now
+  pinned by at least one explicit assertion.
 
 **Post-S1 audits landed (all clean / dormant findings only
 beyond the items above):**
