@@ -270,6 +270,58 @@ public class PaymentCertificatesServiceTests
     }
 
     [Fact]
+    public async Task Issue_with_omission_variation_nets_against_addition_in_IncludedVariationsAmount()
+    {
+        // Coverage gap: SumApprovedVariationsAsync explicitly documents
+        // that a negative EstimatedCostImpact (omission saving) is an
+        // approved reduction and must net against additions in
+        // IncludedVariationsAmount. Without a test, a future "must
+        // be > 0" defensive check would silently break omission flows
+        // (a real construction-domain need — agreeing a reduction in
+        // scope is as common as agreeing an addition).
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        var periodId = await SeedPeriodAsync(options, tenant, projectId,
+            "Apr", Utc(2026, 4, 1), Utc(2026, 4, 30), userId);
+
+        // One addition (+10_000) and one omission (-2_500), both
+        // approved. Net contribution to the cert is +7_500.
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var vsvc = new VariationsService(db, new AuditService(db));
+            var add = await vsvc.RaiseAsync(projectId,
+                new RaiseVariationRequest("Add piling", null, null,
+                    10_000m, null, null), userId);
+            await vsvc.ApproveAsync(projectId, add.Id,
+                new VariationDecisionRequest("ok"), userId);
+
+            var omit = await vsvc.RaiseAsync(projectId,
+                new RaiseVariationRequest("Omit decorative cladding",
+                    null, null, -2_500m, null, null), userId);
+            await vsvc.ApproveAsync(projectId, omit.Id,
+                new VariationDecisionRequest("ok"), userId);
+        }
+
+        PaymentCertificateDto dto;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new PaymentCertificatesService(db, new AuditService(db));
+            // Live preview reflects the net (10_000 - 2_500 = 7_500).
+            var draft = await svc.CreateDraftAsync(projectId,
+                new CreatePaymentCertificateDraftRequest(periodId, 50_000m, 0m, 3m), userId);
+            Assert.Equal(7_500m, draft.IncludedVariationsAmount);
+            dto = await svc.IssueAsync(projectId, draft.Id, userId);
+        }
+
+        Assert.Equal(PaymentCertificateState.Issued, dto.State);
+        Assert.Equal(7_500m, dto.IncludedVariationsAmount);
+        // Gross = 50_000 + 7_500 + 0 = 57_500.
+        Assert.Equal(57_500m, dto.CumulativeGross);
+        // Retention base = 50_000 + 7_500 = 57_500; × 3% = 1_725.
+        Assert.Equal(1_725m, dto.RetentionAmount);
+        Assert.Equal(55_775m, dto.CumulativeNet);   // 57_500 − 1_725
+    }
+
+    [Fact]
     public async Task Issue_after_issue_is_rejected()
     {
         var (options, tenant, _, userId, projectId) = BuildFixture();
