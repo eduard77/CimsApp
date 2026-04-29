@@ -295,7 +295,7 @@ public class AuthService(
 // Single-use tokens binding a registering user to a specific organisation.
 // See ADR-0011 (planned) and CR-002. Closes SR-S0-01 by removing the
 // attacker-supplied OrganisationId from the anonymous register flow.
-public class InvitationService(CimsDbContext db)
+public class InvitationService(CimsDbContext db, AuditService audit)
 {
     public sealed record CreateResult(Guid Id, string Token, DateTime ExpiresAt);
 
@@ -333,6 +333,26 @@ public class InvitationService(CimsDbContext db)
         };
         db.Invitations.Add(invitation);
         await db.SaveChangesAsync();
+
+        // Audit-twin. Bootstrap invitations are minted by anonymous
+        // org-creation flow (no caller); attribute the audit row to
+        // Guid.Empty in that case so the structured event still
+        // exists and can be searched. Email-bind presence is
+        // captured as a flag rather than the email itself — the
+        // address is already on the row's BeforeValue/AfterValue
+        // via the AuditInterceptor and including it here would
+        // double up.
+        await audit.WriteAsync(createdById ?? Guid.Empty,
+            "invitation.created", "Invitation",
+            invitation.Id.ToString(),
+            detail: new
+            {
+                organisationId    = organisationId,
+                isBootstrap       = isBootstrap,
+                expiresAt         = invitation.ExpiresAt,
+                hasEmailBind      = invitation.Email is not null,
+            });
+
         return new CreateResult(invitation.Id, plaintext, invitation.ExpiresAt);
     }
 
@@ -377,6 +397,15 @@ public class InvitationService(CimsDbContext db)
             .ExecuteUpdateAsync(u => u
                 .SetProperty(i => i.ConsumedAt, DateTime.UtcNow)
                 .SetProperty(i => i.ConsumedByUserId, consumerUserId));
+        // Audit-twin only when the consume actually landed —
+        // a race where another caller already consumed the token
+        // returns rows==0 and we don't emit (no work happened, no
+        // audit). Actor = the consumer (the new User who just
+        // registered).
+        if (rows == 1)
+            await audit.WriteAsync(consumerUserId, "invitation.consumed",
+                "Invitation", invitationId.ToString(),
+                detail: new { consumerUserId });
         return rows == 1;
     }
 
