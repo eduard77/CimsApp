@@ -1678,6 +1678,17 @@ public class DocumentsService(CimsDbContext db, AuditService audit)
         var doc = await db.Documents.FirstOrDefaultAsync(d => d.Id == docId && d.ProjectId == projectId && d.IsActive) ?? throw new NotFoundException("Document");
         if (!CdeStateMachine.IsValidTransition(doc.CurrentState, toState)) throw new CdeTransitionException(doc.CurrentState, toState);
         if (!CdeStateMachine.CanTransition(doc.CurrentState, toState, userRole)) throw new ForbiddenException($"Role {userRole} cannot perform this transition");
+        // Wrap the revision-publish ExecuteUpdateAsync (separate SQL
+        // UPDATE that bypasses the change tracker) and the doc state
+        // change + audit (commits via SaveChangesAsync) in one
+        // transaction. Without this wrap, a process crash between the
+        // two writes when transitioning to Published would leave the
+        // latest revisions marked Published (PublishedAt + ApprovedById
+        // + Suitability set) but the Document.CurrentState still in
+        // the previous state — revisions and document disagree until
+        // the next transition retries. Same shape as the RegisterAsync
+        // wrap (PR #29). EF in-memory provider treats this as a no-op.
+        await using var tx = await db.Database.BeginTransactionAsync();
         if (toState == CdeState.Published)
             await db.DocumentRevisions.Where(r => r.DocumentId == docId && r.IsLatest)
                 .ExecuteUpdateAsync(s => s.SetProperty(r => r.PublishedAt, DateTime.UtcNow).SetProperty(r => r.ApprovedById, userId).SetProperty(r => r.ApprovedAt, DateTime.UtcNow).SetProperty(r => r.Suitability, suitability ?? SuitabilityCode.S2));
@@ -1685,6 +1696,7 @@ public class DocumentsService(CimsDbContext db, AuditService audit)
         doc.CurrentState = toState;
         await audit.WriteAsync(userId, "document.state_transition", "Document", docId.ToString(), projectId, docId, new { from = from.ToString(), to = toState.ToString() }, ip, ua);
         await db.SaveChangesAsync();
+        await tx.CommitAsync();
         return doc;
     }
 }
