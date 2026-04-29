@@ -136,16 +136,35 @@ public class AuthService(
 
     public async Task<(string Access, string Refresh)> RefreshAsync(string token)
     {
-        var principal = Validate(token, RefreshSecret) ?? throw new AppException("Invalid refresh token", 401, "INVALID_REFRESH");
-        var userId = Guid.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        // Refresh tokens are opaque random hex (CreateRefreshAsync below
+        // mints `Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N")`,
+        // 64 chars), NOT JWTs. The pre-fix code called Validate(token,
+        // RefreshSecret) which JWT-validated the input and always returned
+        // null for opaque tokens — so /auth/refresh returned 401
+        // INVALID_REFRESH on EVERY call since the initial commit. Fixed
+        // 2026-04-29 by smoke-testing the bootstrap → register → login →
+        // refresh flow against real SQL Server.
+        //
+        // The DB lookup IS the authentication: only the server holds these
+        // strings, and they're rotated on every refresh (current row's
+        // RevokedAt is set, a new row is minted). Defense-in-depth checks
+        // remain: the row must exist, must be IsActive (not revoked, not
+        // expired), and the User must be findable. The JWT-validation
+        // step was redundant given those checks.
+        if (string.IsNullOrEmpty(token))
+            throw new AppException("Invalid refresh token", 401, "INVALID_REFRESH");
+
         // Pre-auth: refresh endpoint has no access token, tenant filter bypassed.
-        var stored = await db.RefreshTokens.IgnoreQueryFilters().FirstOrDefaultAsync(r => r.Token == token);
-        if (stored == null || !stored.IsActive) throw new AppException("Token revoked", 401, "TOKEN_REVOKED");
+        var stored = await db.RefreshTokens.IgnoreQueryFilters().FirstOrDefaultAsync(r => r.Token == token)
+            ?? throw new AppException("Invalid refresh token", 401, "INVALID_REFRESH");
+        if (!stored.IsActive) throw new AppException("Token revoked", 401, "TOKEN_REVOKED");
         stored.RevokedAt = DateTime.UtcNow;
         // Pre-auth (refresh endpoint has no access token): bypass User filter.
-        var user   = await db.Users.IgnoreQueryFilters().Include(u => u.Organisation).FirstAsync(u => u.Id == userId);
+        var user   = await db.Users.IgnoreQueryFilters().Include(u => u.Organisation)
+            .FirstOrDefaultAsync(u => u.Id == stored.UserId)
+            ?? throw new AppException("Invalid refresh token", 401, "INVALID_REFRESH");
         var access = GenerateAccess(user);
-        var newRef = await CreateRefreshAsync(userId, null, null);
+        var newRef = await CreateRefreshAsync(stored.UserId, null, null);
         await db.SaveChangesAsync();
         return (access, newRef.Token);
     }
