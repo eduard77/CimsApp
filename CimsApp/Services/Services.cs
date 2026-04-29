@@ -213,7 +213,7 @@ public class AuthService(
         // context; targetUserId is the user being revoked. Audit-twin
         // atomic with the User + RefreshToken updates via the single
         // SaveChanges below.
-        await audit.WriteAsync(tenant.UserId ?? Guid.Empty,
+        await audit.WriteAsync(tenant.UserId,
             "auth.user_admin_revoke", "User", userId.ToString(),
             detail: new { targetUserId = userId, refreshTokensSwept = swept });
         await db.SaveChangesAsync();
@@ -242,7 +242,7 @@ public class AuthService(
         // structured event ties them together with a single
         // discoverable action name. Atomic with the entity writes via
         // the single SaveChanges below.
-        await audit.WriteAsync(tenant.UserId ?? Guid.Empty,
+        await audit.WriteAsync(tenant.UserId,
             "auth.user_deactivated", "User", userId.ToString(),
             detail: new { targetUserId = userId, refreshTokensSwept = swept });
         await db.SaveChangesAsync();
@@ -358,7 +358,7 @@ public class InvitationService(CimsDbContext db, AuditService audit)
         // via the AuditInterceptor and including it here would
         // double up. Atomic with the Invitation insert via the
         // single SaveChanges below.
-        await audit.WriteAsync(createdById ?? Guid.Empty,
+        await audit.WriteAsync(createdById,
             "invitation.created", "Invitation",
             invitation.Id.ToString(),
             detail: new

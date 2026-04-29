@@ -100,7 +100,7 @@ public class AuditService(CimsDbContext db)
     /// 2026-04-29 (PR refactor/audit-twin-atomicity); the audit-twin
     /// contract requires both halves to succeed-or-fail together.
     /// </summary>
-    public Task WriteAsync(Guid userId, string action, string entity, string entityId,
+    public Task WriteAsync(Guid? userId, string action, string entity, string entityId,
         Guid? projectId = null, Guid? documentId = null, object? detail = null,
         string? ip = null, string? ua = null)
     {

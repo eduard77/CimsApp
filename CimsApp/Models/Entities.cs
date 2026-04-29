@@ -254,8 +254,14 @@ public class ActionItem
 public class AuditLog
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid UserId { get; set; }
-    public User User { get; set; } = null!;
+    // Nullable so anonymous flows (bootstrap-invitation creation
+    // from the anonymous org-create endpoint) can record "no actor"
+    // honestly. Pre-fix the column was non-nullable and callers
+    // wrote Guid.Empty, which violated the FK to Users.Id on SQL
+    // Server (in-memory provider ignores FKs, which is why the
+    // bug was latent until smoke-tested 2026-04-29).
+    public Guid? UserId { get; set; }
+    public User? User { get; set; }
     public Guid? ProjectId { get; set; }
     public Project? Project { get; set; }
     public Guid? DocumentId { get; set; }
