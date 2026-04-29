@@ -54,7 +54,7 @@ public class AuthServiceInputValidationTests
             })
             .Build();
 
-        return new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
+        return new AuthService(db, cfg, new InvitationService(db, new AuditService(db)), NewTracker(), new AuditService(db));
     }
 
     private static ILoginAttemptTracker NewTracker() =>
@@ -186,7 +186,7 @@ public class AuthServiceInputValidationTests
         var before = DateTime.UtcNow;
         using (var db = new CimsDbContext(options, tenant))
         {
-            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
+            var svc = new AuthService(db, cfg, new InvitationService(db, new AuditService(db)), NewTracker(), new AuditService(db));
             await svc.RevokeOwnTokensAsync(userInA);
         }
         var after = DateTime.UtcNow;
@@ -217,7 +217,7 @@ public class AuthServiceInputValidationTests
 
         using (var db = new CimsDbContext(options, orgAdmin))
         {
-            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
+            var svc = new AuthService(db, cfg, new InvitationService(db, new AuditService(db)), NewTracker(), new AuditService(db));
             await svc.RevokeUserTokensAsync(userInA, orgAdmin);
         }
 
@@ -241,7 +241,7 @@ public class AuthServiceInputValidationTests
         };
 
         using var db = new CimsDbContext(options, orgAdmin);
-        var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
+        var svc = new AuthService(db, cfg, new InvitationService(db, new AuditService(db)), NewTracker(), new AuditService(db));
         await Assert.ThrowsAsync<NotFoundException>(() =>
             svc.RevokeUserTokensAsync(userInB, orgAdmin));
     }
@@ -258,7 +258,7 @@ public class AuthServiceInputValidationTests
 
         using (var db = new CimsDbContext(options, superAdmin))
         {
-            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
+            var svc = new AuthService(db, cfg, new InvitationService(db, new AuditService(db)), NewTracker(), new AuditService(db));
             await svc.RevokeUserTokensAsync(userInB, superAdmin);
         }
 
@@ -279,7 +279,7 @@ public class AuthServiceInputValidationTests
         var before = DateTime.UtcNow;
         using (var db = new CimsDbContext(options, orgAdmin))
         {
-            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
+            var svc = new AuthService(db, cfg, new InvitationService(db, new AuditService(db)), NewTracker(), new AuditService(db));
             await svc.DeactivateUserAsync(userInA, orgAdmin);
         }
         var after = DateTime.UtcNow;
@@ -310,7 +310,7 @@ public class AuthServiceInputValidationTests
 
         using (var db = new CimsDbContext(options, tenant))
         {
-            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
+            var svc = new AuthService(db, cfg, new InvitationService(db, new AuditService(db)), NewTracker(), new AuditService(db));
             await svc.RevokeOwnTokensAsync(userInA);
         }
 
@@ -346,7 +346,7 @@ public class AuthServiceInputValidationTests
 
         using (var db = new CimsDbContext(options, orgAdmin))
         {
-            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
+            var svc = new AuthService(db, cfg, new InvitationService(db, new AuditService(db)), NewTracker(), new AuditService(db));
             await svc.RevokeUserTokensAsync(userInA, orgAdmin);
         }
 
@@ -381,7 +381,7 @@ public class AuthServiceInputValidationTests
 
         using (var db = new CimsDbContext(options, orgAdmin))
         {
-            var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
+            var svc = new AuthService(db, cfg, new InvitationService(db, new AuditService(db)), NewTracker(), new AuditService(db));
             await svc.DeactivateUserAsync(userInA, orgAdmin);
         }
 
@@ -404,7 +404,7 @@ public class AuthServiceInputValidationTests
         };
 
         using var db = new CimsDbContext(options, orgAdmin);
-        var svc = new AuthService(db, cfg, new InvitationService(db), NewTracker(), new AuditService(db));
+        var svc = new AuthService(db, cfg, new InvitationService(db, new AuditService(db)), NewTracker(), new AuditService(db));
         await Assert.ThrowsAsync<NotFoundException>(() =>
             svc.DeactivateUserAsync(userInB, orgAdmin));
 
