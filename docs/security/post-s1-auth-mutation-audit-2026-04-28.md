@@ -170,8 +170,8 @@ revoke primitive, and the other security-sensitive mutations
 risk is dormant pending future endpoints (role-demote, password
 reset, both natural fits for v1.1 / S14).
 
-**Follow-on finding (2026-04-29).** A defense-in-depth gap was
-later identified in the AuditInterceptor itself: `User.PasswordHash`
+**Follow-on finding 1 (2026-04-29).** A defense-in-depth gap
+was identified in the AuditInterceptor itself: `User.PasswordHash`
 and `Invitation.TokenHash` were being serialised verbatim into
 the audit `BeforeValue` / `AfterValue` JSON. Bcrypt'd hashes
 and SHA-256 token hashes are not plaintext but should not leak
@@ -181,6 +181,27 @@ that filters those property names out of every audited entity,
 plus regression tests in `AuditInterceptorBehaviourTests` that
 seed Users with a recognisable bcrypt prefix and assert it
 does not appear in the audit JSON.
+
+**Follow-on finding 2 (2026-04-29).** `RegisterAsync` performed
+two separate SaveChanges calls — first to insert the User row,
+then `InvitationService.MarkConsumedAsync` (which uses
+`ExecuteUpdateAsync`, fired as a separate SQL command). A
+process crash between the two operations would leave a User
+created (visible to login) but the Invitation still
+consumable, allowing a second registration with a different
+email to mint a second User from the same token — violating
+"one invitation, one user". Closed by wrapping both writes in
+`db.Database.BeginTransactionAsync()` on RegisterAsync so SQL
+Server serialises them into a single atomic unit. Order
+preserved: User save first, so an FK / duplicate-index failure
+leaves the Invitation available for retry rather than burning
+it. EF in-memory provider treats the transaction as a no-op
+(no real isolation semantics) but the code shape stays correct
+for production. Finding had no live exploit path during v1.0
+internal pilot — the crash window is sub-millisecond and the
+single-developer flow doesn't race — but the defensive wrap is
+correct for any deployment with concurrent registers or
+infrastructure flakiness.
 
 Two refinements identified and promoted to backlog as B-021
 (structured auth-domain audit events) and B-022 (per-request

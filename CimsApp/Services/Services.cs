@@ -64,13 +64,24 @@ public class AuthService(
             // mint further invitations. Non-bootstrap tokens never elevate.
             GlobalRole     = invitation.IsBootstrap ? UserRole.OrgAdmin : null,
         };
+        // Wrap the User save and the Invitation consume in one
+        // transaction. Without this wrap, a process crash between
+        // the two SaveChanges calls would leave a User created
+        // (visible to login) but the Invitation still consumable —
+        // a second registration with a different email could mint a
+        // second User from the same token, violating "one
+        // invitation, one user". On SQL Server the transaction
+        // serialises the two writes into a single atomic unit; on
+        // the EF in-memory provider it's a no-op (no real isolation
+        // semantics there) but the code shape stays correct for
+        // production. Order preserved: User save first so an FK /
+        // duplicate-index failure leaves the Invitation available
+        // for a retry rather than burning it.
+        await using var tx = await db.Database.BeginTransactionAsync();
         db.Users.Add(user);
         await db.SaveChangesAsync();
-
-        // Mark consumed only after the User row actually persisted, so a
-        // failed save (FK violation, duplicate index) leaves the invitation
-        // available for retry rather than burning it.
         await invitations.MarkConsumedAsync(invitation.Id, user.Id);
+        await tx.CommitAsync();
 
         return Map(user, org);
     }
