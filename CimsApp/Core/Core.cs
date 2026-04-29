@@ -90,7 +90,17 @@ public static class DocumentNaming
 // ── Audit ─────────────────────────────────────────────────────────────────────
 public class AuditService(CimsDbContext db)
 {
-    public async Task WriteAsync(Guid userId, string action, string entity, string entityId,
+    /// <summary>
+    /// Add a structured audit-twin event to the change tracker. The
+    /// caller is responsible for committing via SaveChangesAsync — the
+    /// audit row lands in the same transaction as the business
+    /// mutation it describes, so a SaveChanges failure rolls back BOTH
+    /// the entity write and the structured audit event (or commits
+    /// both atomically). This was a separate SaveChanges call until
+    /// 2026-04-29 (PR refactor/audit-twin-atomicity); the audit-twin
+    /// contract requires both halves to succeed-or-fail together.
+    /// </summary>
+    public Task WriteAsync(Guid userId, string action, string entity, string entityId,
         Guid? projectId = null, Guid? documentId = null, object? detail = null,
         string? ip = null, string? ua = null)
     {
@@ -101,6 +111,6 @@ public class AuditService(CimsDbContext db)
             Detail = detail != null ? JsonSerializer.Serialize(detail) : null,
             IpAddress = ip, UserAgent = ua,
         });
-        await db.SaveChangesAsync();
+        return Task.CompletedTask;
     }
 }
