@@ -28,7 +28,7 @@ small focused PR off master with full test coverage and the
 relevant docs (role-matrix, ADRs, v1.1 backlog) updated in
 the same commit. No active sprint scope at the moment.
 
-**Hardening retired since S1 close (2026-04-27 → 2026-04-28):**
+**Hardening retired since S1 close (2026-04-27 → 2026-04-29):**
 - B-001 Access-token revocation (primitive + ADR-0014 +
   endpoints; full close).
 - B-002 Rate limit + progressive back-off (full close;
@@ -45,6 +45,41 @@ the same commit. No active sprint scope at the moment.
 - B-021 Auth-domain structured audit events.
 - B-023 (promoted from SR-S0-05) AddMember org-match check.
 - SR-S0-03 RoleClaimType comment fix.
+- ADR-0007 SuperAdmin filter-bypass written (was being cited
+  but didn't exist).
+- README.md filled in (was empty since first commit).
+- Sprint log ADR-001 → ADR-0008 annotation fix.
+- Pagination types removed (`PaginationParams` /
+  `PagedResult<T>` were dead code).
+- CdeService / CdeStateMachine / DocumentNaming /
+  AuditInterceptor pure-function and behavioural test gaps
+  closed.
+- `Document.DocumentNumber` unique index scope fix
+  (global → per-project — real cross-tenant correctness
+  bug).
+- AuditInterceptor `SkippedFieldNames` (PasswordHash and
+  TokenHash now never appear in audit JSON — defense-in-depth).
+- `project.member_added` and `invitation.created` /
+  `invitation.consumed` structured audit events
+  (audit-twin pattern extended).
+- RegisterAsync transaction wrap (User insert + invitation
+  consume now atomic — closes a "one-invitation-two-users"
+  crash window; PR #29).
+
+**Post-S1 audits landed (all clean / dormant findings only
+beyond the items above):**
+- `docs/security/post-s1-auth-mutation-audit-2026-04-28.md`
+  — User mutation surface; the only present site
+  (DeactivateUserAsync) is correct. Two follow-on findings
+  delivered (PasswordHash leak, RegisterAsync transaction
+  wrap). Two refinements promoted (B-021 closed, B-022 open).
+- `docs/security/post-s1-role-matrix-audit-2026-04-28.md`
+  — Every role-matrix row verified. RM-01 (logout missing
+  rate limit) closed in same commit.
+- `docs/security/post-s1-secondary-mutation-audit-2026-04-29.md`
+  — Organisation / Project / ProjectMember mutation surfaces.
+  All gaps dormant pending future endpoints; one refinement
+  (B-024 optimistic concurrency) promoted to backlog.
 
 **Inherited from S0 / S1 (must NOT regress):**
 - `ITenantContext` + global query filters on every
@@ -76,6 +111,8 @@ the same commit. No active sprint scope at the moment.
   - B-018 LoginAttemptTracker single-instance (pre-customer
     scale-out).
   - B-022 OnTokenValidated DB lookup cache (alongside B-018).
+  - B-024 Optimistic concurrency control on mutable entities
+    (rowversion / ETag / 409 mapping; ~12-16h sprint-shaped).
 
 **Working rules (PAFM-SD):**
 - Ch 27 git: conventional commits, short-lived feature
