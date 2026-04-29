@@ -1,0 +1,257 @@
+CIMS POST-S1 HARDENING — HANDOFF FOR 2026-04-30 OR LATER
+=========================================================
+
+Prepared at end of session 2026-04-29. Branch: master.
+Working tree clean at handoff (only .claude/ untracked).
+Pushed to origin and ready to pull.
+
+CURRENT POSITION
+-----------------
+S1 closed 2026-04-27 (PR #1 merge, tag v0.1-sprint-s1).
+Master is at 7819dad. 277 / 277 tests green. Build clean
+(0 warnings, 0 errors). v1.1 backlog at B-026.
+
+Between sprints. S2 (Risk Management) is NOT yet kicked off
+— kickoff still needs the PAFM-SD .docx Appendix F.3 paste,
+F.3 module-DoD backfill, capacity check, and a new
+docs/sprint-log/s2.md. Take a C-11 rest day before S2 if you
+haven't already.
+
+FIRST THING NEXT SESSION (do before anything else)
+---------------------------------------------------
+1. git fetch && git checkout master && git pull --ff-only
+
+2. NO migration to apply. The last migration shipped this
+   session was ScopeDocumentNumberUniquenessPerProject at
+   commit 688b797 (a few sessions back). EF database update
+   is a no-op on machines already at master.
+
+3. Sanity:
+
+     dotnet build CimsApp.sln
+     dotnet test  CimsApp.sln
+
+   Expect 277 / 277 green. If laptop runtime is missing
+   8.0.26, set DOTNET_ROLL_FORWARD=LatestMajor as before.
+
+4. Read docs/current-sprint.md from top to bottom — it has
+   been refreshed three times this session and is the single
+   source of truth for the post-S1 hardening list. The
+   "Hardening retired since S1 close" section is the
+   complete change log; do not re-discover items already
+   done.
+
+WHAT LANDED THIS SESSION (2026-04-29, 12 PRs)
+----------------------------------------------
+Master moved from 286a457 (PR #28 merge) to 7819dad. Twelve
+PRs landed, all on short-lived feature branches off master
+per Ch 27 working rules. Each is squash-merged with the body
+in the PR description.
+
+ARCHITECTURAL REFACTOR (the headline change):
+
+  PR #33 refactor(audit) — make audit-twin events atomic
+    AuditService.WriteAsync no longer calls SaveChangesAsync;
+    it just adds the AuditLog row to the change tracker. 28
+    call sites flipped so audit.WriteAsync runs BEFORE
+    db.SaveChangesAsync, and a single SaveChanges commits
+    both the entity write AND the structured audit-twin
+    event in one transaction. Before the refactor, every
+    business mutation produced TWO transactions (entity +
+    audit) — a process crash between them could leave the
+    entity persisted but the structured event missing,
+    breaking the audit-twin contract. Forensic adequacy was
+    not at risk (per-row AuditInterceptor was always atomic
+    with the entity write); discoverability is now fully
+    closed too. Side effect: one fewer SaveChanges
+    round-trip per mutation.
+
+THREE SAME-SHAPE TRANSACTION-WRAP BUGS (one pattern, three
+sites — found by following the trail from each fix to the
+next):
+
+  PR #29 fix(register) — RegisterAsync wraps User.Add +
+    InvitationService.MarkConsumedAsync (ExecuteUpdateAsync)
+    in BeginTransactionAsync. Closes the
+    "one-invitation-two-users" crash window where a process
+    crash between the two writes would leave the User
+    visible but the Invitation still consumable.
+
+  PR #34 fix(document-transition) — DocumentsService.TransitionAsync
+    wraps the revision-publish ExecuteUpdateAsync (sets
+    PublishedAt / ApprovedById / Suitability on latest
+    revisions) and the doc.CurrentState SaveChanges in one
+    transaction. Pre-fix: revisions could be marked Published
+    while the Document.CurrentState lagged behind.
+
+  PR #35 fix(org-create) — OrganisationsController.Create
+    wraps the org save and the bootstrap-invitation save
+    (via InvitationService.CreateAsync) in one transaction.
+    Pre-fix: a crash between the two would leave the org Code
+    reserved by the unique index but no bootstrap invitation,
+    so the org was orphaned forever (retry impossible).
+
+The pattern: any "ExecuteUpdateAsync followed by separate
+SaveChanges in one logical operation" or "explicit save +
+service call that also saves" is two SQL transactions. None
+of these have a live exploit path during the v1.0 internal
+pilot — the crash window is sub-millisecond and the
+single-developer flow doesn't race — but the wraps are
+correct for any deployment with concurrent traffic or
+infrastructure flakiness. EF in-memory provider treats
+BeginTransactionAsync as a no-op (suppress the warning via
+ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+if a test exercises a tx-wrapped path).
+
+A future audit pass should grep for `ExecuteUpdateAsync` and
+verify each site is either (a) the only write in its method
+or (b) wrapped with the surrounding writes in a transaction.
+Both current sites (Invitations.MarkConsumedAsync and
+DocumentRevisions inside TransitionAsync) are now covered.
+
+TEST COVERAGE FILLS (pinning documented contracts):
+
+  PR #32 test(payment-cert) — Variation omission (negative
+    EstimatedCostImpact) nets against approved additions in
+    IncludedVariationsAmount. Adds a +10,000 / -2,500 case
+    and asserts the cert nets to 7,500. Pinned the
+    documented contract before someone added a defensive
+    "amount > 0" check that would have silently broken
+    construction-domain omission flows.
+
+  PR #36 + PR #39 test(audit) — Audit-twin coverage
+    completion. After the PR #33 refactor, 9 structured
+    audit events lacked explicit assertions on action name +
+    basic detail. PR #36 covered three high-stakes events
+    (payment_certificate.draft_updated, .issued,
+    document.state_transition); PR #39 covered the
+    remaining six (project.created, document.created,
+    rfi.created, rfi.responded, action.created,
+    action.updated). EVERY structured audit-twin event in
+    the codebase is now pinned by at least one explicit
+    assertion. A regression at any site (typo'd action name,
+    removed audit call, wrong detail payload) is now caught
+    by the test suite rather than only surfacing in a
+    forensic review post-incident.
+
+DOCUMENTATION & BACKLOG:
+
+  PR #30 docs(audit) — post-S1 secondary-mutation audit doc
+    + B-024 (optimistic concurrency control). Walks every
+    security-sensitive mutation site for non-User entities
+    (Organisation, Project, ProjectMember). Three dormant
+    gaps captured as future obligations (SM-01: org
+    deactivation, SM-02: project deactivation/transfer,
+    SM-03: member remove/role change). One refinement
+    promoted to backlog: B-024 (no rowversion / ETag /
+    concurrency token on any mutable entity; ~12-16h
+    sprint-shaped).
+
+  PR #38 docs(backlog) — B-025 (Notification feature) and
+    B-026 (ProjectAppointment / B2B contractor membership).
+    Both are dormant entity scaffolds in the schema since
+    InitialCreate, never written or read by any production
+    code. Adding to the backlog so they're visible rather
+    than rediscovered as "surprise dead code" by a future
+    maintainer. Recommendation: do NOT delete the scaffolds;
+    re-adding the migrations when the features land would
+    just create churn.
+
+  PR #31 + #37 + #40 docs(current-sprint) — three refreshes
+    of docs/current-sprint.md keeping the
+    "Hardening retired" list and the v1.1-tagged sprint-bound
+    list in sync with reality. Always re-read this file
+    before starting a new conversation.
+
+POST-S1 AUDIT DOCS — STATE
+---------------------------
+All three audit docs landed and are stable:
+
+  docs/security/post-s1-auth-mutation-audit-2026-04-28.md
+    User mutation surface. Two follow-on findings now closed
+    via PR #28 (PasswordHash leak in audit) and PR #29
+    (RegisterAsync transaction wrap).
+
+  docs/security/post-s1-role-matrix-audit-2026-04-28.md
+    Every role-matrix row verified. RM-01 closed in same
+    commit.
+
+  docs/security/post-s1-secondary-mutation-audit-2026-04-29.md
+    Organisation / Project / ProjectMember mutation
+    surfaces. Three dormant gaps captured; B-024 promoted.
+
+WHEN A FUTURE ENDPOINT TOUCHES ANY OF THE SECURITY-SENSITIVE
+MUTATIONS LISTED IN THESE AUDITS, RE-READ THE RELEVANT DOC
+AS A CHECKLIST. The pattern of "mutate flag X without
+informing downstream service Y" is exactly what these docs
+exist to catch.
+
+V1.1 BACKLOG — CURRENT STATE
+-----------------------------
+B-001..B-007 closed.
+B-008 ISO 19650 reconciliation — S8 territory.
+B-009 SSO/federated IdP — pre-customer territory.
+B-010..B-012 anti-scope per PAFM Ch 3.
+B-013 closed (MudBlazor 9 upgrade).
+B-014..B-016 deferred from S1 per CR-003.
+B-017 closed.
+B-018 LoginAttemptTracker single-instance — scale-out.
+B-019 closed.
+B-020 (gap, no entry).
+B-021 closed.
+B-022 OnTokenValidated DB lookup cache — scale-out.
+B-023 closed.
+B-024 NEW — Optimistic concurrency control on mutable
+  entities. ~12-16h sprint-shaped. Not load-bearing for v1.0
+  internal pilot; load-bearing at v1.1 once concurrent users
+  become real.
+B-025 NEW — Notification feature implementation. Dormant
+  schema scaffold awaiting consumer.
+B-026 NEW — ProjectAppointment / B2B contractor membership.
+  Crosses ADR-0012 boundary; needs an ADR before
+  implementation.
+
+WHAT'S NEXT (PICK ONE WHEN STARTING)
+-------------------------------------
+1. S2 (Risk Management) sprint kickoff. Needs:
+     - PAFM-SD .docx Appendix F.3 paste into a fresh
+       docs/sprint-log/s2.md
+     - F.3 module-DoD backfill
+     - Capacity check (default formal capacity = 72h,
+       S0-adjusted = 96h)
+     - Sprint kickoff plan modelled on S1's
+
+2. More post-S1 hardening if a specific gap surfaces. The
+   audit-and-fix loop has reached genuine diminishing
+   returns; every angle tried in the last few iterations
+   came up clean. Resume only if a specific concern arises.
+
+3. Real-world smoke test: run the dev server (workaround:
+   `dotnet bin/Debug/net8.0/CimsApp.dll` if Application
+   Control still blocks CimsApp.exe) and exercise the auth
+   flow + a project create end-to-end to confirm none of
+   the recent refactors regressed at runtime. The unit
+   tests cover the contracts; this would cover integration.
+
+OPERATIONAL NOTES
+------------------
+- gh CLI on bash needs the full path:
+    "/c/Program Files/GitHub CLI/gh.exe"
+  Aliasing or PATH fix would resolve this; not done because
+  it's a per-session annoyance, not a blocker.
+- DOTNET_ROLL_FORWARD=LatestMajor still needed if the laptop
+  hasn't pulled .NET 8.0.26 yet.
+- The audit-twin atomicity refactor (PR #33) is the most
+  invasive change since S1 close. If anything looks off in
+  the next session's audit log, the refactor's behaviour
+  shape is documented in PR #33's body and in the
+  AuditService.WriteAsync XML doc comment in
+  CimsApp/Core/Core.cs.
+
+TO COMMIT FIRST THING (none — handoff is the only artifact)
+------------------------------------------------------------
+This handoff file is the only addition. Commit it on master
+directly (no PR — handoff files are not a release artifact)
+or on a docs branch if the working rules require a PR.
+Either is consistent with the existing s0/s1 handoff
+files which were committed directly on the sprint branch.
