@@ -233,6 +233,42 @@ WHAT'S NEXT (PICK ONE WHEN STARTING)
    the recent refactors regressed at runtime. The unit
    tests cover the contracts; this would cover integration.
 
+   UPDATE 2026-04-29 LATE: forward path #3 was actually
+   exercised this session and caught a real, latent
+   production bug — see PR #41 below. The "EF in-memory
+   ignores FK constraints" gap is now a known concern
+   (B-027). Re-running this smoke test on master is
+   recommended as a sanity check before any deploy and
+   before S2 kickoff.
+
+ADDITIONAL PR LANDED 2026-04-29 LATE
+-------------------------------------
+PR #41 fix(audit) — AuditLog.UserId nullable for
+anonymous-actor flows. Discovered when the smoke test
+above (forward path #3) hit POST /api/v1/organisations
+against the real DB and got HTTP 500. The bootstrap-
+invitation audit row wrote Guid.Empty to UserId as a "no
+actor" sentinel; SQL Server rejected the INSERT with FK
+violation FK_AuditLogs_Users_UserId. Broken in production
+for ~a week (since T-S0-11 / PR #11) but 100% latent
+under unit tests because EF in-memory ignores FK
+constraints.
+
+Fix: AuditLog.UserId becomes Guid? + User? navigation;
+AuditService.WriteAsync takes Guid? userId; three call
+sites that did `?? Guid.Empty` pass the nullable through.
+Query filter widened to `x.User != null && x.User.OrganisationId == _tenant.OrganisationId`
+so anonymous-actor rows are hidden from tenant queries.
+New migration AuditLogUserIdNullable.
+
+THE MIGRATION: `dotnet ef database update --project CimsApp`
+must be run on the laptop / any environment that already
+had master at the previous tip. Apart from this, no other
+schema change since the last handoff.
+
+Promoted B-027 (SQL Server smoke test in CI) to the v1.1
+backlog. The unit-test-only gap is no longer theoretical.
+
 OPERATIONAL NOTES
 ------------------
 - gh CLI on bash needs the full path:

@@ -98,6 +98,18 @@ the same commit. No active sprint scope at the moment.
   rfi.created, rfi.responded, action.created,
   action.updated. Every structured audit-twin event now
   pinned by at least one explicit assertion.
+- **AuditLog.UserId nullable (PR #41) — real, latent
+  production bug caught by SQL Server smoke test.** The
+  bootstrap-invitation path (POST /api/v1/organisations,
+  anon flow) wrote Guid.Empty to AuditLog.UserId as a "no
+  actor" sentinel; SQL Server rejected the INSERT with FK
+  violation. Broken in production since T-S0-11 (~one week).
+  EF in-memory ignores FKs, which is why every unit test
+  passed. Column is now `Guid?`, the audit log records null
+  honestly, the query filter handles `User == null`. New
+  migration `AuditLogUserIdNullable`. Promoted **B-027**:
+  add SQL Server smoke test to CI to catch this class of
+  bug pre-merge.
 
 **Post-S1 audits landed (all clean / dormant findings only
 beyond the items above):**
