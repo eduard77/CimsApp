@@ -317,7 +317,11 @@ public class CimsDbContext(
         m.Entity<ActionItem>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<ProjectTemplate>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<Notification>().HasQueryFilter(x => x.User.OrganisationId == _tenant.OrganisationId);
-        m.Entity<AuditLog>().HasQueryFilter(x => x.User.OrganisationId == _tenant.OrganisationId);
+        // AuditLog.UserId is nullable for anonymous flows (bootstrap
+        // invitation creation has no actor). Anonymous-actor audit
+        // rows have no tenant binding — they're system events visible
+        // only via IgnoreQueryFilters (SuperAdmin / audit-export).
+        m.Entity<AuditLog>().HasQueryFilter(x => x.User != null && x.User.OrganisationId == _tenant.OrganisationId);
         // Invitations are tenant-scoped. Pre-auth consumption in
         // InvitationService.ConsumeAsync uses IgnoreQueryFilters(), the
         // same pattern AuthService uses for User/RefreshToken lookups.

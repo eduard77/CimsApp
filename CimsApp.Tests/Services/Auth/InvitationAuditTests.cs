@@ -97,7 +97,10 @@ public class InvitationAuditTests
         using var verify = new CimsDbContext(options, tenant);
         var audit = Assert.Single(verify.AuditLogs.IgnoreQueryFilters()
             .Where(a => a.Action == "invitation.created"));
-        Assert.Equal(Guid.Empty, audit.UserId);
+        // Bootstrap invitation has no caller — the audit row honestly
+        // records "no actor known" via a null UserId. Pre-fix this was
+        // Guid.Empty, which violated the FK to Users.Id on SQL Server.
+        Assert.Null(audit.UserId);
         Assert.Contains("\"isBootstrap\":true", audit.Detail);
         Assert.Contains("\"hasEmailBind\":false", audit.Detail);
     }
