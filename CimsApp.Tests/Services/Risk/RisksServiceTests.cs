@@ -368,6 +368,105 @@ public class RisksServiceTests
     }
 
     [Fact]
+    public async Task RecordQualitativeAssessmentAsync_sets_notes_assessor_and_bumps_status_to_Assessed()
+    {
+        var (options, tenant, _, userId, projectId, _) = BuildFixture();
+        Guid riskId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            riskId = (await svc.CreateAsync(projectId, BasicCreate(), userId)).Id;
+        }
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            await svc.RecordQualitativeAssessmentAsync(projectId, riskId,
+                new RecordQualitativeAssessmentRequest("Geotechnical survey confirms soil class C; mitigation: deeper piles."),
+                userId);
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var risk = await verify.Risks.SingleAsync(r => r.Id == riskId);
+        Assert.Equal(RiskStatus.Assessed, risk.Status);
+        Assert.NotNull(risk.QualitativeNotes);
+        Assert.Contains("Geotechnical", risk.QualitativeNotes);
+        Assert.Equal(userId, risk.AssessedById);
+        Assert.NotNull(risk.AssessedAt);
+
+        var auditRow = await verify.AuditLogs.IgnoreQueryFilters()
+            .SingleAsync(a => a.Action == "risk.qualitative_assessed");
+        // The audit JSON encodes `>` as `>` (default JSON-safe
+        // policy); just assert the two endpoints of the transition.
+        Assert.Contains("Identified", auditRow.Detail!);
+        Assert.Contains("Assessed",   auditRow.Detail!);
+    }
+
+    [Fact]
+    public async Task RecordQualitativeAssessmentAsync_preserves_status_when_already_past_Identified()
+    {
+        var (options, tenant, _, userId, projectId, _) = BuildFixture();
+        Guid riskId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            riskId = (await svc.CreateAsync(projectId, BasicCreate(), userId)).Id;
+            // Move past Identified before assessing.
+            await svc.UpdateAsync(projectId, riskId,
+                new UpdateRiskRequest(null, null, null, null, null, RiskStatus.Active,
+                    null, null, null, null), userId);
+        }
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            await svc.RecordQualitativeAssessmentAsync(projectId, riskId,
+                new RecordQualitativeAssessmentRequest("Re-assessed mid-flight"),
+                userId);
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var risk = await verify.Risks.SingleAsync(r => r.Id == riskId);
+        Assert.Equal(RiskStatus.Active, risk.Status);
+        Assert.Contains("Re-assessed mid-flight", risk.QualitativeNotes!);
+    }
+
+    [Fact]
+    public async Task RecordQualitativeAssessmentAsync_rejects_empty_notes()
+    {
+        var (options, tenant, _, userId, projectId, _) = BuildFixture();
+        Guid riskId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            riskId = (await svc.CreateAsync(projectId, BasicCreate(), userId)).Id;
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new RisksService(db2, new AuditService(db2));
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            svc2.RecordQualitativeAssessmentAsync(projectId, riskId,
+                new RecordQualitativeAssessmentRequest("   "), userId));
+    }
+
+    [Fact]
+    public async Task RecordQualitativeAssessmentAsync_rejects_already_closed_risk()
+    {
+        var (options, tenant, _, userId, projectId, _) = BuildFixture();
+        Guid riskId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            riskId = (await svc.CreateAsync(projectId, BasicCreate(), userId)).Id;
+            await svc.CloseAsync(projectId, riskId, userId);
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new RisksService(db2, new AuditService(db2));
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            svc2.RecordQualitativeAssessmentAsync(projectId, riskId,
+                new RecordQualitativeAssessmentRequest("late"), userId));
+    }
+
+    [Fact]
     public async Task UpdateAsync_cross_tenant_lookup_404s()
     {
         var (options, tenant, _, userId, projectId, _) = BuildFixture();
