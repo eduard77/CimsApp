@@ -620,6 +620,19 @@ public class RisksController(RisksService svc, CimsDbContext db) : CimsControlle
             CurrentUserId, ClientIp, ClientAgent, ct);
         return Ok(new { success = true, data = risk });
     }
+
+    [HttpGet("monte-carlo")]
+    public async Task<IActionResult> MonteCarlo(
+        Guid projectId,
+        [FromQuery] int iterations = 10_000,
+        [FromQuery] int? seed = null,
+        CancellationToken ct = default)
+    {
+        // Membership-only: simulation is a read-side aggregation.
+        await GetProjectRoleAsync(db, projectId);
+        var result = await svc.RunMonteCarloAsync(projectId, iterations, seed, ct);
+        return Ok(new { success = true, data = result });
+    }
 }
 
 // ── Documents ─────────────────────────────────────────────────────────────────

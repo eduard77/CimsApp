@@ -1941,6 +1941,44 @@ public class RisksService(CimsDbContext db, AuditService audit)
         await db.SaveChangesAsync(ct);
         return risk;
     }
+
+    /// <summary>
+    /// Run cost-side Monte Carlo simulation across the project's
+    /// quantified risks (T-S2-08, PAFM-SD F.3 fourth bullet — cost
+    /// half only per CR-004, schedule-side is v1.1 / B-028).
+    /// Selects active non-Closed risks that have a complete 3-point
+    /// estimate + Distribution; risks lacking any of the four are
+    /// silently excluded (the analyst hasn't quantified them yet).
+    /// Closed risks excluded — running MC against historical
+    /// realised exposure is not what this view is for.
+    /// </summary>
+    public async Task<CimsApp.Core.MonteCarloResult> RunMonteCarloAsync(
+        Guid projectId, int iterations, int? seed = null, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var risks = await db.Risks
+            .Where(r => r.ProjectId == projectId
+                     && r.IsActive
+                     && r.Status != RiskStatus.Closed
+                     && r.BestCase   != null
+                     && r.MostLikely != null
+                     && r.WorstCase  != null
+                     && r.Distribution != null)
+            .ToListAsync(ct);
+
+        var inputs = risks.Select(r => new CimsApp.Core.MonteCarloInput
+        {
+            Probability  = r.Probability,
+            BestCase     = (double)r.BestCase!.Value,
+            MostLikely   = (double)r.MostLikely!.Value,
+            WorstCase    = (double)r.WorstCase!.Value,
+            Distribution = r.Distribution!.Value,
+        }).ToList();
+
+        return CimsApp.Core.MonteCarlo.Simulate(inputs, iterations, seed ?? Random.Shared.Next());
+    }
 }
 
 // ── CDE ───────────────────────────────────────────────────────────────────────
