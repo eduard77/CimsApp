@@ -44,6 +44,7 @@ public class CimsDbContextTenantFilterTests
         typeof(RiskDrawdown),
         // S3 stakeholder-domain additions (T-S3-02 onwards).
         typeof(Stakeholder),
+        typeof(EngagementLog),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =
