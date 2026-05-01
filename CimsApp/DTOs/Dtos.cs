@@ -60,6 +60,34 @@ public record CashflowByLineDto(
     string ProjectCurrency, List<CashflowLineSeries> Lines);
 public record RaiseVariationRequest(string Title, string? Description, string? Reason, decimal? EstimatedCostImpact, int? EstimatedTimeImpactDays, Guid? CostBreakdownItemId);
 public record VariationDecisionRequest(string? DecisionNote);
+// T-S2-04. Risk register CRUD. Probability and Impact are 1..5; Score is
+// computed P×I server-side. CategoryId, OwnerId, ResponseStrategy,
+// ResponsePlan, ContingencyAmount are all optional at create time.
+public record CreateRiskRequest(
+    string Title,
+    string? Description,
+    Guid? CategoryId,
+    int Probability,
+    int Impact,
+    Guid? OwnerId,
+    ResponseStrategy? ResponseStrategy,
+    string? ResponsePlan,
+    decimal? ContingencyAmount);
+// All fields nullable for partial update. Setting Status to Closed via
+// this DTO is rejected by RisksService.UpdateAsync — callers must use
+// the dedicated close endpoint so the audit trail carries a distinct
+// risk.closed event.
+public record UpdateRiskRequest(
+    string? Title,
+    string? Description,
+    Guid? CategoryId,
+    int? Probability,
+    int? Impact,
+    RiskStatus? Status,
+    Guid? OwnerId,
+    ResponseStrategy? ResponseStrategy,
+    string? ResponsePlan,
+    decimal? ContingencyAmount);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

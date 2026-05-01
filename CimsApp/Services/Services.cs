@@ -1637,6 +1637,192 @@ public class VariationsService(CimsDbContext db, AuditService audit)
     }
 }
 
+// ── Risk & Opportunities ──────────────────────────────────────────────────────
+// PAFM-SD Appendix F.3 (S2 module). T-S2-04 ships the core lifecycle:
+// Create, Update, Close, each with audit-twin events committed atomically
+// with the entity write per the post-S1 PR #33 pattern.
+public class RisksService(CimsDbContext db, AuditService audit)
+{
+    /// <summary>
+    /// Register a new Risk in state <see cref="RiskStatus.Identified"/>.
+    /// Probability and Impact are validated to 1..5 (the standard 5×5
+    /// matrix); Score is the persisted product (denormalised for fast
+    /// heat-map queries). CategoryId, if set, must belong to the same
+    /// project (cross-tenant or wrong-project IDs 404 here, same
+    /// guard pattern as VariationsService.RaiseAsync).
+    /// </summary>
+    public async Task<Risk> CreateAsync(
+        Guid projectId, CreateRiskRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(["Title is required"]);
+        ValidateMatrixInputs(req.Probability, req.Impact);
+
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        if (req.CategoryId.HasValue)
+        {
+            var catOk = await db.RiskCategories.AnyAsync(
+                c => c.Id == req.CategoryId.Value && c.ProjectId == projectId, ct);
+            if (!catOk) throw new NotFoundException("RiskCategory");
+        }
+        if (req.OwnerId.HasValue)
+        {
+            var ownerOk = await db.Users.AnyAsync(u => u.Id == req.OwnerId.Value, ct);
+            if (!ownerOk) throw new NotFoundException("User");
+        }
+
+        var risk = new Risk
+        {
+            ProjectId         = projectId,
+            CategoryId        = req.CategoryId,
+            Title             = req.Title.Trim(),
+            Description       = req.Description,
+            Probability       = req.Probability,
+            Impact            = req.Impact,
+            Score             = req.Probability * req.Impact,
+            Status            = RiskStatus.Identified,
+            OwnerId           = req.OwnerId,
+            ResponseStrategy  = req.ResponseStrategy,
+            ResponsePlan      = req.ResponsePlan,
+            ContingencyAmount = req.ContingencyAmount,
+        };
+        db.Risks.Add(risk);
+        await audit.WriteAsync(actorId, "risk.created", "Risk",
+            risk.Id.ToString(), projectId,
+            detail: new
+            {
+                title      = risk.Title,
+                score      = risk.Score,
+                categoryId = risk.CategoryId,
+                ownerId    = risk.OwnerId,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return risk;
+    }
+
+    /// <summary>
+    /// Partial update on a non-Closed Risk. Any field set on the
+    /// request is applied; null = "leave unchanged" (so v1.0 cannot
+    /// explicitly clear nullable fields back to null — accepted
+    /// limitation, revisit with a tri-state DTO if real workflows
+    /// demand it). Setting Status to <see cref="RiskStatus.Closed"/>
+    /// is rejected here — callers must use <see cref="CloseAsync"/>
+    /// so the audit history carries a distinct `risk.closed` event
+    /// rather than a generic `risk.updated`.
+    /// </summary>
+    public async Task<Risk> UpdateAsync(
+        Guid projectId, Guid riskId, UpdateRiskRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var risk = await db.Risks
+            .FirstOrDefaultAsync(r => r.Id == riskId && r.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Risk");
+
+        if (risk.Status == RiskStatus.Closed)
+            throw new ConflictException("Risk is Closed; cannot update");
+        if (req.Status == RiskStatus.Closed)
+            throw new ConflictException("Use CloseAsync to set Status to Closed");
+
+        var oldScore = risk.Score;
+        var changed = new List<string>();
+
+        if (req.Title is not null)
+        {
+            if (string.IsNullOrWhiteSpace(req.Title))
+                throw new ValidationException(["Title cannot be empty"]);
+            risk.Title = req.Title.Trim();
+            changed.Add("Title");
+        }
+        if (req.Description is not null) { risk.Description = req.Description; changed.Add("Description"); }
+
+        if (req.CategoryId.HasValue)
+        {
+            var catOk = await db.RiskCategories.AnyAsync(
+                c => c.Id == req.CategoryId.Value && c.ProjectId == projectId, ct);
+            if (!catOk) throw new NotFoundException("RiskCategory");
+            risk.CategoryId = req.CategoryId.Value;
+            changed.Add("CategoryId");
+        }
+
+        if (req.Probability.HasValue || req.Impact.HasValue)
+        {
+            var newP = req.Probability ?? risk.Probability;
+            var newI = req.Impact ?? risk.Impact;
+            ValidateMatrixInputs(newP, newI);
+            if (req.Probability.HasValue) { risk.Probability = newP; changed.Add("Probability"); }
+            if (req.Impact.HasValue)      { risk.Impact      = newI; changed.Add("Impact"); }
+            risk.Score = newP * newI;
+            if (oldScore != risk.Score)   changed.Add("Score");
+        }
+
+        if (req.Status.HasValue)         { risk.Status = req.Status.Value; changed.Add("Status"); }
+
+        if (req.OwnerId.HasValue)
+        {
+            var ownerOk = await db.Users.AnyAsync(u => u.Id == req.OwnerId.Value, ct);
+            if (!ownerOk) throw new NotFoundException("User");
+            risk.OwnerId = req.OwnerId.Value;
+            changed.Add("OwnerId");
+        }
+
+        if (req.ResponseStrategy.HasValue) { risk.ResponseStrategy = req.ResponseStrategy.Value; changed.Add("ResponseStrategy"); }
+        if (req.ResponsePlan is not null)  { risk.ResponsePlan = req.ResponsePlan; changed.Add("ResponsePlan"); }
+        if (req.ContingencyAmount.HasValue){ risk.ContingencyAmount = req.ContingencyAmount.Value; changed.Add("ContingencyAmount"); }
+
+        if (changed.Count == 0)
+            throw new ValidationException(["No updatable fields provided"]);
+
+        await audit.WriteAsync(actorId, "risk.updated", "Risk",
+            risk.Id.ToString(), projectId,
+            detail: new
+            {
+                changedFields = changed,
+                scoreBefore   = oldScore,
+                scoreAfter    = risk.Score,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return risk;
+    }
+
+    /// <summary>
+    /// Move a Risk to <see cref="RiskStatus.Closed"/>. Idempotent on
+    /// already-Closed risks (rejected as ConflictException so callers
+    /// don't silently double-emit close events).
+    /// </summary>
+    public async Task<Risk> CloseAsync(
+        Guid projectId, Guid riskId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var risk = await db.Risks
+            .FirstOrDefaultAsync(r => r.Id == riskId && r.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Risk");
+
+        if (risk.Status == RiskStatus.Closed)
+            throw new ConflictException("Risk is already Closed");
+
+        var previousStatus = risk.Status;
+        risk.Status = RiskStatus.Closed;
+
+        await audit.WriteAsync(actorId, "risk.closed", "Risk",
+            risk.Id.ToString(), projectId,
+            detail: new { previousStatus = previousStatus.ToString() },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return risk;
+    }
+
+    private static void ValidateMatrixInputs(int probability, int impact)
+    {
+        var errors = new List<string>();
+        if (probability < 1 || probability > 5) errors.Add("Probability must be 1..5");
+        if (impact < 1 || impact > 5)            errors.Add("Impact must be 1..5");
+        if (errors.Count > 0) throw new ValidationException(errors);
+    }
+}
+
 // ── CDE ───────────────────────────────────────────────────────────────────────
 public class CdeService(CimsDbContext db, AuditService audit)
 {
