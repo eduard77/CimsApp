@@ -50,6 +50,8 @@ public class CimsDbContext(
     public DbSet<Stakeholder>        Stakeholders        => Set<Stakeholder>();
     public DbSet<EngagementLog>      EngagementLogs      => Set<EngagementLog>();
     public DbSet<CommunicationItem>  CommunicationItems  => Set<CommunicationItem>();
+    public DbSet<Activity>           Activities          => Set<Activity>();
+    public DbSet<Dependency>         Dependencies        => Set<Dependency>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -405,6 +407,38 @@ public class CimsDbContext(
              .HasForeignKey(c => c.OwnerId).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<Activity>(e =>
+        {
+            // (ProjectId, Code) is the natural unique-within-project
+            // identifier; the CPM solver and the Gantt renderer hit
+            // (ProjectId, IsActive) for the live activity list.
+            e.HasIndex(a => new { a.ProjectId, a.Code }).IsUnique();
+            e.HasIndex(a => new { a.ProjectId, a.IsActive });
+            e.HasOne(a => a.Project).WithMany()
+             .HasForeignKey(a => a.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(a => a.Assignee).WithMany()
+             .HasForeignKey(a => a.AssigneeId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<Dependency>(e =>
+        {
+            // CPM forward pass walks (ProjectId, SuccessorId);
+            // backward pass walks (ProjectId, PredecessorId).
+            e.HasIndex(d => new { d.ProjectId, d.SuccessorId });
+            e.HasIndex(d => new { d.ProjectId, d.PredecessorId });
+            // Disallow duplicate (Predecessor, Successor) pairs.
+            // The Type / Lag are properties of *the* link; multi-link
+            // pairs are vanishingly rare in real schedules and would
+            // muddle the CPM solver semantics.
+            e.HasIndex(d => new { d.PredecessorId, d.SuccessorId }).IsUnique();
+            e.HasOne(d => d.Project).WithMany()
+             .HasForeignKey(d => d.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(d => d.Predecessor).WithMany(a => a.SuccessorLinks)
+             .HasForeignKey(d => d.PredecessorId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(d => d.Successor).WithMany(a => a.PredecessorLinks)
+             .HasForeignKey(d => d.SuccessorId).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -446,6 +480,8 @@ public class CimsDbContext(
         m.Entity<Stakeholder>().HasQueryFilter(s => s.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<EngagementLog>().HasQueryFilter(g => g.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<CommunicationItem>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Activity>().HasQueryFilter(a => a.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Dependency>().HasQueryFilter(d => d.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -471,6 +507,7 @@ public class CimsDbContext(
             else if (e.Entity is Risk risk) risk.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is Stakeholder s) s.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is CommunicationItem ci) ci.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is Activity act) act.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

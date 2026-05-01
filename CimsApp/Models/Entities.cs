@@ -1001,3 +1001,108 @@ public class CommunicationItem
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// One scheduled activity in a project's CPM schedule (T-S4-02,
+/// PAFM-SD F.5 first bullet). Tenant-scoped through
+/// Project.AppointingPartyId. CPM-computed fields (Early/Late
+/// Start/Finish, Total/Free Float, IsCritical) are nullable until
+/// the first ScheduleService.RecomputeAsync run; the service
+/// populates them by calling Core/Cpm.cs and persisting the result.
+/// Soft-deleted via IsActive to preserve dependency-graph history.
+/// </summary>
+public class Activity
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Caller-supplied unique-within-project code, e.g.
+    /// "A1010", "MIL-100". Service enforces uniqueness on
+    /// (ProjectId, Code).</summary>
+    [Required, MaxLength(50)] public string Code { get; set; } = "";
+
+    [Required, MaxLength(300)] public string Name { get; set; } = "";
+    public string? Description { get; set; }
+
+    /// <summary>Planned duration in DurationUnit. Decimal so half-day
+    /// activities are expressible without an Hour unit. v1.0 only
+    /// supports Day; Hour reserved for v1.1.</summary>
+    [Column(TypeName = "decimal(9,2)")]
+    public decimal Duration { get; set; }
+    public DurationUnit DurationUnit { get; set; } = DurationUnit.Day;
+
+    // ── CPM-computed fields (populated by Core/Cpm.cs run) ─────────
+    public DateTime? EarlyStart  { get; set; }
+    public DateTime? EarlyFinish { get; set; }
+    public DateTime? LateStart   { get; set; }
+    public DateTime? LateFinish  { get; set; }
+    [Column(TypeName = "decimal(9,2)")]
+    public decimal? TotalFloat   { get; set; }
+    [Column(TypeName = "decimal(9,2)")]
+    public decimal? FreeFloat    { get; set; }
+    public bool IsCritical { get; set; }
+
+    // ── Scheduled (committed plan) and Actual (recorded) dates ─────
+    public DateTime? ScheduledStart  { get; set; }
+    public DateTime? ScheduledFinish { get; set; }
+    public DateTime? ActualStart     { get; set; }
+    public DateTime? ActualFinish    { get; set; }
+
+    // ── Constraint propagation (MS-Project-style) ───────────────────
+    public ConstraintType ConstraintType { get; set; } = ConstraintType.ASAP;
+    public DateTime? ConstraintDate { get; set; }
+
+    /// <summary>Progress fraction in [0, 1]. Drives EV (post-S1)
+    /// and reporting. Service validates range.</summary>
+    [Column(TypeName = "decimal(5,4)")]
+    public decimal PercentComplete { get; set; }
+
+    /// <summary>Optional caller-supplied owner / responsible.
+    /// Service validates project membership.</summary>
+    public Guid? AssigneeId { get; set; }
+    public User? Assignee { get; set; }
+
+    [MaxLength(100)] public string? Discipline { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<Dependency> PredecessorLinks { get; set; } = [];
+    public ICollection<Dependency> SuccessorLinks   { get; set; } = [];
+}
+
+/// <summary>
+/// Inter-activity scheduling dependency (T-S4-03). Predecessor and
+/// Successor are both Activity rows in the *same* project; service
+/// enforces same-project at write time. Lag is in days (decimal,
+/// can be negative for lead). Tenant-scoped via Project.
+/// </summary>
+public class Dependency
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Denormalised for the tenant query filter — same
+    /// pattern as RiskDrawdown.ProjectId. Always equals
+    /// Predecessor.ProjectId == Successor.ProjectId; service
+    /// enforces.</summary>
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid PredecessorId { get; set; }
+    public Activity Predecessor { get; set; } = null!;
+
+    public Guid SuccessorId { get; set; }
+    public Activity Successor { get; set; } = null!;
+
+    public DependencyType Type { get; set; } = DependencyType.FS;
+
+    /// <summary>Lag in days. Negative = lead. Service validates a
+    /// reasonable range (-365..365) to catch typos.</summary>
+    [Column(TypeName = "decimal(9,2)")]
+    public decimal Lag { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
