@@ -49,6 +49,8 @@ public class CimsDbContextTenantFilterTests
         // S4 schedule-domain additions (T-S4-02 onwards).
         typeof(Activity),
         typeof(Dependency),
+        typeof(ScheduleBaseline),
+        typeof(ScheduleBaselineActivity),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =
