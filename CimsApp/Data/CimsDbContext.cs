@@ -57,6 +57,7 @@ public class CimsDbContext(
     public DbSet<LookaheadEntry>      LookaheadEntries     => Set<LookaheadEntry>();
     public DbSet<WeeklyWorkPlan>      WeeklyWorkPlans      => Set<WeeklyWorkPlan>();
     public DbSet<WeeklyTaskCommitment> WeeklyTaskCommitments => Set<WeeklyTaskCommitment>();
+    public DbSet<ChangeRequest>       ChangeRequests       => Set<ChangeRequest>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -501,6 +502,26 @@ public class CimsDbContext(
              .HasForeignKey(c => c.ActivityId).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<ChangeRequest>(e =>
+        {
+            // Project-scoped sequential number — unique within project.
+            e.HasIndex(c => new { c.ProjectId, c.Number }).IsUnique();
+            // Register listing renders by (ProjectId, State) and
+            // (ProjectId, RaisedAt desc) for "newest first" views.
+            e.HasIndex(c => new { c.ProjectId, c.State });
+            e.HasIndex(c => new { c.ProjectId, c.RaisedAt });
+            e.HasOne(c => c.Project).WithMany()
+             .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.RaisedBy).WithMany()
+             .HasForeignKey(c => c.RaisedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.AssessedBy).WithMany()
+             .HasForeignKey(c => c.AssessedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.DecisionBy).WithMany()
+             .HasForeignKey(c => c.DecisionById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.GeneratedVariation).WithMany()
+             .HasForeignKey(c => c.GeneratedVariationId).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -549,6 +570,7 @@ public class CimsDbContext(
         m.Entity<LookaheadEntry>().HasQueryFilter(le => le.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<WeeklyWorkPlan>().HasQueryFilter(w => w.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<WeeklyTaskCommitment>().HasQueryFilter(c => c.WeeklyWorkPlan.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<ChangeRequest>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -576,6 +598,7 @@ public class CimsDbContext(
             else if (e.Entity is CommunicationItem ci) ci.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is Activity act) act.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is WeeklyTaskCommitment wtc) wtc.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is ChangeRequest cr) cr.UpdatedAt = DateTime.UtcNow;
         }
     }
 }
