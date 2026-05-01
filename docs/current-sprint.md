@@ -5,31 +5,31 @@ non-trivial AI session so the model starts with the right scope anchor.
 
 ---
 
-**Status:** Sprint S2 active — Risk & Opportunities kickoff landed 2026-05-01.
+**Status:** Between sprints — S2 closed (PR awaiting merge); S3 not
+yet kicked off.
 
-**Active sprint:** S2 — Risk & Opportunities. PAFM-SD Ch 6.4 / Appendix
-F.3. Branch `sprint/s2-risk-management` off master (`c0cfd53`). Kickoff
-+ CR-004 capacity cut both committed Day 1; T-S2-02 (RiskCategory
-entity) is next. See `docs/sprint-log/s2.md`.
+**Last sprint:** S2 — Risk & Opportunities. Branch
+`sprint/s2-risk-management` (PR awaiting merge); tag
+`v0.2-sprint-s2`. See `docs/sprint-log/s2.md` and
+`docs/retrospectives/s2.md`. 8 of 9 PAFM Appendix F.3 module-DoD
+bullets delivered; the 1 unticked is B-029 (opportunity register,
+deferred per CR-004).
 
-CR-004 deferrals to v1.1 backlog: B-028 (schedule-side Monte Carlo),
-B-029 (opportunity register), B-030 (cross-module contingency
-drawdown link).
+CR-004 deferrals to v1.1 backlog: B-028 (schedule-side Monte
+Carlo — also blocked on S4 CPM data), B-029 (opportunity
+register), B-030 (cross-module contingency drawdown link).
 
-**Last sprint:** S1 — Cost & Commercial. Merged at `330a09c`
-(2026-04-27). Tag `v0.1-sprint-s1`. See `docs/retrospectives/s1.md`.
-
-**Last sprint:** S1 — Cost & Commercial. Merged at `330a09c`
+**Previously closed:** S1 — Cost & Commercial. Merged at `330a09c`
 (2026-04-27). Tag `v0.1-sprint-s1`. See
 `docs/sprint-log/s1.md` and `docs/retrospectives/s1.md`. 8 of
 10 PAFM Appendix F.2 module-DoD bullets delivered; the 2
 unticked are the CR-003 deferrals (B-014 Construction Act
 notices, B-015 final account schedule).
 
-**Next sprint:** S2 — Risk Management. PAFM-SD Ch 6.4 / Appendix
-F.3. PMBOK 5 Risk knowledge area. Not yet kicked off — kickoff
-needs PAFM-SD `.docx` Appendix F.3 paste, F.3 module-DoD
-backfill, capacity check, and a new `docs/sprint-log/s2.md`.
+**Next sprint:** S3 — Stakeholder & Communications. PAFM Appendix
+F.4. Estimated 60h over 3 weeks. Stakeholder register, power /
+interest matrix, engagement plan + log, communications matrix.
+Not yet kicked off.
 
 **Branch:** `master` (live work between sprints lands on
 short-lived feature branches off master, not a long-running

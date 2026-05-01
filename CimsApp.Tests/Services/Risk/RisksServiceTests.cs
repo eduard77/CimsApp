@@ -734,6 +734,47 @@ public class RisksServiceTests
         Assert.Equal("later",   rows[1].Note);
     }
 
+    [Theory]
+    [InlineData(ResponseStrategy.Avoid)]
+    [InlineData(ResponseStrategy.Transfer)]
+    [InlineData(ResponseStrategy.Mitigate)]
+    [InlineData(ResponseStrategy.Accept)]
+    public async Task UpdateAsync_records_each_F3_response_strategy_via_response_plan(ResponseStrategy strategy)
+    {
+        // T-S2-10. Response plans (avoid / transfer / mitigate /
+        // accept) are delivered via the existing UpdateAsync path
+        // per the S2 kickoff — no dedicated service method needed.
+        // This test pins each of the four F.3 strategies through
+        // that path and confirms the audit event names them.
+        var (options, tenant, _, userId, projectId, _) = BuildFixture();
+        Guid riskId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            riskId = (await svc.CreateAsync(projectId, BasicCreate(), userId)).Id;
+        }
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            await svc.UpdateAsync(projectId, riskId,
+                new UpdateRiskRequest(null, null, null, null, null, null, null,
+                    ResponseStrategy: strategy,
+                    ResponsePlan: $"Strategy {strategy}: detailed plan",
+                    ContingencyAmount: null),
+                userId);
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var risk = await verify.Risks.SingleAsync(r => r.Id == riskId);
+        Assert.Equal(strategy, risk.ResponseStrategy);
+        Assert.Equal($"Strategy {strategy}: detailed plan", risk.ResponsePlan);
+
+        var update = await verify.AuditLogs.IgnoreQueryFilters()
+            .SingleAsync(a => a.Action == "risk.updated");
+        Assert.Contains("ResponseStrategy", update.Detail!);
+        Assert.Contains("ResponsePlan",     update.Detail!);
+    }
+
     [Fact]
     public async Task UpdateAsync_cross_tenant_lookup_404s()
     {
