@@ -467,6 +467,85 @@ public class RisksServiceTests
     }
 
     [Fact]
+    public async Task RecordQuantitativeAssessmentAsync_persists_3point_estimate_and_distribution()
+    {
+        var (options, tenant, _, userId, projectId, _) = BuildFixture();
+        Guid riskId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            riskId = (await svc.CreateAsync(projectId, BasicCreate(), userId)).Id;
+        }
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            await svc.RecordQuantitativeAssessmentAsync(projectId, riskId,
+                new RecordQuantitativeAssessmentRequest(
+                    BestCase: 10_000m, MostLikely: 25_000m, WorstCase: 80_000m,
+                    Distribution: DistributionShape.Pert),
+                userId);
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var risk = await verify.Risks.SingleAsync(r => r.Id == riskId);
+        Assert.Equal(10_000m, risk.BestCase);
+        Assert.Equal(25_000m, risk.MostLikely);
+        Assert.Equal(80_000m, risk.WorstCase);
+        Assert.Equal(DistributionShape.Pert, risk.Distribution);
+
+        var auditRow = await verify.AuditLogs.IgnoreQueryFilters()
+            .SingleAsync(a => a.Action == "risk.quantitative_assessed");
+        Assert.Contains("Pert", auditRow.Detail!);
+    }
+
+    [Theory]
+    [InlineData(100, 50, 80)]    // best > mostLikely
+    [InlineData(10, 80, 50)]     // mostLikely > worst
+    [InlineData(-1, 5, 10)]      // negative best
+    [InlineData(0, -1, 10)]      // negative mostLikely
+    [InlineData(0, 5, -10)]      // negative worst
+    public async Task RecordQuantitativeAssessmentAsync_rejects_invalid_3point_inputs(
+        decimal best, decimal mostLikely, decimal worst)
+    {
+        var (options, tenant, _, userId, projectId, _) = BuildFixture();
+        Guid riskId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            riskId = (await svc.CreateAsync(projectId, BasicCreate(), userId)).Id;
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new RisksService(db2, new AuditService(db2));
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            svc2.RecordQuantitativeAssessmentAsync(projectId, riskId,
+                new RecordQuantitativeAssessmentRequest(best, mostLikely, worst,
+                    DistributionShape.Triangular),
+                userId));
+    }
+
+    [Fact]
+    public async Task RecordQuantitativeAssessmentAsync_rejects_already_closed_risk()
+    {
+        var (options, tenant, _, userId, projectId, _) = BuildFixture();
+        Guid riskId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            riskId = (await svc.CreateAsync(projectId, BasicCreate(), userId)).Id;
+            await svc.CloseAsync(projectId, riskId, userId);
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new RisksService(db2, new AuditService(db2));
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            svc2.RecordQuantitativeAssessmentAsync(projectId, riskId,
+                new RecordQuantitativeAssessmentRequest(0, 5, 10,
+                    DistributionShape.Triangular),
+                userId));
+    }
+
+    [Fact]
     public async Task UpdateAsync_cross_tenant_lookup_404s()
     {
         var (options, tenant, _, userId, projectId, _) = BuildFixture();
