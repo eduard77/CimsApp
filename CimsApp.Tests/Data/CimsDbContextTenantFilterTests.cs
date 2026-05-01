@@ -51,6 +51,9 @@ public class CimsDbContextTenantFilterTests
         typeof(Dependency),
         typeof(ScheduleBaseline),
         typeof(ScheduleBaselineActivity),
+        typeof(LookaheadEntry),
+        typeof(WeeklyWorkPlan),
+        typeof(WeeklyTaskCommitment),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =
