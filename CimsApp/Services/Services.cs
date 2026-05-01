@@ -1979,6 +1979,70 @@ public class RisksService(CimsDbContext db, AuditService audit)
 
         return CimsApp.Core.MonteCarlo.Simulate(inputs, iterations, seed ?? Random.Shared.Next());
     }
+
+    /// <summary>
+    /// Record a contingency drawdown against a Risk (T-S2-09).
+    /// Amount must be > 0; OccurredAt is the date the cost was
+    /// incurred (analyst-supplied; distinct from row-write time).
+    /// Cumulative drawdowns may exceed Risk.ContingencyAmount —
+    /// over-runs are tracked honestly rather than blocked, matching
+    /// real construction practice. Already-Closed risks rejected.
+    /// Cross-module link to specific Commitment / ActualCost rows
+    /// is deferred to v1.1 (B-030 per CR-004); v1.0 takes a free-text
+    /// Reference for traceability.
+    /// </summary>
+    public async Task<RiskDrawdown> RecordDrawdownAsync(
+        Guid projectId, Guid riskId, RecordRiskDrawdownRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (req.Amount <= 0)
+            throw new ValidationException(["Amount must be > 0"]);
+
+        var risk = await db.Risks
+            .FirstOrDefaultAsync(r => r.Id == riskId && r.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Risk");
+
+        if (risk.Status == RiskStatus.Closed)
+            throw new ConflictException("Risk is Closed; cannot record drawdown");
+
+        var drawdown = new RiskDrawdown
+        {
+            ProjectId    = projectId,
+            RiskId       = riskId,
+            Amount       = req.Amount,
+            OccurredAt   = req.OccurredAt,
+            Reference    = req.Reference,
+            Note         = req.Note,
+            RecordedById = actorId,
+        };
+        db.RiskDrawdowns.Add(drawdown);
+
+        await audit.WriteAsync(actorId, "risk.drawdown_recorded", "RiskDrawdown",
+            drawdown.Id.ToString(), projectId,
+            detail: new
+            {
+                riskId    = riskId,
+                amount    = req.Amount,
+                occurredAt = req.OccurredAt,
+                reference = req.Reference,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return drawdown;
+    }
+
+    /// <summary>List drawdowns recorded against a Risk, oldest first.
+    /// Cross-tenant 404 via the query filter.</summary>
+    public async Task<List<RiskDrawdown>> ListDrawdownsAsync(
+        Guid projectId, Guid riskId, CancellationToken ct = default)
+    {
+        var riskExists = await db.Risks.AnyAsync(r => r.Id == riskId && r.ProjectId == projectId, ct);
+        if (!riskExists) throw new NotFoundException("Risk");
+        return await db.RiskDrawdowns
+            .Where(d => d.RiskId == riskId)
+            .OrderBy(d => d.OccurredAt)
+            .ThenBy(d => d.CreatedAt)
+            .ToListAsync(ct);
+    }
 }
 
 // ── CDE ───────────────────────────────────────────────────────────────────────

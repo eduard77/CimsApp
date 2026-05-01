@@ -101,6 +101,13 @@ public record RecordQuantitativeAssessmentRequest(
     decimal MostLikely,
     decimal WorstCase,
     DistributionShape Distribution);
+// T-S2-09 contingency drawdown. Amount > 0; OccurredAt is a UTC date
+// when the cost was incurred (distinct from row-write time).
+public record RecordRiskDrawdownRequest(
+    decimal Amount,
+    DateTime OccurredAt,
+    string? Reference,
+    string? Note);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

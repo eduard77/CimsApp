@@ -633,6 +633,28 @@ public class RisksController(RisksService svc, CimsDbContext db) : CimsControlle
         var result = await svc.RunMonteCarloAsync(projectId, iterations, seed, ct);
         return Ok(new { success = true, data = result });
     }
+
+    [HttpPost("{riskId:guid}/drawdowns")]
+    public async Task<IActionResult> RecordDrawdown(
+        Guid projectId, Guid riskId,
+        RecordRiskDrawdownRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var d = await svc.RecordDrawdownAsync(projectId, riskId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = d });
+    }
+
+    [HttpGet("{riskId:guid}/drawdowns")]
+    public async Task<IActionResult> ListDrawdowns(
+        Guid projectId, Guid riskId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListDrawdownsAsync(projectId, riskId, ct);
+        return Ok(new { success = true, data = rows });
+    }
 }
 
 // ── Documents ─────────────────────────────────────────────────────────────────

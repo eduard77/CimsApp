@@ -46,6 +46,7 @@ public class CimsDbContext(
     public DbSet<PaymentCertificate> PaymentCertificates => Set<PaymentCertificate>();
     public DbSet<RiskCategory>       RiskCategories      => Set<RiskCategory>();
     public DbSet<Risk>               Risks               => Set<Risk>();
+    public DbSet<RiskDrawdown>       RiskDrawdowns       => Set<RiskDrawdown>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -345,6 +346,24 @@ public class CimsDbContext(
              .HasForeignKey(r => r.AssessedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<RiskDrawdown>(e =>
+        {
+            // Drawdown listings hit (RiskId, OccurredAt) and
+            // (ProjectId, OccurredAt) for register and project rollup
+            // views; index both.
+            e.HasIndex(d => new { d.RiskId, d.OccurredAt });
+            e.HasIndex(d => new { d.ProjectId, d.OccurredAt });
+            e.Property(d => d.Amount).HasPrecision(18, 2);
+            // All FKs NoAction for the same multi-cascade-path reasoning
+            // that drives the rest of the cost-domain configs.
+            e.HasOne(d => d.Project).WithMany()
+             .HasForeignKey(d => d.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(d => d.Risk).WithMany(r => r.Drawdowns)
+             .HasForeignKey(d => d.RiskId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(d => d.RecordedBy).WithMany()
+             .HasForeignKey(d => d.RecordedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -382,6 +401,7 @@ public class CimsDbContext(
         m.Entity<PaymentCertificate>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<RiskCategory>().HasQueryFilter(r => r.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<Risk>().HasQueryFilter(r => r.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<RiskDrawdown>().HasQueryFilter(d => d.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()

@@ -800,5 +800,56 @@ public class Risk
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<RiskDrawdown> Drawdowns { get; set; } = [];
+}
+
+/// <summary>
+/// One drawdown event against a Risk's allocated contingency
+/// (T-S2-09, PAFM-SD F.3 fifth bullet — "Contingency drawdown
+/// tracking"). v1.0 records amount + date + free-text reference;
+/// cross-module link to specific Commitments / ActualCosts is
+/// deferred to v1.1 (B-030 per CR-004) so the v1.0 audit trail
+/// stays self-contained even before the Cost-domain integration
+/// lands. Tenant-scoped indirectly through Risk → Project.
+/// </summary>
+public class RiskDrawdown
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Denormalised for the tenant query filter — matches
+    /// the rest of the cost-domain entities. Always equals
+    /// Risk.ProjectId; service enforces.</summary>
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid RiskId { get; set; }
+    public Risk Risk { get; set; } = null!;
+
+    /// <summary>Amount drawn down, in Project.Currency. Must be > 0.
+    /// Cumulative drawdowns may exceed Risk.ContingencyAmount —
+    /// over-runs are tracked honestly rather than blocked, matching
+    /// real construction practice where contingency overruns happen
+    /// and need to be visible.</summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>UTC date the drawdown was incurred / recorded —
+    /// distinct from CreatedAt which is row-write time.</summary>
+    public DateTime OccurredAt { get; set; }
+
+    /// <summary>Free-text reference: PO number, invoice number, or
+    /// description of the event triggering the drawdown. The richer
+    /// "link to specific Commitment / ActualCost row" is the v1.1
+    /// B-030 deferral.</summary>
+    [MaxLength(200)] public string? Reference { get; set; }
+
+    public string? Note { get; set; }
+
+    /// <summary>Who recorded the drawdown (typically the Risk Owner
+    /// or a delegated cost engineer).</summary>
+    public Guid RecordedById { get; set; }
+    public User RecordedBy { get; set; } = null!;
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
