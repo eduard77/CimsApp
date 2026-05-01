@@ -333,6 +333,42 @@ draft/issue, CBS import, and document.transition paths
 have NOT been exercised live yet — those are the
 remaining smoke targets.
 
+UPDATE 2026-04-30 / 05-01 LATE: smoke walk completed for
+ALL paths now (variation approve, payment cert draft +
+issue, document.transition). Surfaced ONE more bug:
+
+PR #44 fix(auth) — AuthController [AllowAnonymous] scope.
+Class-level [AllowAnonymous] overrides every action-level
+[Authorize] per ASP.NET Core docs, so /me and
+/logout-everywhere were silently anonymous-allowed. Calling
+/me without auth (or with a post-revoke access token) threw
+ArgumentNullException at Guid.Parse(NameIdentifier!) → 500
+instead of 401. Fix: scope [AllowAnonymous] per-action.
+
+Also exercised:
+  - Cross-tenant read (Org B GETs Org A's project) → 404
+  - Cross-tenant write (Org B POSTs RFI on Org A's project,
+    POSTs payment cert) → 403
+  - Project list cross-tenant → empty
+  - Single-use invitation (second register on same
+    bootstrap token) → 400 "Invitation has already been used"
+  - Protected endpoints without auth → clean 401
+  - Revoke flow end-to-end:
+    /logout-everywhere → /refresh with old refresh: 401
+    TOKEN_REVOKED; /me with old access: 401 (post PR #44)
+
+THE SMOKE WALK CAUGHT FOUR REAL PRODUCTION BUGS:
+  #41: AuditLog.UserId FK violation
+  #42: Auth body binding + 3 secret leaks
+  #43: Refresh token validation
+  #44: AllowAnonymous scope
+
+All four were 100% latent under unit-test-only validation.
+Master is now believed honest — every code path I have
+exercised against real SQL Server returns the correct
+status code with no secret leaks. CBS import (file upload
+endpoint) is the only smoke target not exercised.
+
 OPERATIONAL NOTES
 ------------------
 - gh CLI on bash needs the full path:

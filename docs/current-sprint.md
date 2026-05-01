@@ -137,13 +137,25 @@ the same commit. No active sprint scope at the moment.
   Five new RefreshTokenAuthTests cover happy path + unknown
   / revoked / expired / null-empty edges.
 
-**Three consecutive smoke-test PRs (#41, #42, #43) found
-real, latent production bugs that EF in-memory unit testing
-fundamentally cannot catch (FK constraints, body binding,
-serialization, JWT mismatch). B-027 (SQL Server smoke test
-in CI) is now massively justified — the unit-test gap is no
-longer theoretical, it is concretely demonstrated three
-times over.**
+- **AuthController [AllowAnonymous] scope (PR #44) — fourth
+  smoke-test bug.** Class-level [AllowAnonymous] overrides
+  every action-level [Authorize] (per ASP.NET Core docs), so
+  /me and /logout-everywhere were silently anonymous-allowed.
+  Calling /me without auth (or with a post-revoke access
+  token) threw ArgumentNullException at
+  Guid.Parse(NameIdentifier!) → HTTP 500 instead of 401.
+  Fix: scope [AllowAnonymous] per-action (register / login /
+  refresh / logout); Me + LogoutEverywhere keep their
+  [Authorize] and now auth middleware short-circuits with
+  401 before the action runs.
+
+**Four consecutive smoke-test PRs (#41-#44) found real,
+latent production bugs. The full bootstrap → register →
+login → project → downstream-domain smoke walk is now green
+end-to-end against real SQL Server. Cross-tenant isolation
+verified live (read + write both correctly blocked).
+B-027 (SQL Server smoke test in CI) is concretely justified
+four times over — the unit-test-only gap is real.**
 
 **Post-S1 audits landed (all clean / dormant findings only
 beyond the items above):**
