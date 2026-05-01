@@ -45,6 +45,7 @@ public class CimsDbContext(
     public DbSet<Variation>          Variations          => Set<Variation>();
     public DbSet<PaymentCertificate> PaymentCertificates => Set<PaymentCertificate>();
     public DbSet<RiskCategory>       RiskCategories      => Set<RiskCategory>();
+    public DbSet<Risk>               Risks               => Set<Risk>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -315,6 +316,27 @@ public class CimsDbContext(
              .HasForeignKey(r => r.ParentId).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<Risk>(e =>
+        {
+            // Heat-map / register queries hit (ProjectId, Status) and
+            // (ProjectId, Score) frequently; index both. Score
+            // descending matches the natural "highest risks first"
+            // listing order.
+            e.HasIndex(r => new { r.ProjectId, r.Status });
+            e.HasIndex(r => new { r.ProjectId, r.Score });
+            e.Property(r => r.ContingencyAmount).HasPrecision(18, 2);
+            // All FKs NoAction for the same multi-cascade-path reasoning
+            // that drives the Variation / Invitation configs. Project,
+            // Category, and Owner each ultimately resolve to
+            // Organisation.
+            e.HasOne(r => r.Project).WithMany()
+             .HasForeignKey(r => r.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(r => r.Category).WithMany()
+             .HasForeignKey(r => r.CategoryId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(r => r.Owner).WithMany()
+             .HasForeignKey(r => r.OwnerId).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -351,6 +373,7 @@ public class CimsDbContext(
         m.Entity<Variation>().HasQueryFilter(v => v.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<PaymentCertificate>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<RiskCategory>().HasQueryFilter(r => r.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Risk>().HasQueryFilter(r => r.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -373,6 +396,7 @@ public class CimsDbContext(
             else if (e.Entity is CostBreakdownItem cbi) cbi.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is Commitment cm) cm.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is RiskCategory rc) rc.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is Risk risk) risk.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

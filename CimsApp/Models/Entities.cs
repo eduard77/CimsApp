@@ -693,3 +693,74 @@ public class RiskCategory
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// A project risk per PAFM-SD Appendix F.3 / PMBOK 5 Risk knowledge area
+/// (T-S2-03). Tenant-scoped indirectly through Project.AppointingPartyId.
+///
+/// v1.0 ships the identity, classification, qualitative scoring (P×I on
+/// the 5×5 matrix per F.3), response strategy, and contingency amount.
+/// 3-point estimates (BestCase / MostLikely / WorstCase + Distribution
+/// choice) for quantitative assessment land in T-S2-07 via a separate
+/// migration. Qualitative-assessment metadata (notes, assessor, date)
+/// lands in T-S2-06. The two are deferred to keep T-S2-03 focused on
+/// the identity and base scoring shape — same incremental pattern S1
+/// used for CostBreakdownItem (T-S1-02) → Budget (T-S1-04) → Schedule
+/// (B-017).
+/// </summary>
+public class Risk
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Optional RBS classification. Null = unclassified
+    /// (acceptable while a risk is initially registered).</summary>
+    public Guid? CategoryId { get; set; }
+    public RiskCategory? Category { get; set; }
+
+    [Required, MaxLength(200)] public string Title { get; set; } = "";
+    public string? Description { get; set; }
+
+    /// <summary>1-5 on the standard 5×5 matrix. Service layer enforces
+    /// the range at write time.</summary>
+    public int Probability { get; set; }
+
+    /// <summary>1-5 on the standard 5×5 matrix. Service layer enforces
+    /// the range at write time.</summary>
+    public int Impact { get; set; }
+
+    /// <summary>Persisted P×I — denormalised for fast queries / heat-map
+    /// rendering. Recomputed by the service on every Probability or
+    /// Impact change. Range 1..25. Numeric only — threshold mapping
+    /// (low / medium / high) belongs to S14 Admin Console as a
+    /// per-tenant setting per the S2 kickoff Top-3-risks mitigation.</summary>
+    public int Score { get; set; }
+
+    public RiskStatus Status { get; set; } = RiskStatus.Identified;
+
+    /// <summary>The responsible owner. Null at registration; set when
+    /// the risk is assessed and assigned (T-S2-04 service path).</summary>
+    public Guid? OwnerId { get; set; }
+    public User? Owner { get; set; }
+
+    /// <summary>F.3 negative-risk response. Null while the risk is in
+    /// the Identified / Assessed phase pre-decision.</summary>
+    public ResponseStrategy? ResponseStrategy { get; set; }
+
+    /// <summary>Free-text plan describing how the chosen strategy is
+    /// being executed. Set when ResponseStrategy is set.</summary>
+    public string? ResponsePlan { get; set; }
+
+    /// <summary>Allocated contingency for this specific risk (if the
+    /// response is Accept or Mitigate with reserved budget). v1.0:
+    /// drawdown amounts manually tracked per-risk via T-S2-09's
+    /// RiskDrawdown entity. Cross-module link to specific Commitments /
+    /// Actuals deferred to v1.1 — see B-030.</summary>
+    public decimal? ContingencyAmount { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+

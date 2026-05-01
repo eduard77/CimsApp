@@ -40,6 +40,7 @@ public class CimsDbContextTenantFilterTests
         typeof(PaymentCertificate),
         // S2 risk-domain additions (T-S2-02 onwards).
         typeof(RiskCategory),
+        typeof(Risk),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =

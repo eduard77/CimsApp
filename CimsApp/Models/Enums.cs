@@ -11,3 +11,9 @@ public enum ActionStatus { Open, InProgress, Closed, Cancelled }
 public enum CommitmentType { PO, Subcontract }
 public enum VariationState { Raised, Approved, Rejected }
 public enum PaymentCertificateState { Draft, Issued }
+
+// S2 Risk module (PAFM-SD F.3).
+public enum RiskStatus { Identified, Assessed, Active, Mitigated, Closed }
+// PMBOK 5 / 7 negative-risk response strategies. (Opportunity / positive-risk
+// strategies — exploit / share / enhance / accept — land in B-029 v1.1.)
+public enum ResponseStrategy { Avoid, Transfer, Mitigate, Accept }
