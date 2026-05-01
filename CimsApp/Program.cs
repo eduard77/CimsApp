@@ -158,6 +158,7 @@ builder.Services.AddScoped<RisksService>();
 builder.Services.AddScoped<StakeholdersService>();
 builder.Services.AddScoped<CommunicationsService>();
 builder.Services.AddScoped<ScheduleService>();
+builder.Services.AddScoped<LpsService>();
 builder.Services.AddScoped<CdeService>();
 builder.Services.AddScoped<DocumentsService>();
 builder.Services.AddScoped<RfiService>();

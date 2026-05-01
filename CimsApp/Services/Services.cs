@@ -2996,7 +2996,299 @@ public class ScheduleService(CimsDbContext db, AuditService audit)
         (decimal)(current - baseline).Ticks / TimeSpan.TicksPerDay;
 }
 
-// ── CDE ───────────────────────────────────────────────────────────────────────
+/// <summary>
+/// LpsService — Last Planner System boards (T-S4-07, PAFM-SD F.5
+/// third bullet). Three sub-domains:
+/// (1) LookaheadEntry CRUD — the 6-week-out commit window.
+/// (2) WeeklyWorkPlan CRUD — the per-week commitment header.
+/// (3) WeeklyTaskCommitment CRUD — the per-Activity commit + flag.
+///
+/// PPC (Percent Plan Complete) is computed on read inside
+/// <see cref="GetWeeklyWorkPlanAsync"/> — never persisted, so it
+/// always reflects current commitment state.
+/// </summary>
+public class LpsService(CimsDbContext db, AuditService audit)
+{
+    // ── Lookahead ───────────────────────────────────────────────────
+
+    public async Task<LookaheadEntry> AddLookaheadAsync(
+        Guid projectId, CreateLookaheadEntryRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var activityExists = await db.Activities.AnyAsync(
+            a => a.Id == req.ActivityId && a.ProjectId == projectId && a.IsActive, ct);
+        if (!activityExists) throw new NotFoundException("Activity");
+
+        var weekMonday = NormalizeToMonday(req.WeekStarting);
+
+        var entry = new LookaheadEntry
+        {
+            ProjectId          = projectId,
+            ActivityId         = req.ActivityId,
+            WeekStarting       = weekMonday,
+            ConstraintsRemoved = req.ConstraintsRemoved,
+            Notes              = req.Notes,
+            CreatedById        = actorId,
+        };
+        db.LookaheadEntries.Add(entry);
+
+        await audit.WriteAsync(actorId, "lookahead.added", "LookaheadEntry",
+            entry.Id.ToString(), projectId,
+            detail: new
+            {
+                activityId         = req.ActivityId,
+                weekStarting       = weekMonday,
+                constraintsRemoved = req.ConstraintsRemoved,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return entry;
+    }
+
+    public async Task<LookaheadEntry> UpdateLookaheadAsync(
+        Guid projectId, Guid lookaheadId, UpdateLookaheadEntryRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var entry = await db.LookaheadEntries
+            .FirstOrDefaultAsync(le => le.Id == lookaheadId && le.ProjectId == projectId && le.IsActive, ct)
+            ?? throw new NotFoundException("LookaheadEntry");
+
+        var changed = new List<string>();
+        if (req.ConstraintsRemoved.HasValue && req.ConstraintsRemoved.Value != entry.ConstraintsRemoved)
+        {
+            entry.ConstraintsRemoved = req.ConstraintsRemoved.Value;
+            changed.Add("ConstraintsRemoved");
+        }
+        if (req.Notes is not null) { entry.Notes = req.Notes; changed.Add("Notes"); }
+
+        if (changed.Count == 0)
+            throw new ValidationException(["No updatable fields provided"]);
+
+        await audit.WriteAsync(actorId, "lookahead.updated", "LookaheadEntry",
+            entry.Id.ToString(), projectId,
+            detail: new { changedFields = changed }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return entry;
+    }
+
+    public async Task RemoveLookaheadAsync(
+        Guid projectId, Guid lookaheadId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var entry = await db.LookaheadEntries
+            .FirstOrDefaultAsync(le => le.Id == lookaheadId && le.ProjectId == projectId && le.IsActive, ct)
+            ?? throw new NotFoundException("LookaheadEntry");
+
+        entry.IsActive = false;
+        await audit.WriteAsync(actorId, "lookahead.removed", "LookaheadEntry",
+            entry.Id.ToString(), projectId,
+            detail: new { activityId = entry.ActivityId, weekStarting = entry.WeekStarting },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<List<LookaheadEntry>> ListLookaheadAsync(
+        Guid projectId, DateTime? weekStarting, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        var q = db.LookaheadEntries
+            .Where(le => le.ProjectId == projectId && le.IsActive);
+        if (weekStarting.HasValue)
+        {
+            var monday = NormalizeToMonday(weekStarting.Value);
+            q = q.Where(le => le.WeekStarting == monday);
+        }
+        return await q.OrderBy(le => le.WeekStarting).ThenBy(le => le.CreatedAt)
+            .ToListAsync(ct);
+    }
+
+    // ── Weekly Work Plan ────────────────────────────────────────────
+
+    public async Task<WeeklyWorkPlan> CreateWeeklyWorkPlanAsync(
+        Guid projectId, CreateWeeklyWorkPlanRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var weekMonday = NormalizeToMonday(req.WeekStarting);
+
+        var duplicate = await db.WeeklyWorkPlans.AnyAsync(
+            w => w.ProjectId == projectId && w.WeekStarting == weekMonday, ct);
+        if (duplicate)
+            throw new ConflictException(
+                $"A weekly work plan for week starting {weekMonday:yyyy-MM-dd} already exists in this project");
+
+        var wwp = new WeeklyWorkPlan
+        {
+            ProjectId    = projectId,
+            WeekStarting = weekMonday,
+            Notes        = req.Notes,
+            CreatedById  = actorId,
+        };
+        db.WeeklyWorkPlans.Add(wwp);
+
+        await audit.WriteAsync(actorId, "weekly_plan.created", "WeeklyWorkPlan",
+            wwp.Id.ToString(), projectId,
+            detail: new { weekStarting = weekMonday }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return wwp;
+    }
+
+    public async Task<List<WeeklyWorkPlan>> ListWeeklyWorkPlansAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        return await db.WeeklyWorkPlans
+            .Where(w => w.ProjectId == projectId)
+            .OrderByDescending(w => w.WeekStarting)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Read a weekly work plan with its commitments and the computed
+    /// PPC. PPC = 100 × completed_count / committed_count when
+    /// committed_count > 0; null otherwise.
+    /// </summary>
+    public async Task<WeeklyWorkPlanDto> GetWeeklyWorkPlanAsync(
+        Guid projectId, Guid wwpId, CancellationToken ct = default)
+    {
+        var wwp = await db.WeeklyWorkPlans
+            .FirstOrDefaultAsync(w => w.Id == wwpId && w.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("WeeklyWorkPlan");
+
+        var commitments = await db.WeeklyTaskCommitments
+            .Where(c => c.WeeklyWorkPlanId == wwpId)
+            .Join(db.Activities, c => c.ActivityId, a => a.Id,
+                (c, a) => new { c, a })
+            .OrderBy(x => x.a.Code)
+            .ToListAsync(ct);
+
+        var rows = commitments.Select(x => new WeeklyTaskCommitmentDto(
+            x.c.Id, x.c.WeeklyWorkPlanId, x.c.ActivityId,
+            x.a.Code, x.a.Name,
+            x.c.Committed, x.c.Completed, x.c.Reason, x.c.Notes,
+            x.c.UpdatedAt)).ToList();
+
+        var committedCount = rows.Count(r => r.Committed);
+        var completedCount = rows.Count(r => r.Completed);
+        decimal? ppc = committedCount > 0
+            ? Math.Round(100m * completedCount / committedCount, 2)
+            : null;
+
+        return new WeeklyWorkPlanDto(
+            wwp.Id, wwp.ProjectId, wwp.WeekStarting, wwp.Notes,
+            wwp.CreatedAt, wwp.CreatedById,
+            committedCount, completedCount, ppc,
+            rows);
+    }
+
+    // ── Weekly task commitments ─────────────────────────────────────
+
+    public async Task<WeeklyTaskCommitment> AddCommitmentAsync(
+        Guid projectId, Guid wwpId, AddCommitmentRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var wwp = await db.WeeklyWorkPlans
+            .FirstOrDefaultAsync(w => w.Id == wwpId && w.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("WeeklyWorkPlan");
+
+        var activityOk = await db.Activities.AnyAsync(
+            a => a.Id == req.ActivityId && a.ProjectId == projectId && a.IsActive, ct);
+        if (!activityOk) throw new NotFoundException("Activity");
+
+        var duplicate = await db.WeeklyTaskCommitments.AnyAsync(
+            c => c.WeeklyWorkPlanId == wwpId && c.ActivityId == req.ActivityId, ct);
+        if (duplicate)
+            throw new ConflictException("Activity is already committed in this weekly plan");
+
+        var commit = new WeeklyTaskCommitment
+        {
+            WeeklyWorkPlanId = wwpId,
+            ProjectId        = projectId,
+            ActivityId       = req.ActivityId,
+            Committed        = true,
+            Completed        = false,
+            Notes            = req.Notes,
+        };
+        db.WeeklyTaskCommitments.Add(commit);
+
+        await audit.WriteAsync(actorId, "weekly_commitment.added", "WeeklyTaskCommitment",
+            commit.Id.ToString(), projectId,
+            detail: new
+            {
+                weeklyWorkPlanId = wwpId,
+                activityId       = req.ActivityId,
+                weekStarting     = wwp.WeekStarting,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return commit;
+    }
+
+    public async Task<WeeklyTaskCommitment> UpdateCommitmentAsync(
+        Guid projectId, Guid wwpId, Guid commitmentId,
+        UpdateCommitmentRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var commit = await db.WeeklyTaskCommitments
+            .FirstOrDefaultAsync(c => c.Id == commitmentId
+                                   && c.WeeklyWorkPlanId == wwpId
+                                   && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("WeeklyTaskCommitment");
+
+        // The whole point of LPS is to surface the reason when a
+        // commitment fails. Reject Completed = false without a Reason.
+        if (commit.Committed && !req.Completed && !req.Reason.HasValue)
+            throw new ValidationException(
+                ["Reason is required when Completed = false on a committed task"]);
+
+        commit.Completed = req.Completed;
+        commit.Reason    = req.Completed ? null : req.Reason;
+        if (req.Notes is not null) commit.Notes = req.Notes;
+
+        await audit.WriteAsync(actorId, "weekly_commitment.updated", "WeeklyTaskCommitment",
+            commit.Id.ToString(), projectId,
+            detail: new
+            {
+                completed = req.Completed,
+                reason    = req.Reason?.ToString(),
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return commit;
+    }
+
+    public async Task RemoveCommitmentAsync(
+        Guid projectId, Guid wwpId, Guid commitmentId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var commit = await db.WeeklyTaskCommitments
+            .FirstOrDefaultAsync(c => c.Id == commitmentId
+                                   && c.WeeklyWorkPlanId == wwpId
+                                   && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("WeeklyTaskCommitment");
+
+        db.WeeklyTaskCommitments.Remove(commit);
+        await audit.WriteAsync(actorId, "weekly_commitment.removed", "WeeklyTaskCommitment",
+            commit.Id.ToString(), projectId,
+            detail: new
+            {
+                weeklyWorkPlanId = wwpId,
+                activityId       = commit.ActivityId,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Normalise an arbitrary date to the Monday of its ISO week.
+    /// LPS boards are aligned to Monday-starting weeks; allowing any
+    /// day-of-week input keeps the API permissive (the front-end can
+    /// just send "today" without knowing it's Monday).
+    /// </summary>
+    private static DateTime NormalizeToMonday(DateTime d)
+    {
+        var date = d.Date;
+        var diff = ((int)date.DayOfWeek - (int)DayOfWeek.Monday + 7) % 7;
+        return date.AddDays(-diff);
+    }
+}
 public class CdeService(CimsDbContext db, AuditService audit)
 {
     public async Task<List<CdeContainer>> ListContainersAsync(Guid projectId) =>

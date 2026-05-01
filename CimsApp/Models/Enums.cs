@@ -62,3 +62,20 @@ public enum ConstraintType { ASAP, ALAP, SNET, SNLT, FNET, FNLT, MSO, MFO }
 // Lag (in days, decimal) is added to the trigger event; negative lag
 // is "lead" and pulls the successor in.
 public enum DependencyType { FS, SS, FF, SF }
+// LPS reason-for-non-completion (T-S4-07). Standard Last Planner
+// System root-cause categories for activities that were Committed
+// but not Completed in a Weekly Work Plan. v1.1 candidate: per-tenant
+// custom reason categories — UK construction projects often want a
+// finer breakdown (e.g. "Welfare facilities unavailable" or
+// "Permit-to-work delay").
+public enum LpsReasonForNonCompletion
+{
+    ResourceUnavailability,
+    MaterialDelay,
+    WeatherImpact,
+    DesignChange,
+    PrerequisiteIncomplete,
+    ScopeChange,
+    AccessIssue,
+    Other,
+}

@@ -251,6 +251,40 @@ public record BaselineComparisonDto(
     decimal? ProjectFinishVarianceDays,
     int AddedActivitiesCount, int RemovedActivitiesCount,
     List<BaselineActivityComparisonDto> Activities);
+// T-S4-07 LPS lookahead entry. WeekStarting is normalised by the
+// service to the Monday of the supplied date. ConstraintsRemoved
+// defaults false at create time; the PM toggles it during the
+// weekly LPS meeting.
+public record CreateLookaheadEntryRequest(
+    Guid ActivityId, DateTime WeekStarting,
+    bool ConstraintsRemoved, string? Notes);
+public record UpdateLookaheadEntryRequest(
+    bool? ConstraintsRemoved, string? Notes);
+// T-S4-07 weekly work plan. WeekStarting normalised to Monday.
+// Unique within project.
+public record CreateWeeklyWorkPlanRequest(DateTime WeekStarting, string? Notes);
+// T-S4-07 commit-to-task. ActivityId must belong to the same project
+// as the WeeklyWorkPlan; service enforces same-project + active.
+public record AddCommitmentRequest(Guid ActivityId, string? Notes);
+// At week-end the IM/PM marks each commitment Completed = true OR
+// supplies a Reason. Completed = false WITHOUT a Reason is rejected
+// (the whole point of LPS is to surface reasons-for-non-completion).
+public record UpdateCommitmentRequest(
+    bool Completed, LpsReasonForNonCompletion? Reason, string? Notes);
+// Weekly Work Plan view with computed PPC. PPC = 100 ×
+// completed_count / committed_count when committed > 0; null
+// otherwise (no commitments yet recorded).
+public record WeeklyWorkPlanDto(
+    Guid Id, Guid ProjectId, DateTime WeekStarting, string? Notes,
+    DateTime CreatedAt, Guid CreatedById,
+    int CommittedCount, int CompletedCount, decimal? PercentPlanComplete,
+    List<WeeklyTaskCommitmentDto> Commitments);
+public record WeeklyTaskCommitmentDto(
+    Guid Id, Guid WeeklyWorkPlanId, Guid ActivityId,
+    string ActivityCode, string ActivityName,
+    bool Committed, bool Completed,
+    LpsReasonForNonCompletion? Reason, string? Notes,
+    DateTime UpdatedAt);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

@@ -54,6 +54,9 @@ public class CimsDbContext(
     public DbSet<Dependency>         Dependencies        => Set<Dependency>();
     public DbSet<ScheduleBaseline>   ScheduleBaselines   => Set<ScheduleBaseline>();
     public DbSet<ScheduleBaselineActivity> ScheduleBaselineActivities => Set<ScheduleBaselineActivity>();
+    public DbSet<LookaheadEntry>      LookaheadEntries     => Set<LookaheadEntry>();
+    public DbSet<WeeklyWorkPlan>      WeeklyWorkPlans      => Set<WeeklyWorkPlan>();
+    public DbSet<WeeklyTaskCommitment> WeeklyTaskCommitments => Set<WeeklyTaskCommitment>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -462,6 +465,42 @@ public class CimsDbContext(
              .HasForeignKey(b => b.ActivityId).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<LookaheadEntry>(e =>
+        {
+            // Lookahead board renders by (ProjectId, WeekStarting);
+            // per-activity drill-down hits (ActivityId, WeekStarting).
+            e.HasIndex(le => new { le.ProjectId, le.WeekStarting, le.IsActive });
+            e.HasIndex(le => new { le.ActivityId, le.WeekStarting });
+            e.HasOne(le => le.Project).WithMany()
+             .HasForeignKey(le => le.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(le => le.Activity).WithMany()
+             .HasForeignKey(le => le.ActivityId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(le => le.CreatedBy).WithMany()
+             .HasForeignKey(le => le.CreatedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<WeeklyWorkPlan>(e =>
+        {
+            // One WWP per (project, week) — unique constraint.
+            e.HasIndex(w => new { w.ProjectId, w.WeekStarting }).IsUnique();
+            e.HasOne(w => w.Project).WithMany()
+             .HasForeignKey(w => w.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(w => w.CreatedBy).WithMany()
+             .HasForeignKey(w => w.CreatedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<WeeklyTaskCommitment>(e =>
+        {
+            // Disallow duplicate (WWP, Activity) commitments — each
+            // WWP can commit to a given activity at most once.
+            e.HasIndex(c => new { c.WeeklyWorkPlanId, c.ActivityId }).IsUnique();
+            e.HasIndex(c => new { c.ProjectId, c.WeeklyWorkPlanId });
+            e.HasOne(c => c.WeeklyWorkPlan).WithMany(w => w.Commitments)
+             .HasForeignKey(c => c.WeeklyWorkPlanId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.Activity).WithMany()
+             .HasForeignKey(c => c.ActivityId).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -507,6 +546,9 @@ public class CimsDbContext(
         m.Entity<Dependency>().HasQueryFilter(d => d.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<ScheduleBaseline>().HasQueryFilter(b => b.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<ScheduleBaselineActivity>().HasQueryFilter(b => b.ScheduleBaseline.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<LookaheadEntry>().HasQueryFilter(le => le.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<WeeklyWorkPlan>().HasQueryFilter(w => w.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<WeeklyTaskCommitment>().HasQueryFilter(c => c.WeeklyWorkPlan.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -533,6 +575,7 @@ public class CimsDbContext(
             else if (e.Entity is Stakeholder s) s.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is CommunicationItem ci) ci.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is Activity act) act.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is WeeklyTaskCommitment wtc) wtc.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

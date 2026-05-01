@@ -1176,3 +1176,104 @@ public class ScheduleBaselineActivity
     public bool IsCritical { get; set; }
 }
 
+/// <summary>
+/// One Lookahead-window entry (T-S4-07, PAFM-SD F.5 third bullet —
+/// "Last Planner System boards"). The 6-week-out lookahead is the
+/// LPS pull-planning view: each entry pairs an Activity with the
+/// week it should become "ready to start" (constraints removed).
+/// Tenant-scoped through Project.AppointingPartyId. Soft-deleted via
+/// IsActive — lookaheads are transient planning artefacts and the
+/// PM/IM workflow drops + re-adds entries as the constraints picture
+/// evolves week to week.
+/// </summary>
+public class LookaheadEntry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid ActivityId { get; set; }
+    public Activity Activity { get; set; } = null!;
+
+    /// <summary>The Monday of the lookahead-week this entry tracks.
+    /// Service truncates incoming values to date-only at the
+    /// week-start (the controller can be lenient on the input).</summary>
+    public DateTime WeekStarting { get; set; }
+
+    /// <summary>"Ready to start" flag — when every prerequisite,
+    /// resource, drawing, and approval is in place. Toggled by the
+    /// PM during the weekly LPS meeting.</summary>
+    public bool ConstraintsRemoved { get; set; }
+
+    public string? Notes { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public Guid CreatedById { get; set; }
+    public User CreatedBy { get; set; } = null!;
+}
+
+/// <summary>
+/// One Weekly Work Plan (T-S4-07, PAFM-SD F.5 third bullet). Header
+/// per project per week. Owns a collection of
+/// <see cref="WeeklyTaskCommitment"/> rows — one per Activity the PM
+/// commits to that week. PPC (Percent Plan Complete) is computed on
+/// read as completed_count / committed_count × 100 — never persisted,
+/// so PPC always reflects current commitment state.
+/// </summary>
+public class WeeklyWorkPlan
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Monday of the week. Unique within project.</summary>
+    public DateTime WeekStarting { get; set; }
+
+    public string? Notes { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public Guid CreatedById { get; set; }
+    public User CreatedBy { get; set; } = null!;
+
+    public ICollection<WeeklyTaskCommitment> Commitments { get; set; } = [];
+}
+
+/// <summary>
+/// One Activity-level commitment inside a <see cref="WeeklyWorkPlan"/>
+/// (T-S4-07). The PM commits to completing the Activity in the week;
+/// at week-end the IM/PM marks Completed = true or supplies a
+/// <see cref="LpsReasonForNonCompletion"/> for the failure. Tenant-
+/// scoped via the parent WeeklyWorkPlan + denormalised ProjectId.
+/// </summary>
+public class WeeklyTaskCommitment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid WeeklyWorkPlanId { get; set; }
+    public WeeklyWorkPlan WeeklyWorkPlan { get; set; } = null!;
+
+    /// <summary>Denormalised — equals WeeklyWorkPlan.ProjectId.
+    /// Drives the tenant query filter without a join.</summary>
+    public Guid ProjectId { get; set; }
+
+    public Guid ActivityId { get; set; }
+    public Activity Activity { get; set; } = null!;
+
+    public bool Committed { get; set; } = true;
+    public bool Completed { get; set; }
+
+    /// <summary>Required when Committed = true and Completed = false
+    /// at any read time. Service enforces on the mark-completed
+    /// transition: caller cannot leave Completed = false without a
+    /// Reason once the WeeklyWorkPlan's week has ended.</summary>
+    public LpsReasonForNonCompletion? Reason { get; set; }
+
+    public string? Notes { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
