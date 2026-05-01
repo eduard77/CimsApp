@@ -791,6 +791,110 @@ public class CommunicationsController(CommunicationsService svc, CimsDbContext d
     }
 }
 
+// ── Schedule & Programme (T-S4-05) ────────────────────────────────────────────
+// PAFM-SD F.5. Activity CRUD, dependency CRUD, and CPM recompute.
+[Route("api/v1/projects/{projectId:guid}/schedule")]
+public class ScheduleController(ScheduleService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet("activities")]
+    public async Task<IActionResult> ListActivities(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListActivitiesAsync(projectId, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpGet("activities/{activityId:guid}")]
+    public async Task<IActionResult> GetActivity(
+        Guid projectId, Guid activityId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var row = await svc.GetActivityAsync(projectId, activityId, ct);
+        return Ok(new { success = true, data = row });
+    }
+
+    [HttpPost("activities")]
+    public async Task<IActionResult> CreateActivity(
+        Guid projectId, CreateActivityRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var act = await svc.CreateActivityAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = act });
+    }
+
+    [HttpPut("activities/{activityId:guid}")]
+    public async Task<IActionResult> UpdateActivity(
+        Guid projectId, Guid activityId,
+        UpdateActivityRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var act = await svc.UpdateActivityAsync(projectId, activityId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = act });
+    }
+
+    [HttpPost("activities/{activityId:guid}/deactivate")]
+    public async Task<IActionResult> DeactivateActivity(
+        Guid projectId, Guid activityId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var act = await svc.DeactivateActivityAsync(projectId, activityId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = act });
+    }
+
+    [HttpGet("dependencies")]
+    public async Task<IActionResult> ListDependencies(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListDependenciesAsync(projectId, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpPost("dependencies")]
+    public async Task<IActionResult> AddDependency(
+        Guid projectId, AddDependencyRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var dep = await svc.AddDependencyAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = dep });
+    }
+
+    [HttpDelete("dependencies/{dependencyId:guid}")]
+    public async Task<IActionResult> RemoveDependency(
+        Guid projectId, Guid dependencyId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        await svc.RemoveDependencyAsync(projectId, dependencyId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
+
+    [HttpPost("recompute")]
+    public async Task<IActionResult> Recompute(
+        Guid projectId, RecomputeScheduleRequest? req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var result = await svc.RecomputeAsync(projectId, req?.DataDate,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = result });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

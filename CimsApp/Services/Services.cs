@@ -2563,6 +2563,272 @@ public class ScheduleService(CimsDbContext db, AuditService audit)
             .OrderBy(d => d.PredecessorId).ThenBy(d => d.SuccessorId)
             .ToListAsync(ct);
     }
+
+    // ── Activity CRUD (T-S4-05) ─────────────────────────────────────
+
+    public async Task<Activity> CreateActivityAsync(
+        Guid projectId, CreateActivityRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        ValidateActivityCommon(req.Code, req.Name, req.Duration,
+            req.PercentComplete, req.ConstraintType, req.ConstraintDate);
+        if (req.AssigneeId.HasValue)
+            await EnsureAssigneeIsProjectMemberAsync(projectId, req.AssigneeId.Value, ct);
+
+        var codeTaken = await db.Activities.AnyAsync(
+            a => a.ProjectId == projectId && a.Code == req.Code.Trim(), ct);
+        if (codeTaken)
+            throw new ConflictException($"Activity code '{req.Code.Trim()}' already exists in this project");
+
+        var act = new Activity
+        {
+            ProjectId        = projectId,
+            Code             = req.Code.Trim(),
+            Name             = req.Name.Trim(),
+            Description      = req.Description,
+            Duration         = req.Duration,
+            DurationUnit     = req.DurationUnit,
+            ScheduledStart   = req.ScheduledStart,
+            ScheduledFinish  = req.ScheduledFinish,
+            ConstraintType   = req.ConstraintType,
+            ConstraintDate   = req.ConstraintDate,
+            PercentComplete  = req.PercentComplete,
+            AssigneeId       = req.AssigneeId,
+            Discipline       = req.Discipline,
+        };
+        db.Activities.Add(act);
+
+        await audit.WriteAsync(actorId, "activity.created", "Activity",
+            act.Id.ToString(), projectId,
+            detail: new
+            {
+                code           = act.Code,
+                duration       = act.Duration,
+                durationUnit   = act.DurationUnit.ToString(),
+                constraintType = act.ConstraintType.ToString(),
+                hasAssignee    = act.AssigneeId.HasValue,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return act;
+    }
+
+    public async Task<Activity> UpdateActivityAsync(
+        Guid projectId, Guid activityId, UpdateActivityRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var act = await db.Activities
+            .FirstOrDefaultAsync(a => a.Id == activityId && a.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Activity");
+
+        if (!act.IsActive)
+            throw new ConflictException("Activity is deactivated; cannot update");
+
+        var changed = new List<string>();
+
+        if (req.Code is not null)
+        {
+            var newCode = req.Code.Trim();
+            if (string.IsNullOrEmpty(newCode))
+                throw new ValidationException(["Code cannot be empty"]);
+            if (newCode != act.Code)
+            {
+                var taken = await db.Activities.AnyAsync(
+                    a => a.ProjectId == projectId && a.Code == newCode && a.Id != activityId, ct);
+                if (taken)
+                    throw new ConflictException($"Activity code '{newCode}' already exists in this project");
+                act.Code = newCode;
+                changed.Add("Code");
+            }
+        }
+        if (req.Name is not null)
+        {
+            if (string.IsNullOrWhiteSpace(req.Name))
+                throw new ValidationException(["Name cannot be empty"]);
+            act.Name = req.Name.Trim();
+            changed.Add("Name");
+        }
+        if (req.Description is not null) { act.Description = req.Description; changed.Add("Description"); }
+        if (req.Duration.HasValue)
+        {
+            if (req.Duration.Value < 0m)
+                throw new ValidationException(["Duration cannot be negative"]);
+            act.Duration = req.Duration.Value;
+            changed.Add("Duration");
+        }
+        if (req.DurationUnit.HasValue)    { act.DurationUnit = req.DurationUnit.Value;    changed.Add("DurationUnit"); }
+        if (req.ScheduledStart  is not null) { act.ScheduledStart  = req.ScheduledStart;  changed.Add("ScheduledStart"); }
+        if (req.ScheduledFinish is not null) { act.ScheduledFinish = req.ScheduledFinish; changed.Add("ScheduledFinish"); }
+        if (req.ConstraintType.HasValue)
+        {
+            act.ConstraintType = req.ConstraintType.Value;
+            // If switching to a no-date constraint (ASAP / ALAP),
+            // clear the legacy ConstraintDate so it doesn't dangle.
+            if (req.ConstraintType.Value is ConstraintType.ASAP or ConstraintType.ALAP)
+                act.ConstraintDate = null;
+            changed.Add("ConstraintType");
+        }
+        if (req.ConstraintDate is not null)
+        {
+            act.ConstraintDate = req.ConstraintDate;
+            changed.Add("ConstraintDate");
+        }
+        if (req.PercentComplete.HasValue)
+        {
+            if (req.PercentComplete.Value < 0m || req.PercentComplete.Value > 1m)
+                throw new ValidationException(["PercentComplete must be in [0, 1]"]);
+            act.PercentComplete = req.PercentComplete.Value;
+            changed.Add("PercentComplete");
+        }
+        if (req.AssigneeId.HasValue)
+        {
+            if (req.AssigneeId.Value != act.AssigneeId)
+            {
+                await EnsureAssigneeIsProjectMemberAsync(projectId, req.AssigneeId.Value, ct);
+                act.AssigneeId = req.AssigneeId;
+                changed.Add("AssigneeId");
+            }
+        }
+        if (req.Discipline is not null) { act.Discipline = req.Discipline; changed.Add("Discipline"); }
+
+        if (changed.Count == 0)
+            throw new ValidationException(["No updatable fields provided"]);
+
+        await audit.WriteAsync(actorId, "activity.updated", "Activity",
+            act.Id.ToString(), projectId,
+            detail: new { changedFields = changed }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return act;
+    }
+
+    public async Task<Activity> DeactivateActivityAsync(
+        Guid projectId, Guid activityId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var act = await db.Activities
+            .FirstOrDefaultAsync(a => a.Id == activityId && a.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Activity");
+
+        if (!act.IsActive)
+            throw new ConflictException("Activity is already deactivated");
+
+        var hasDeps = await db.Dependencies.AnyAsync(
+            d => d.ProjectId == projectId
+              && (d.PredecessorId == activityId || d.SuccessorId == activityId), ct);
+        if (hasDeps)
+            throw new ConflictException(
+                "Activity has active dependencies; remove the dependencies before deactivating");
+
+        act.IsActive = false;
+        await audit.WriteAsync(actorId, "activity.deactivated", "Activity",
+            act.Id.ToString(), projectId,
+            detail: new { code = act.Code }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return act;
+    }
+
+    public async Task<Activity> GetActivityAsync(
+        Guid projectId, Guid activityId, CancellationToken ct = default)
+        => await db.Activities
+            .FirstOrDefaultAsync(a => a.Id == activityId && a.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Activity");
+
+    public async Task<List<Activity>> ListActivitiesAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        return await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive)
+            .OrderBy(a => a.Code)
+            .ToListAsync(ct);
+    }
+
+    // ── Recompute (T-S4-05) ─────────────────────────────────────────
+    /// <summary>
+    /// Run the CPM solver against the project's active activities +
+    /// dependencies; persist ES / EF / LS / LF / TotalFloat /
+    /// FreeFloat / IsCritical to each Activity. Data date defaults
+    /// to Project.StartDate; explicit override accepted via the
+    /// `dataDate` parameter. Transactional — the solve + persist
+    /// pair is wrapped, so a partial schedule never lands.
+    /// Audit: `schedule.recomputed` with the solver summary.
+    /// </summary>
+    public async Task<ScheduleRecomputeResultDto> RecomputeAsync(
+        Guid projectId, DateTime? dataDate, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var project = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        var ps = dataDate ?? project.StartDate
+            ?? throw new ValidationException(["dataDate or Project.StartDate must be set"]);
+
+        var activities = await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive)
+            .ToListAsync(ct);
+        var dependencies = await db.Dependencies
+            .Where(d => d.ProjectId == projectId)
+            .ToListAsync(ct);
+
+        var cpmActivities = activities.Select(a =>
+            new Cpm.CpmActivity(a.Id, a.Duration, a.ConstraintType, a.ConstraintDate)).ToList();
+        var cpmDeps = dependencies.Select(d =>
+            new Cpm.CpmDependency(d.PredecessorId, d.SuccessorId, d.Type, d.Lag)).ToList();
+
+        var result = Cpm.Solve(ps, cpmActivities, cpmDeps);
+        var byId = activities.ToDictionary(a => a.Id);
+        foreach (var r in result.Activities)
+        {
+            var act = byId[r.Id];
+            act.EarlyStart  = r.EarlyStart;
+            act.EarlyFinish = r.EarlyFinish;
+            act.LateStart   = r.LateStart;
+            act.LateFinish  = r.LateFinish;
+            act.TotalFloat  = r.TotalFloat;
+            act.FreeFloat   = r.FreeFloat;
+            act.IsCritical  = r.IsCritical;
+        }
+
+        var critCount = result.Activities.Count(r => r.IsCritical);
+        await audit.WriteAsync(actorId, "schedule.recomputed", "Schedule",
+            projectId.ToString(), projectId,
+            detail: new
+            {
+                projectStart    = result.ProjectStart,
+                projectFinish   = result.ProjectFinish,
+                activities      = activities.Count,
+                criticalCount   = critCount,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return new ScheduleRecomputeResultDto(
+            result.ProjectStart, result.ProjectFinish, activities.Count, critCount);
+    }
+
+    // ── Validation helpers ──────────────────────────────────────────
+    private static void ValidateActivityCommon(
+        string code, string name, decimal duration, decimal percentComplete,
+        ConstraintType constraintType, DateTime? constraintDate)
+    {
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(code)) errors.Add("Code is required");
+        if (string.IsNullOrWhiteSpace(name)) errors.Add("Name is required");
+        if (duration < 0m) errors.Add("Duration cannot be negative");
+        if (percentComplete < 0m || percentComplete > 1m)
+            errors.Add("PercentComplete must be in [0, 1]");
+        if (constraintType is ConstraintType.SNET or ConstraintType.SNLT
+                            or ConstraintType.FNET or ConstraintType.FNLT
+                            or ConstraintType.MSO  or ConstraintType.MFO
+            && !constraintDate.HasValue)
+            errors.Add($"ConstraintDate is required for {constraintType}");
+        if (errors.Count > 0) throw new ValidationException(errors);
+    }
+
+    private async Task EnsureAssigneeIsProjectMemberAsync(Guid projectId, Guid assigneeId, CancellationToken ct)
+    {
+        var isMember = await db.ProjectMembers.AnyAsync(
+            m => m.ProjectId == projectId && m.UserId == assigneeId, ct);
+        if (!isMember)
+            throw new ValidationException(["Assignee must be a member of the project"]);
+    }
 }
 
 // ── CDE ───────────────────────────────────────────────────────────────────────

@@ -169,6 +169,59 @@ public record AddDependencyRequest(
     Guid SuccessorId,
     DependencyType Type,
     decimal Lag);
+// T-S4-05 activity create. Code unique within project. Duration >= 0
+// (zero is a milestone). PercentComplete in [0, 1]. ConstraintDate
+// required when ConstraintType is one of the date-pinned variants
+// (SNET / SNLT / FNET / FNLT / MSO / MFO). AssigneeId, Discipline
+// optional.
+public record CreateActivityRequest(
+    string Code,
+    string Name,
+    string? Description,
+    decimal Duration,
+    DurationUnit DurationUnit,
+    DateTime? ScheduledStart,
+    DateTime? ScheduledFinish,
+    ConstraintType ConstraintType,
+    DateTime? ConstraintDate,
+    decimal PercentComplete,
+    Guid? AssigneeId,
+    string? Discipline);
+// All fields nullable for partial update. Code change re-validates
+// uniqueness; AssigneeId change re-validates membership.
+public record UpdateActivityRequest(
+    string? Code,
+    string? Name,
+    string? Description,
+    decimal? Duration,
+    DurationUnit? DurationUnit,
+    DateTime? ScheduledStart,
+    DateTime? ScheduledFinish,
+    ConstraintType? ConstraintType,
+    DateTime? ConstraintDate,
+    decimal? PercentComplete,
+    Guid? AssigneeId,
+    string? Discipline);
+// T-S4-05 recompute. Optional dataDate override; service falls back
+// to Project.StartDate if not supplied. Service rejects if neither
+// is set.
+public record RecomputeScheduleRequest(DateTime? DataDate);
+// T-S4-05 schedule snapshot returned by GET /schedule and computed
+// view endpoints. The Activities list mirrors Cpm.CpmActivityResult
+// per row, joined to the Activity Code/Name/AssigneeId for UI use.
+public record ScheduleActivityDto(
+    Guid Id, string Code, string Name, string? Description,
+    decimal Duration, DurationUnit DurationUnit,
+    DateTime? EarlyStart, DateTime? EarlyFinish,
+    DateTime? LateStart, DateTime? LateFinish,
+    decimal? TotalFloat, decimal? FreeFloat, bool IsCritical,
+    DateTime? ScheduledStart, DateTime? ScheduledFinish,
+    DateTime? ActualStart, DateTime? ActualFinish,
+    ConstraintType ConstraintType, DateTime? ConstraintDate,
+    decimal PercentComplete, Guid? AssigneeId, string? Discipline,
+    bool IsActive);
+public record ScheduleRecomputeResultDto(
+    DateTime ProjectStart, DateTime ProjectFinish, int ActivitiesCount, int CriticalActivitiesCount);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.
