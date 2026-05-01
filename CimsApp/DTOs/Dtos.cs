@@ -285,6 +285,12 @@ public record WeeklyTaskCommitmentDto(
     bool Committed, bool Completed,
     LpsReasonForNonCompletion? Reason, string? Notes,
     DateTime UpdatedAt);
+// T-S4-09 MSP XML import summary. Counts what was inserted; the
+// caller can call /schedule/recompute to populate CPM fields.
+public record MsProjectImportResultDto(
+    string? ProjectName, DateTime? ProjectStart,
+    int ActivitiesImported, int DependenciesImported,
+    List<string> Warnings);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

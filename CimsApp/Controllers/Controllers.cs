@@ -923,6 +923,23 @@ public class ScheduleController(ScheduleService svc, CimsDbContext db) : CimsCon
         var dto = await svc.GetBaselineComparisonAsync(projectId, baselineId, ct);
         return Ok(new { success = true, data = dto });
     }
+
+    // T-S4-09 MS Project XML import. Multipart `file`. Same shape
+    // as T-S1-03 CBS import. Into-empty only.
+    [HttpPost("import")]
+    public async Task<IActionResult> ImportMsProject(
+        Guid projectId, IFormFile file, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        if (file is null || file.Length == 0)
+            throw new ValidationException(["file is required"]);
+        await using var stream = file.OpenReadStream();
+        var result = await svc.ImportFromMsProjectAsync(projectId, stream,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = result });
+    }
 }
 
 // ── Last Planner System (T-S4-07) ─────────────────────────────────────────────

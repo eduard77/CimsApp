@@ -2830,6 +2830,124 @@ public class ScheduleService(CimsDbContext db, AuditService audit)
             throw new ValidationException(["Assignee must be a member of the project"]);
     }
 
+    // ── MS Project XML import (T-S4-09) ─────────────────────────────
+
+    /// <summary>
+    /// Import an MSP XML file into the project's schedule. Same shape
+    /// as T-S1-03 CBS import: import-into-empty only — refuses if the
+    /// project already has any active activities. The Core/MsProjectXml
+    /// parser handles the XML; this method maps parsed UIDs → CIMS
+    /// Guids, inserts the rows in a single transaction, and emits a
+    /// `schedule.imported` audit event with the counts in the detail.
+    /// CPM is NOT auto-recomputed — the caller decides when to call
+    /// /schedule/recompute (often after manual review of the import).
+    /// </summary>
+    public async Task<MsProjectImportResultDto> ImportFromMsProjectAsync(
+        Guid projectId, Stream xmlStream, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var hasExisting = await db.Activities
+            .AnyAsync(a => a.ProjectId == projectId && a.IsActive, ct);
+        if (hasExisting)
+            throw new ConflictException(
+                "Project already has activities; MS Project XML import is into-empty only");
+
+        CimsApp.Core.MsProjectXml.ImportResult parsed;
+        try { parsed = CimsApp.Core.MsProjectXml.Parse(xmlStream); }
+        catch (FormatException ex)
+            { throw new ValidationException([$"MS Project XML parse error: {ex.Message}"]); }
+
+        var warnings = new List<string>();
+
+        // First pass: insert Activities, build UID → Guid map.
+        var uidToId = new Dictionary<string, Guid>(parsed.Activities.Count);
+        var usedCodes = new HashSet<string>();
+        foreach (var p in parsed.Activities)
+        {
+            // MSP UID is the most stable identifier — use as Code so
+            // round-trip identity is preserved if export ships in v1.1.
+            // De-dupe within the import in the unlikely case MSP ships
+            // a duplicate UID by appending a discriminator.
+            var code = $"MSP-{p.Uid}";
+            while (!usedCodes.Add(code))
+            {
+                code = $"MSP-{p.Uid}-{Guid.NewGuid():N}".Substring(0, 50);
+            }
+
+            var activity = new Activity
+            {
+                ProjectId       = projectId,
+                Code            = code.Length > 50 ? code[..50] : code,
+                Name            = p.Name.Length > 300 ? p.Name[..300] : p.Name,
+                Duration        = p.DurationDays,
+                DurationUnit    = DurationUnit.Day,
+                ScheduledStart  = p.Start,
+                ScheduledFinish = p.Finish,
+                ConstraintType  = ConstraintType.ASAP,
+                PercentComplete = Math.Clamp(p.PercentComplete, 0m, 1m),
+            };
+            db.Activities.Add(activity);
+            uidToId[p.Uid] = activity.Id;
+        }
+
+        // Second pass: insert Dependencies. Skip and warn on links
+        // pointing at unknown UIDs (the XML may reference external
+        // tasks that didn't ship in this Tasks block).
+        var depCount = 0;
+        var seenPairs = new HashSet<(Guid, Guid)>();
+        foreach (var d in parsed.Dependencies)
+        {
+            if (!uidToId.TryGetValue(d.PredecessorUid, out var predId))
+            {
+                warnings.Add($"Skipped dependency: predecessor UID '{d.PredecessorUid}' not found in import");
+                continue;
+            }
+            if (!uidToId.TryGetValue(d.SuccessorUid, out var succId))
+            {
+                warnings.Add($"Skipped dependency: successor UID '{d.SuccessorUid}' not found in import");
+                continue;
+            }
+            if (predId == succId)
+            {
+                warnings.Add($"Skipped self-loop on UID '{d.PredecessorUid}'");
+                continue;
+            }
+            if (!seenPairs.Add((predId, succId)))
+            {
+                warnings.Add($"Skipped duplicate dependency {d.PredecessorUid} -> {d.SuccessorUid}");
+                continue;
+            }
+            db.Dependencies.Add(new Dependency
+            {
+                ProjectId     = projectId,
+                PredecessorId = predId,
+                SuccessorId   = succId,
+                Type          = d.Type,
+                Lag           = Math.Clamp(d.LagDays, -365m, 365m),
+            });
+            depCount++;
+        }
+
+        await audit.WriteAsync(actorId, "schedule.imported", "Schedule",
+            projectId.ToString(), projectId,
+            detail: new
+            {
+                source              = "MsProjectXml",
+                projectName         = parsed.ProjectName,
+                activitiesImported  = parsed.Activities.Count,
+                dependenciesImported = depCount,
+                warningsCount       = warnings.Count,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+
+        return new MsProjectImportResultDto(
+            parsed.ProjectName, parsed.ProjectStart,
+            parsed.Activities.Count, depCount, warnings);
+    }
+
     // ── Baselines (T-S4-06) ─────────────────────────────────────────
 
     /// <summary>
