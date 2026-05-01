@@ -924,6 +924,15 @@ public class ScheduleController(ScheduleService svc, CimsDbContext db) : CimsCon
         return Ok(new { success = true, data = dto });
     }
 
+    // T-S4-11 Gantt data endpoint. Read-only, membership.
+    [HttpGet("gantt")]
+    public async Task<IActionResult> Gantt(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetGanttAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
     // T-S4-09 MS Project XML import. Multipart `file`. Same shape
     // as T-S1-03 CBS import. Into-empty only.
     [HttpPost("import")]

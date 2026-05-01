@@ -2743,6 +2743,49 @@ public class ScheduleService(CimsDbContext db, AuditService audit)
             .ToListAsync(ct);
     }
 
+    /// <summary>
+    /// Gantt data endpoint (T-S4-11, PAFM-SD F.5 sixth bullet —
+    /// "Gantt and network views"; network view deferred to v1.1 /
+    /// B-033 per CR-005). Returns the per-activity bars + per-link
+    /// arrows in a UI-friendly shape. Start / Finish prefer the
+    /// CPM-computed EarlyStart / EarlyFinish; fall back to
+    /// ScheduledStart / ScheduledFinish if the solver hasn't run.
+    /// ProjectStart / ProjectFinish are min / max across the
+    /// activity-set Start / Finish.
+    /// </summary>
+    public async Task<GanttDto> GetGanttAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var activities = await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive)
+            .OrderBy(a => a.Code)
+            .ToListAsync(ct);
+        var dependencies = await db.Dependencies
+            .Where(d => d.ProjectId == projectId)
+            .OrderBy(d => d.PredecessorId).ThenBy(d => d.SuccessorId)
+            .ToListAsync(ct);
+
+        var actDtos = activities.Select(a => new GanttActivityDto(
+            a.Id, a.Code, a.Name,
+            a.EarlyStart  ?? a.ScheduledStart,
+            a.EarlyFinish ?? a.ScheduledFinish,
+            a.Duration, a.PercentComplete,
+            a.IsCritical, a.AssigneeId, a.Discipline)).ToList();
+
+        var depDtos = dependencies.Select(d => new GanttDependencyDto(
+            d.Id, d.PredecessorId, d.SuccessorId, d.Type, d.Lag)).ToList();
+
+        var starts   = actDtos.Where(x => x.Start.HasValue).Select(x => x.Start!.Value).ToList();
+        var finishes = actDtos.Where(x => x.Finish.HasValue).Select(x => x.Finish!.Value).ToList();
+        DateTime? projectStart  = starts.Count   == 0 ? null : starts.Min();
+        DateTime? projectFinish = finishes.Count == 0 ? null : finishes.Max();
+
+        return new GanttDto(projectStart, projectFinish, actDtos, depDtos);
+    }
+
     // ── Recompute (T-S4-05) ─────────────────────────────────────────
     /// <summary>
     /// Run the CPM solver against the project's active activities +

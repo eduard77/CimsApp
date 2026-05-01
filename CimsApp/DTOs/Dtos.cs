@@ -291,6 +291,24 @@ public record MsProjectImportResultDto(
     string? ProjectName, DateTime? ProjectStart,
     int ActivitiesImported, int DependenciesImported,
     List<string> Warnings);
+// T-S4-11 Gantt data endpoint. UI-friendly read view: per-activity
+// bars + per-dependency arrows. Start / Finish prefer CPM-computed
+// EarlyStart / EarlyFinish; fall back to ScheduledStart / Finish if
+// the CPM solver hasn't been run yet (or both null if neither set).
+// Network-view (PERT diagram) endpoint deferred to B-033 v1.1 per
+// CR-005.
+public record GanttActivityDto(
+    Guid Id, string Code, string Name,
+    DateTime? Start, DateTime? Finish,
+    decimal Duration, decimal PercentComplete,
+    bool IsCritical, Guid? AssigneeId, string? Discipline);
+public record GanttDependencyDto(
+    Guid Id, Guid PredecessorId, Guid SuccessorId,
+    DependencyType Type, decimal Lag);
+public record GanttDto(
+    DateTime? ProjectStart, DateTime? ProjectFinish,
+    List<GanttActivityDto> Activities,
+    List<GanttDependencyDto> Dependencies);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.
