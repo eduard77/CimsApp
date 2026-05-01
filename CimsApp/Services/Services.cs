@@ -1821,6 +1821,38 @@ public class RisksService(CimsDbContext db, AuditService audit)
         if (impact < 1 || impact > 5)            errors.Add("Impact must be 1..5");
         if (errors.Count > 0) throw new ValidationException(errors);
     }
+
+    /// <summary>
+    /// List active risks on a project, ordered by Score descending then
+    /// CreatedAt ascending — natural register / heat-map listing.
+    /// Cross-tenant projectIds 404 via the query filter.
+    /// </summary>
+    public async Task<List<Risk>> ListAsync(Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        return await db.Risks
+            .Where(r => r.ProjectId == projectId && r.IsActive)
+            .OrderByDescending(r => r.Score)
+            .ThenBy(r => r.CreatedAt)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Build the 25-cell 5×5 P×I matrix for the project — one cell per
+    /// (Probability, Impact) coordinate, with RiskIds inside each cell.
+    /// Closed risks are excluded (heat-maps show the live register only).
+    /// </summary>
+    public async Task<List<CimsApp.Core.RiskMatrixCell>> GetMatrixAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        var live = await db.Risks
+            .Where(r => r.ProjectId == projectId && r.IsActive && r.Status != RiskStatus.Closed)
+            .ToListAsync(ct);
+        return CimsApp.Core.RiskMatrix.Build(live);
+    }
 }
 
 // ── CDE ───────────────────────────────────────────────────────────────────────

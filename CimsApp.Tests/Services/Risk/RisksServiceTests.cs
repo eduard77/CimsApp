@@ -322,6 +322,52 @@ public class RisksServiceTests
     }
 
     [Fact]
+    public async Task ListAsync_returns_active_risks_ordered_by_score_desc()
+    {
+        var (options, tenant, _, userId, projectId, _) = BuildFixture();
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            await svc.CreateAsync(projectId, BasicCreate() with { Title = "Low",  Probability = 1, Impact = 1 }, userId);
+            await svc.CreateAsync(projectId, BasicCreate() with { Title = "High", Probability = 5, Impact = 5 }, userId);
+            await svc.CreateAsync(projectId, BasicCreate() with { Title = "Mid",  Probability = 3, Impact = 3 }, userId);
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new RisksService(db2, new AuditService(db2));
+        var list = await svc2.ListAsync(projectId);
+
+        Assert.Equal(3, list.Count);
+        Assert.Equal("High", list[0].Title);   // 25
+        Assert.Equal("Mid",  list[1].Title);   // 9
+        Assert.Equal("Low",  list[2].Title);   // 1
+    }
+
+    [Fact]
+    public async Task GetMatrixAsync_returns_25_cells_excluding_closed_risks()
+    {
+        var (options, tenant, _, userId, projectId, _) = BuildFixture();
+        Guid closedId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            await svc.CreateAsync(projectId, BasicCreate() with { Title = "Live A", Probability = 4, Impact = 5 }, userId);
+            await svc.CreateAsync(projectId, BasicCreate() with { Title = "Live B", Probability = 4, Impact = 5 }, userId);
+            closedId = (await svc.CreateAsync(projectId, BasicCreate() with { Title = "Stale", Probability = 4, Impact = 5 }, userId)).Id;
+            await svc.CloseAsync(projectId, closedId, userId);
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new RisksService(db2, new AuditService(db2));
+        var cells = await svc2.GetMatrixAsync(projectId);
+
+        Assert.Equal(25, cells.Count);
+        var c45 = cells.Single(c => c.Probability == 4 && c.Impact == 5);
+        Assert.Equal(2, c45.RiskIds.Count); // closed risk excluded
+        Assert.DoesNotContain(closedId, c45.RiskIds);
+    }
+
+    [Fact]
     public async Task UpdateAsync_cross_tenant_lookup_404s()
     {
         var (options, tenant, _, userId, projectId, _) = BuildFixture();

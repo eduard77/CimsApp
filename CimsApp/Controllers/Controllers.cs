@@ -541,6 +541,24 @@ public class VariationsController(VariationsService svc, CimsDbContext db) : Cim
 [Route("api/v1/projects/{projectId:guid}/risks")]
 public class RisksController(RisksService svc, CimsDbContext db) : CimsControllerBase
 {
+    [HttpGet]
+    public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
+    {
+        // Membership-only: any project member can read the register.
+        await GetProjectRoleAsync(db, projectId);
+        var risks = await svc.ListAsync(projectId, ct);
+        return Ok(new { success = true, data = risks });
+    }
+
+    [HttpGet("matrix")]
+    public async Task<IActionResult> Matrix(Guid projectId, CancellationToken ct)
+    {
+        // Membership-only: heat-map is a read view.
+        await GetProjectRoleAsync(db, projectId);
+        var cells = await svc.GetMatrixAsync(projectId, ct);
+        return Ok(new { success = true, data = cells });
+    }
+
     [HttpPost]
     public async Task<IActionResult> Create(
         Guid projectId, CreateRiskRequest req, CancellationToken ct)
