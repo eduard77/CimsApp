@@ -141,6 +141,26 @@ public record RecordEngagementRequest(
     DateTime OccurredAt,
     string Summary,
     string? ActionsAgreed);
+// T-S3-07 communications matrix row. The four DoD axes — what / who /
+// when / how — map to ItemType / Audience / Frequency / Channel.
+// OwnerId must be a project member; service enforces.
+public record CreateCommunicationItemRequest(
+    string ItemType,
+    string Audience,
+    CommunicationFrequency Frequency,
+    CommunicationChannel Channel,
+    Guid OwnerId,
+    string? Notes);
+// All fields nullable for partial update. Caller can replace OwnerId
+// (membership re-validated) or change cadence/channel as the comms
+// plan evolves.
+public record UpdateCommunicationItemRequest(
+    string? ItemType,
+    string? Audience,
+    CommunicationFrequency? Frequency,
+    CommunicationChannel? Channel,
+    Guid? OwnerId,
+    string? Notes);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

@@ -49,6 +49,7 @@ public class CimsDbContext(
     public DbSet<RiskDrawdown>       RiskDrawdowns       => Set<RiskDrawdown>();
     public DbSet<Stakeholder>        Stakeholders        => Set<Stakeholder>();
     public DbSet<EngagementLog>      EngagementLogs      => Set<EngagementLog>();
+    public DbSet<CommunicationItem>  CommunicationItems  => Set<CommunicationItem>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -392,6 +393,18 @@ public class CimsDbContext(
              .HasForeignKey(g => g.RecordedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<CommunicationItem>(e =>
+        {
+            // Listings hit (ProjectId, IsActive) for the matrix view
+            // and (ProjectId, ItemType) for the by-type filter.
+            e.HasIndex(c => new { c.ProjectId, c.IsActive });
+            e.HasIndex(c => new { c.ProjectId, c.ItemType });
+            e.HasOne(c => c.Project).WithMany()
+             .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.Owner).WithMany()
+             .HasForeignKey(c => c.OwnerId).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -432,6 +445,7 @@ public class CimsDbContext(
         m.Entity<RiskDrawdown>().HasQueryFilter(d => d.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<Stakeholder>().HasQueryFilter(s => s.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<EngagementLog>().HasQueryFilter(g => g.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<CommunicationItem>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -456,6 +470,7 @@ public class CimsDbContext(
             else if (e.Entity is RiskCategory rc) rc.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is Risk risk) risk.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is Stakeholder s) s.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is CommunicationItem ci) ci.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

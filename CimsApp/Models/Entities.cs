@@ -957,3 +957,47 @@ public class EngagementLog
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// One row in the project-level communications matrix (T-S3-07,
+/// PAFM-SD F.4 fourth bullet — "Communications matrix (what, who,
+/// when, how)"). The four DoD axes map to ItemType / Audience /
+/// Frequency / Channel respectively. Tenant-scoped through
+/// Project.AppointingPartyId; soft-deleted via IsActive to preserve
+/// audit history when a planned communication is retired.
+/// </summary>
+public class CommunicationItem
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>The "what" — short label e.g. "Monthly project report",
+    /// "Daily diary", "Variation notice". Free text in v1.0; an
+    /// org-level template seed is a v1.1 candidate per the S3 kickoff
+    /// Top-3 risks list.</summary>
+    [Required, MaxLength(200)] public string ItemType { get; set; } = "";
+
+    /// <summary>The "who" — comma-separated roles or stakeholder names
+    /// in v1.0. v1.1 candidate: link to Stakeholder rows directly per
+    /// the S3 kickoff decisions section.</summary>
+    [Required, MaxLength(500)] public string Audience { get; set; } = "";
+
+    /// <summary>The "when" — fixed cadence enum.</summary>
+    public CommunicationFrequency Frequency { get; set; }
+
+    /// <summary>The "how" — channel / medium.</summary>
+    public CommunicationChannel Channel { get; set; }
+
+    /// <summary>Caller-nominated owner of the communication. Service
+    /// validates the user belongs to the project (membership check).</summary>
+    public Guid OwnerId { get; set; }
+    public User Owner { get; set; } = null!;
+
+    public string? Notes { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+

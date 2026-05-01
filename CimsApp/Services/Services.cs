@@ -2308,6 +2308,145 @@ public class StakeholdersService(CimsDbContext db, AuditService audit)
     }
 }
 
+/// <summary>
+/// CommunicationsService — the project-level communications matrix
+/// (T-S3-07, PAFM-SD F.4 fourth bullet — "what / who / when / how").
+/// Mirrors StakeholdersService shape: Create / Update / Deactivate
+/// + List, audit-twin pattern, cross-tenant 404 via query filter.
+/// </summary>
+public class CommunicationsService(CimsDbContext db, AuditService audit)
+{
+    public async Task<CommunicationItem> CreateAsync(
+        Guid projectId, CreateCommunicationItemRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        ValidateCreate(req);
+        await EnsureOwnerIsProjectMemberAsync(projectId, req.OwnerId, ct);
+
+        var item = new CommunicationItem
+        {
+            ProjectId = projectId,
+            ItemType  = req.ItemType.Trim(),
+            Audience  = req.Audience.Trim(),
+            Frequency = req.Frequency,
+            Channel   = req.Channel,
+            OwnerId   = req.OwnerId,
+            Notes     = req.Notes,
+        };
+        db.CommunicationItems.Add(item);
+
+        await audit.WriteAsync(actorId, "communication.created", "CommunicationItem",
+            item.Id.ToString(), projectId,
+            detail: new
+            {
+                itemType  = item.ItemType,
+                audience  = item.Audience,
+                frequency = item.Frequency.ToString(),
+                channel   = item.Channel.ToString(),
+                ownerId   = item.OwnerId,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return item;
+    }
+
+    public async Task<CommunicationItem> UpdateAsync(
+        Guid projectId, Guid itemId, UpdateCommunicationItemRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var item = await db.CommunicationItems
+            .FirstOrDefaultAsync(c => c.Id == itemId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CommunicationItem");
+
+        if (!item.IsActive)
+            throw new ConflictException("Communication item is deactivated; cannot update");
+
+        var changed = new List<string>();
+
+        if (req.ItemType is not null)
+        {
+            if (string.IsNullOrWhiteSpace(req.ItemType))
+                throw new ValidationException(["ItemType cannot be empty"]);
+            item.ItemType = req.ItemType.Trim();
+            changed.Add("ItemType");
+        }
+        if (req.Audience is not null)
+        {
+            if (string.IsNullOrWhiteSpace(req.Audience))
+                throw new ValidationException(["Audience cannot be empty"]);
+            item.Audience = req.Audience.Trim();
+            changed.Add("Audience");
+        }
+        if (req.Frequency.HasValue) { item.Frequency = req.Frequency.Value; changed.Add("Frequency"); }
+        if (req.Channel.HasValue)   { item.Channel   = req.Channel.Value;   changed.Add("Channel"); }
+        if (req.OwnerId.HasValue && req.OwnerId.Value != item.OwnerId)
+        {
+            await EnsureOwnerIsProjectMemberAsync(projectId, req.OwnerId.Value, ct);
+            item.OwnerId = req.OwnerId.Value;
+            changed.Add("OwnerId");
+        }
+        if (req.Notes is not null) { item.Notes = req.Notes; changed.Add("Notes"); }
+
+        if (changed.Count == 0)
+            throw new ValidationException(["No updatable fields provided"]);
+
+        await audit.WriteAsync(actorId, "communication.updated", "CommunicationItem",
+            item.Id.ToString(), projectId,
+            detail: new { changedFields = changed }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return item;
+    }
+
+    public async Task<CommunicationItem> DeactivateAsync(
+        Guid projectId, Guid itemId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var item = await db.CommunicationItems
+            .FirstOrDefaultAsync(c => c.Id == itemId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CommunicationItem");
+
+        if (!item.IsActive)
+            throw new ConflictException("Communication item is already deactivated");
+
+        item.IsActive = false;
+        await audit.WriteAsync(actorId, "communication.deactivated", "CommunicationItem",
+            item.Id.ToString(), projectId,
+            detail: new { itemType = item.ItemType }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return item;
+    }
+
+    /// <summary>List active communications for the project, ordered
+    /// by ItemType then Frequency. The matrix is a planning view —
+    /// no soft-deleted rows.</summary>
+    public async Task<List<CommunicationItem>> ListAsync(Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        return await db.CommunicationItems
+            .Where(c => c.ProjectId == projectId && c.IsActive)
+            .OrderBy(c => c.ItemType)
+            .ThenBy(c => c.Frequency)
+            .ToListAsync(ct);
+    }
+
+    private static void ValidateCreate(CreateCommunicationItemRequest req)
+    {
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(req.ItemType)) errors.Add("ItemType is required");
+        if (string.IsNullOrWhiteSpace(req.Audience)) errors.Add("Audience is required");
+        if (req.OwnerId == Guid.Empty)               errors.Add("OwnerId is required");
+        if (errors.Count > 0) throw new ValidationException(errors);
+    }
+
+    private async Task EnsureOwnerIsProjectMemberAsync(Guid projectId, Guid ownerId, CancellationToken ct)
+    {
+        var isMember = await db.ProjectMembers.AnyAsync(
+            m => m.ProjectId == projectId && m.UserId == ownerId, ct);
+        if (!isMember)
+            throw new ValidationException(["Owner must be a member of the project"]);
+    }
+}
+
 // ── CDE ───────────────────────────────────────────────────────────────────────
 public class CdeService(CimsDbContext db, AuditService audit)
 {
