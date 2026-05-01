@@ -1106,3 +1106,73 @@ public class Dependency
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// A frozen snapshot of a project's schedule at a point in time
+/// (T-S4-06, PAFM-SD F.5 second bullet — "Baselines captured and
+/// compared against actual"). Multiple baselines per project are
+/// allowed (Original, Revision 1, etc.). The header carries summary
+/// metadata; per-activity rows live in
+/// <see cref="ScheduleBaselineActivity"/>. Tenant-scoped through
+/// Project.AppointingPartyId. Baselines are immutable after capture
+/// — there's no Update / Delete; superseded baselines stay visible
+/// for audit / reporting.
+/// </summary>
+public class ScheduleBaseline
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    [Required, MaxLength(200)] public string Label { get; set; } = "";
+
+    public DateTime CapturedAt { get; set; } = DateTime.UtcNow;
+    public Guid CapturedById { get; set; }
+    public User CapturedBy { get; set; } = null!;
+
+    /// <summary>Denormalised summary at capture time so list endpoints
+    /// don't need to aggregate across the per-activity rows.</summary>
+    public int ActivitiesCount { get; set; }
+
+    /// <summary>Project finish (max EarlyFinish across activities) at
+    /// the moment the baseline was captured. Null if any activity
+    /// hadn't been CPM-recomputed (EarlyFinish missing).</summary>
+    public DateTime? ProjectFinishAtBaseline { get; set; }
+
+    public ICollection<ScheduleBaselineActivity> Activities { get; set; } = [];
+}
+
+/// <summary>
+/// One frozen activity row inside a <see cref="ScheduleBaseline"/>.
+/// Code / Name are denormalised so the baseline preserves the
+/// activity's identity even if the Activity row's Code is later
+/// renamed. Comparison endpoint subtracts current Activity.Early*
+/// from these fields to compute start / finish / duration variances.
+/// Tenant-scoped via the parent ScheduleBaseline + denormalised
+/// ProjectId for query filter consistency.
+/// </summary>
+public class ScheduleBaselineActivity
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ScheduleBaselineId { get; set; }
+    public ScheduleBaseline ScheduleBaseline { get; set; } = null!;
+
+    /// <summary>Denormalised — equals ScheduleBaseline.ProjectId.
+    /// Drives the tenant query filter without requiring a join.</summary>
+    public Guid ProjectId { get; set; }
+
+    public Guid ActivityId { get; set; }
+    public Activity Activity { get; set; } = null!;
+
+    [Required, MaxLength(50)]  public string Code { get; set; } = "";
+    [Required, MaxLength(300)] public string Name { get; set; } = "";
+
+    [Column(TypeName = "decimal(9,2)")]
+    public decimal Duration { get; set; }
+
+    public DateTime? EarlyStart  { get; set; }
+    public DateTime? EarlyFinish { get; set; }
+    public bool IsCritical { get; set; }
+}
+

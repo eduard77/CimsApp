@@ -893,6 +893,36 @@ public class ScheduleController(ScheduleService svc, CimsDbContext db) : CimsCon
             CurrentUserId, ClientIp, ClientAgent, ct);
         return Ok(new { success = true, data = result });
     }
+
+    // T-S4-06 baselines.
+    [HttpGet("baselines")]
+    public async Task<IActionResult> ListBaselines(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListBaselinesAsync(projectId, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpPost("baselines")]
+    public async Task<IActionResult> CreateBaseline(
+        Guid projectId, CreateBaselineRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var b = await svc.CreateBaselineAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = b });
+    }
+
+    [HttpGet("baselines/{baselineId:guid}/comparison")]
+    public async Task<IActionResult> BaselineComparison(
+        Guid projectId, Guid baselineId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetBaselineComparisonAsync(projectId, baselineId, ct);
+        return Ok(new { success = true, data = dto });
+    }
 }
 
 // ── Documents ─────────────────────────────────────────────────────────────────

@@ -222,6 +222,35 @@ public record ScheduleActivityDto(
     bool IsActive);
 public record ScheduleRecomputeResultDto(
     DateTime ProjectStart, DateTime ProjectFinish, int ActivitiesCount, int CriticalActivitiesCount);
+// T-S4-06 baseline capture. Label required ("Original baseline",
+// "Revision 2", etc.). Snapshot pulls every active activity.
+public record CreateBaselineRequest(string Label);
+// Header listing of baselines on a project (T-S4-06).
+public record BaselineSummaryDto(
+    Guid Id, string Label, DateTime CapturedAt, Guid CapturedById,
+    int ActivitiesCount, DateTime? ProjectFinishAtBaseline);
+// One activity-level row in the comparison output. Variances are
+// in days, current minus baseline (positive = slipped later /
+// expanded). Either side can be null:
+// - IsNewSinceBaseline = true → activity exists currently but was
+//   not in the baseline; baseline* fields null.
+// - IsRemovedSinceBaseline = true → activity was in the baseline
+//   but is now deactivated; current* fields null.
+public record BaselineActivityComparisonDto(
+    Guid ActivityId, string Code, string Name,
+    DateTime? BaselineEarlyStart, DateTime? BaselineEarlyFinish,
+    decimal? BaselineDuration, bool BaselineWasCritical,
+    DateTime? CurrentEarlyStart, DateTime? CurrentEarlyFinish,
+    decimal? CurrentDuration, bool CurrentIsCritical,
+    decimal? StartVarianceDays, decimal? FinishVarianceDays,
+    decimal? DurationVarianceDays,
+    bool IsNewSinceBaseline, bool IsRemovedSinceBaseline);
+public record BaselineComparisonDto(
+    Guid BaselineId, string Label, DateTime CapturedAt,
+    DateTime? ProjectFinishAtBaseline, DateTime? CurrentProjectFinish,
+    decimal? ProjectFinishVarianceDays,
+    int AddedActivitiesCount, int RemovedActivitiesCount,
+    List<BaselineActivityComparisonDto> Activities);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

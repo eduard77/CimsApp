@@ -52,6 +52,8 @@ public class CimsDbContext(
     public DbSet<CommunicationItem>  CommunicationItems  => Set<CommunicationItem>();
     public DbSet<Activity>           Activities          => Set<Activity>();
     public DbSet<Dependency>         Dependencies        => Set<Dependency>();
+    public DbSet<ScheduleBaseline>   ScheduleBaselines   => Set<ScheduleBaseline>();
+    public DbSet<ScheduleBaselineActivity> ScheduleBaselineActivities => Set<ScheduleBaselineActivity>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -439,6 +441,27 @@ public class CimsDbContext(
              .HasForeignKey(d => d.SuccessorId).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<ScheduleBaseline>(e =>
+        {
+            e.HasIndex(b => new { b.ProjectId, b.CapturedAt });
+            e.HasOne(b => b.Project).WithMany()
+             .HasForeignKey(b => b.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(b => b.CapturedBy).WithMany()
+             .HasForeignKey(b => b.CapturedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<ScheduleBaselineActivity>(e =>
+        {
+            // Comparison endpoint joins per-baseline rows back to
+            // current Activity rows; index on (ScheduleBaselineId,
+            // ActivityId) makes that lookup O(log n).
+            e.HasIndex(b => new { b.ScheduleBaselineId, b.ActivityId });
+            e.HasOne(b => b.ScheduleBaseline).WithMany(s => s.Activities)
+             .HasForeignKey(b => b.ScheduleBaselineId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(b => b.Activity).WithMany()
+             .HasForeignKey(b => b.ActivityId).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -482,6 +505,8 @@ public class CimsDbContext(
         m.Entity<CommunicationItem>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<Activity>().HasQueryFilter(a => a.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<Dependency>().HasQueryFilter(d => d.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<ScheduleBaseline>().HasQueryFilter(b => b.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<ScheduleBaselineActivity>().HasQueryFilter(b => b.ScheduleBaseline.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()

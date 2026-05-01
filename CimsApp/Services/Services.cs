@@ -2829,6 +2829,171 @@ public class ScheduleService(CimsDbContext db, AuditService audit)
         if (!isMember)
             throw new ValidationException(["Assignee must be a member of the project"]);
     }
+
+    // ── Baselines (T-S4-06) ─────────────────────────────────────────
+
+    /// <summary>
+    /// Snapshot every active activity in the project into a frozen
+    /// <see cref="ScheduleBaseline"/>. Captures the activity's
+    /// post-CPM EarlyStart / EarlyFinish / Duration / IsCritical at
+    /// baseline time. Multiple baselines per project are allowed —
+    /// the typical PMBOK workflow is "Original baseline" + several
+    /// "Approved revision N" snapshots through the project life.
+    /// Empty-activity-set baselines are accepted (an honest "we have
+    /// nothing planned yet" anchor); the comparison endpoint handles
+    /// the empty case cleanly.
+    /// </summary>
+    public async Task<ScheduleBaseline> CreateBaselineAsync(
+        Guid projectId, CreateBaselineRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Label))
+            throw new ValidationException(["Label is required"]);
+
+        var project = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var activities = await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive)
+            .ToListAsync(ct);
+
+        var efs = activities.Where(a => a.EarlyFinish.HasValue)
+            .Select(a => a.EarlyFinish!.Value).ToList();
+        var baseline = new ScheduleBaseline
+        {
+            ProjectId               = projectId,
+            Label                   = req.Label.Trim(),
+            CapturedById            = actorId,
+            ActivitiesCount         = activities.Count,
+            ProjectFinishAtBaseline = efs.Count == 0 ? null : efs.Max(),
+        };
+        db.ScheduleBaselines.Add(baseline);
+
+        foreach (var a in activities)
+        {
+            db.ScheduleBaselineActivities.Add(new ScheduleBaselineActivity
+            {
+                ScheduleBaselineId = baseline.Id,
+                ProjectId          = projectId,
+                ActivityId         = a.Id,
+                Code               = a.Code,
+                Name               = a.Name,
+                Duration           = a.Duration,
+                EarlyStart         = a.EarlyStart,
+                EarlyFinish        = a.EarlyFinish,
+                IsCritical         = a.IsCritical,
+            });
+        }
+
+        await audit.WriteAsync(actorId, "schedule_baseline.captured", "ScheduleBaseline",
+            baseline.Id.ToString(), projectId,
+            detail: new
+            {
+                label                   = baseline.Label,
+                activitiesCount         = baseline.ActivitiesCount,
+                projectFinishAtBaseline = baseline.ProjectFinishAtBaseline,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return baseline;
+    }
+
+    public async Task<List<BaselineSummaryDto>> ListBaselinesAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        return await db.ScheduleBaselines
+            .Where(b => b.ProjectId == projectId)
+            .OrderByDescending(b => b.CapturedAt)
+            .Select(b => new BaselineSummaryDto(
+                b.Id, b.Label, b.CapturedAt, b.CapturedById,
+                b.ActivitiesCount, b.ProjectFinishAtBaseline))
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Compare a captured baseline against the project's current
+    /// schedule. Per-activity output covers three cases:
+    /// (1) activity in both → variance fields populated;
+    /// (2) activity new since baseline → IsNewSinceBaseline = true,
+    ///     baseline* fields null;
+    /// (3) activity removed since baseline → IsRemovedSinceBaseline =
+    ///     true, current* fields null.
+    /// Variance = current minus baseline (positive = slipped later
+    /// or expanded).
+    /// </summary>
+    public async Task<BaselineComparisonDto> GetBaselineComparisonAsync(
+        Guid projectId, Guid baselineId, CancellationToken ct = default)
+    {
+        var baseline = await db.ScheduleBaselines
+            .FirstOrDefaultAsync(b => b.Id == baselineId && b.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("ScheduleBaseline");
+
+        var baselineRows = await db.ScheduleBaselineActivities
+            .Where(b => b.ScheduleBaselineId == baselineId)
+            .ToListAsync(ct);
+        var currentRows = await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive)
+            .ToListAsync(ct);
+
+        var byBaseline = baselineRows.ToDictionary(b => b.ActivityId);
+        var byCurrent  = currentRows.ToDictionary(a => a.Id);
+        var allIds = byBaseline.Keys.Union(byCurrent.Keys).ToList();
+
+        var rows = new List<BaselineActivityComparisonDto>(allIds.Count);
+        foreach (var id in allIds)
+        {
+            byBaseline.TryGetValue(id, out var b);
+            byCurrent.TryGetValue(id, out var c);
+
+            var isNew     = b is null && c is not null;
+            var isRemoved = b is not null && c is null;
+
+            decimal? startVar  = (b?.EarlyStart  is { } bs && c?.EarlyStart  is { } cs) ? DiffDays(cs, bs) : null;
+            decimal? finishVar = (b?.EarlyFinish is { } bf && c?.EarlyFinish is { } cf) ? DiffDays(cf, bf) : null;
+            decimal? durVar    = (b is not null && c is not null) ? c!.Duration - b!.Duration : null;
+
+            rows.Add(new BaselineActivityComparisonDto(
+                ActivityId: id,
+                Code: c?.Code ?? b!.Code,
+                Name: c?.Name ?? b!.Name,
+                BaselineEarlyStart:  b?.EarlyStart,
+                BaselineEarlyFinish: b?.EarlyFinish,
+                BaselineDuration:    b?.Duration,
+                BaselineWasCritical: b?.IsCritical ?? false,
+                CurrentEarlyStart:   c?.EarlyStart,
+                CurrentEarlyFinish:  c?.EarlyFinish,
+                CurrentDuration:     c?.Duration,
+                CurrentIsCritical:   c?.IsCritical ?? false,
+                StartVarianceDays:   startVar,
+                FinishVarianceDays:  finishVar,
+                DurationVarianceDays: durVar,
+                IsNewSinceBaseline:     isNew,
+                IsRemovedSinceBaseline: isRemoved));
+        }
+
+        var currentEfs = currentRows
+            .Where(a => a.EarlyFinish.HasValue)
+            .Select(a => a.EarlyFinish!.Value).ToList();
+        DateTime? currentFinishOrNull = currentEfs.Count == 0 ? null : currentEfs.Max();
+        decimal? finishVarProject = (baseline.ProjectFinishAtBaseline is { } pb && currentFinishOrNull is { } pc)
+            ? DiffDays(pc, pb)
+            : null;
+
+        return new BaselineComparisonDto(
+            BaselineId:                 baseline.Id,
+            Label:                      baseline.Label,
+            CapturedAt:                 baseline.CapturedAt,
+            ProjectFinishAtBaseline:    baseline.ProjectFinishAtBaseline,
+            CurrentProjectFinish:       currentFinishOrNull,
+            ProjectFinishVarianceDays:  finishVarProject,
+            AddedActivitiesCount:       rows.Count(r => r.IsNewSinceBaseline),
+            RemovedActivitiesCount:     rows.Count(r => r.IsRemovedSinceBaseline),
+            Activities:                 rows);
+    }
+
+    private static decimal DiffDays(DateTime current, DateTime baseline) =>
+        (decimal)(current - baseline).Ticks / TimeSpan.TicksPerDay;
 }
 
 // ── CDE ───────────────────────────────────────────────────────────────────────
