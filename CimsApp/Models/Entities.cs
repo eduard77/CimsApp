@@ -776,6 +776,27 @@ public class Risk
     public Guid? AssessedById { get; set; }
     public User? AssessedBy { get; set; }
 
+    /// <summary>T-S2-07 quantitative assessment — 3-point estimate.
+    /// Best-case (lowest realistic cost) of the risk's monetary impact.
+    /// Currency follows Project.Currency. Either all three (Best /
+    /// MostLikely / Worst) are set together with a Distribution, or
+    /// all four are null. RisksService validates this invariant plus
+    /// Best ≤ MostLikely ≤ Worst at write time.</summary>
+    public decimal? BestCase { get; set; }
+
+    /// <summary>3-point estimate — expected cost.</summary>
+    public decimal? MostLikely { get; set; }
+
+    /// <summary>3-point estimate — catastrophic cost (worst realistic).</summary>
+    public decimal? WorstCase { get; set; }
+
+    /// <summary>Distribution shape used for Monte Carlo sampling
+    /// (T-S2-08). Triangular is the v1.0 default. Per
+    /// <see cref="DistributionShape"/> notes, the sampler itself
+    /// lands in T-S2-08; this column captures the analyst's choice
+    /// at quantitative-assessment time.</summary>
+    public DistributionShape? Distribution { get; set; }
+
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

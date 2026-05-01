@@ -92,6 +92,15 @@ public record UpdateRiskRequest(
 // of recording an assessment is the rationale); AssessedAt is set to
 // UtcNow server-side; the assessor is the calling user.
 public record RecordQualitativeAssessmentRequest(string Notes);
+// T-S2-07 quantitative assessment. All four required. Service validates
+// BestCase <= MostLikely <= WorstCase. To clear an existing 3-point
+// estimate, a future endpoint can use a separate "clear" action — v1.0
+// only supports setting / replacing.
+public record RecordQuantitativeAssessmentRequest(
+    decimal BestCase,
+    decimal MostLikely,
+    decimal WorstCase,
+    DistributionShape Distribution);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

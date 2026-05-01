@@ -17,3 +17,10 @@ public enum RiskStatus { Identified, Assessed, Active, Mitigated, Closed }
 // PMBOK 5 / 7 negative-risk response strategies. (Opportunity / positive-risk
 // strategies — exploit / share / enhance / accept — land in B-029 v1.1.)
 public enum ResponseStrategy { Avoid, Transfer, Mitigate, Accept }
+// 3-point estimate distribution shape (T-S2-07). Triangular is the simplest
+// (linear interpolation between Best, Most-Likely, Worst). PERT is the
+// classical PMBOK weighted-average shape (mean = (B + 4M + W) / 6,
+// stddev = (W - B) / 6). Beta is a generalisation of PERT used in
+// quantitative-risk literature; v1.0 ships parameter-shape selection
+// only, the actual distribution sampling lands in T-S2-08 Monte Carlo.
+public enum DistributionShape { Triangular, Pert, Beta }

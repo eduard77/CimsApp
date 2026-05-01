@@ -325,6 +325,11 @@ public class CimsDbContext(
             e.HasIndex(r => new { r.ProjectId, r.Status });
             e.HasIndex(r => new { r.ProjectId, r.Score });
             e.Property(r => r.ContingencyAmount).HasPrecision(18, 2);
+            // T-S2-07 3-point estimates — same precision as
+            // ContingencyAmount and the cost-domain decimals.
+            e.Property(r => r.BestCase).HasPrecision(18, 2);
+            e.Property(r => r.MostLikely).HasPrecision(18, 2);
+            e.Property(r => r.WorstCase).HasPrecision(18, 2);
             // All FKs NoAction for the same multi-cascade-path reasoning
             // that drives the Variation / Invitation configs. Project,
             // Category, and Owner each ultimately resolve to

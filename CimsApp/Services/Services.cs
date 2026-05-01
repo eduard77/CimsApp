@@ -1894,6 +1894,53 @@ public class RisksService(CimsDbContext db, AuditService audit)
         await db.SaveChangesAsync(ct);
         return risk;
     }
+
+    /// <summary>
+    /// Record a quantitative assessment on a Risk (T-S2-07). Sets the
+    /// 3-point estimate (BestCase, MostLikely, WorstCase) and the
+    /// chosen Distribution shape. Validates BestCase ≤ MostLikely ≤
+    /// WorstCase per the S2 kickoff Top-3-risks mitigation. Negative
+    /// values rejected (Risk impacts are non-negative; opportunity
+    /// "negative impact" semantics are a v1.1 backlog item B-029).
+    /// Re-assessment overwrites; passive history via AuditInterceptor
+    /// per-row JSON. Already-Closed risks rejected.
+    /// </summary>
+    public async Task<Risk> RecordQuantitativeAssessmentAsync(
+        Guid projectId, Guid riskId, RecordQuantitativeAssessmentRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var errors = new List<string>();
+        if (req.BestCase   < 0) errors.Add("BestCase must be >= 0");
+        if (req.MostLikely < 0) errors.Add("MostLikely must be >= 0");
+        if (req.WorstCase  < 0) errors.Add("WorstCase must be >= 0");
+        if (req.BestCase > req.MostLikely)   errors.Add("BestCase must be <= MostLikely");
+        if (req.MostLikely > req.WorstCase)  errors.Add("MostLikely must be <= WorstCase");
+        if (errors.Count > 0) throw new ValidationException(errors);
+
+        var risk = await db.Risks
+            .FirstOrDefaultAsync(r => r.Id == riskId && r.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Risk");
+
+        if (risk.Status == RiskStatus.Closed)
+            throw new ConflictException("Risk is Closed; cannot record assessment");
+
+        risk.BestCase     = req.BestCase;
+        risk.MostLikely   = req.MostLikely;
+        risk.WorstCase    = req.WorstCase;
+        risk.Distribution = req.Distribution;
+
+        await audit.WriteAsync(actorId, "risk.quantitative_assessed", "Risk",
+            risk.Id.ToString(), projectId,
+            detail: new
+            {
+                bestCase     = req.BestCase,
+                mostLikely   = req.MostLikely,
+                worstCase    = req.WorstCase,
+                distribution = req.Distribution.ToString(),
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return risk;
+    }
 }
 
 // ── CDE ───────────────────────────────────────────────────────────────────────
