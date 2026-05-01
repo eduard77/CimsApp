@@ -161,6 +161,14 @@ public record UpdateCommunicationItemRequest(
     CommunicationChannel? Channel,
     Guid? OwnerId,
     string? Notes);
+// T-S4-03 dependency add. Predecessor + Successor must both belong to
+// the same project (service-enforced); cycle rejected with
+// ConflictException. Lag in days, decimal, can be negative for lead.
+public record AddDependencyRequest(
+    Guid PredecessorId,
+    Guid SuccessorId,
+    DependencyType Type,
+    decimal Lag);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

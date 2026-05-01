@@ -2447,6 +2447,124 @@ public class CommunicationsService(CimsDbContext db, AuditService audit)
     }
 }
 
+/// <summary>
+/// ScheduleService — the schedule-domain CRUD + CPM solver entry
+/// point (T-S4-03 onwards, PAFM-SD F.5). Dependency Add / Remove
+/// arrives in T-S4-03; Activity CRUD + RecomputeAsync (CPM solve)
+/// arrive in T-S4-05 / T-S4-04.
+/// </summary>
+public class ScheduleService(CimsDbContext db, AuditService audit)
+{
+    /// <summary>
+    /// Add a directed dependency (Predecessor → Successor) to the
+    /// project's schedule. Both endpoints must be active Activity
+    /// rows belonging to the same project. Lag is bounded to
+    /// ±365 days to catch typos; the empirical limit could be
+    /// higher but real construction lags rarely exceed a year.
+    /// Self-loops and cycle-creating edges are rejected with
+    /// ConflictException — the caller fixes the dependency
+    /// topology, the service does not silently drop edges.
+    /// </summary>
+    public async Task<Dependency> AddDependencyAsync(
+        Guid projectId, AddDependencyRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (req.PredecessorId == req.SuccessorId)
+            throw new ValidationException(["Predecessor and Successor cannot be the same activity"]);
+        if (req.Lag < -365m || req.Lag > 365m)
+            throw new ValidationException(["Lag must be in the range -365..365 days"]);
+
+        var endpoints = await db.Activities
+            .Where(a => a.ProjectId == projectId
+                     && a.IsActive
+                     && (a.Id == req.PredecessorId || a.Id == req.SuccessorId))
+            .Select(a => a.Id)
+            .ToListAsync(ct);
+        if (!endpoints.Contains(req.PredecessorId) || !endpoints.Contains(req.SuccessorId))
+            throw new NotFoundException("Activity");
+
+        var duplicate = await db.Dependencies.AnyAsync(d =>
+            d.ProjectId == projectId
+         && d.PredecessorId == req.PredecessorId
+         && d.SuccessorId == req.SuccessorId, ct);
+        if (duplicate)
+            throw new ConflictException("Dependency already exists for this predecessor / successor pair");
+
+        // Cycle detection: pull every active activity ID + every
+        // existing dependency edge in the project, append the proposed
+        // edge, run DFS three-colour. Rejected on cycle (incl. self-loop
+        // — already gated above for fast feedback).
+        var allIds = await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive)
+            .Select(a => a.Id).ToListAsync(ct);
+        var existingEdges = await db.Dependencies
+            .Where(d => d.ProjectId == projectId)
+            .Select(d => new ValueTuple<Guid, Guid>(d.PredecessorId, d.SuccessorId))
+            .ToListAsync(ct);
+        var edges = new List<(Guid, Guid)>(existingEdges.Count + 1);
+        edges.AddRange(existingEdges);
+        edges.Add((req.PredecessorId, req.SuccessorId));
+        var cycle = CimsApp.Core.DependencyGraph.DetectCycle(allIds, edges);
+        if (cycle.HasCycle)
+            throw new ConflictException(
+                $"Adding this dependency would create a cycle: {string.Join(" -> ", cycle.CycleNodes)}");
+
+        var dep = new Dependency
+        {
+            ProjectId     = projectId,
+            PredecessorId = req.PredecessorId,
+            SuccessorId   = req.SuccessorId,
+            Type          = req.Type,
+            Lag           = req.Lag,
+        };
+        db.Dependencies.Add(dep);
+
+        await audit.WriteAsync(actorId, "dependency.added", "Dependency",
+            dep.Id.ToString(), projectId,
+            detail: new
+            {
+                predecessorId = req.PredecessorId,
+                successorId   = req.SuccessorId,
+                type          = req.Type.ToString(),
+                lag           = req.Lag,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return dep;
+    }
+
+    public async Task RemoveDependencyAsync(
+        Guid projectId, Guid dependencyId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var dep = await db.Dependencies
+            .FirstOrDefaultAsync(d => d.Id == dependencyId && d.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Dependency");
+
+        db.Dependencies.Remove(dep);
+        await audit.WriteAsync(actorId, "dependency.removed", "Dependency",
+            dep.Id.ToString(), projectId,
+            detail: new
+            {
+                predecessorId = dep.PredecessorId,
+                successorId   = dep.SuccessorId,
+                type          = dep.Type.ToString(),
+                lag           = dep.Lag,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<List<Dependency>> ListDependenciesAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        return await db.Dependencies
+            .Where(d => d.ProjectId == projectId)
+            .OrderBy(d => d.PredecessorId).ThenBy(d => d.SuccessorId)
+            .ToListAsync(ct);
+    }
+}
+
 // ── CDE ───────────────────────────────────────────────────────────────────────
 public class CdeService(CimsDbContext db, AuditService audit)
 {
