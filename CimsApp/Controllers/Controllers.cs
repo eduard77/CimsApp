@@ -657,6 +657,57 @@ public class RisksController(RisksService svc, CimsDbContext db) : CimsControlle
     }
 }
 
+// ── Stakeholder & Communications ──────────────────────────────────────────────
+// PAFM-SD F.4 (S3 module). T-S3-03 controller surface.
+[Route("api/v1/projects/{projectId:guid}/stakeholders")]
+public class StakeholdersController(StakeholdersService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListAsync(projectId, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Create(
+        Guid projectId, CreateStakeholderRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var s = await svc.CreateAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = s });
+    }
+
+    [HttpPut("{stakeholderId:guid}")]
+    public async Task<IActionResult> Update(
+        Guid projectId, Guid stakeholderId,
+        UpdateStakeholderRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var s = await svc.UpdateAsync(projectId, stakeholderId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = s });
+    }
+
+    [HttpPost("{stakeholderId:guid}/deactivate")]
+    public async Task<IActionResult> Deactivate(
+        Guid projectId, Guid stakeholderId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var s = await svc.DeactivateAsync(projectId, stakeholderId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = s });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

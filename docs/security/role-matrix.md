@@ -105,6 +105,15 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 | POST | `/api/v1/projects/{projectId}/risks/{riskId}/drawdowns` | authenticated | `TaskTeamMember+` | T-S2-09. Body `RecordRiskDrawdownRequest(amount, occurredAt, reference?, note?)`. Records a contingency drawdown event against the risk. Amount > 0 enforced; cumulative drawdowns may exceed Risk.ContingencyAmount (over-runs visible, not blocked). Already-Closed risks rejected. Cross-module link to specific Commitment / ActualCost rows deferred to v1.1 (B-030). Audit: `risk.drawdown_recorded` with `{ riskId, amount, occurredAt, reference }`. |
 | GET  | `/api/v1/projects/{projectId}/risks/{riskId}/drawdowns` | authenticated | membership | T-S2-09. List drawdowns recorded against a risk, ordered by OccurredAt asc then CreatedAt asc. |
 
+## Stakeholder & Communications
+
+| Method | Route | Global role | Project role | Comment |
+|---|---|---|---|---|
+| GET  | `/api/v1/projects/{projectId}/stakeholders` | authenticated | membership | T-S3-03. List active stakeholders ordered by Score desc then Name asc. |
+| POST | `/api/v1/projects/{projectId}/stakeholders` | authenticated | `TaskTeamMember+` | T-S3-03. Body `CreateStakeholderRequest(name, organisation?, role?, email?, phone?, power, interest, engagementApproach?, engagementNotes?)`. Power and Interest validated to 1..5; Score = P×I computed server-side. EngagementApproach auto-computed at 3-as-midpoint Mendelow if not supplied. Audit: `stakeholder.created`. |
+| PUT  | `/api/v1/projects/{projectId}/stakeholders/{stakeholderId}` | authenticated | `TaskTeamMember+` | T-S3-03. Body `UpdateStakeholderRequest` — all fields nullable for partial update. Power/Interest changes recompute Score and (if EngagementApproach not also explicitly set) the Mendelow quadrant. Already-deactivated rejected with `ConflictException`. No-op rejected with `ValidationException`. Audit: `stakeholder.updated` with `{ changedFields, scoreBefore, scoreAfter }`. |
+| POST | `/api/v1/projects/{projectId}/stakeholders/{stakeholderId}/deactivate` | authenticated | `ProjectManager+` | T-S3-03. Sets IsActive = false; idempotent rejection on already-deactivated. Audit: `stakeholder.deactivated` with `{ name }`. |
+
 ## Documents
 
 | Method | Route | Global role | Project role | Comment |

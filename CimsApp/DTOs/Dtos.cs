@@ -108,6 +108,32 @@ public record RecordRiskDrawdownRequest(
     DateTime OccurredAt,
     string? Reference,
     string? Note);
+// T-S3-03 stakeholder register. Name required + Power/Interest in 1..5;
+// EngagementApproach auto-computed from P/I at 3-as-midpoint by the
+// service unless the caller overrides.
+public record CreateStakeholderRequest(
+    string Name,
+    string? Organisation,
+    string? Role,
+    string? Email,
+    string? Phone,
+    int Power,
+    int Interest,
+    EngagementApproach? EngagementApproach,
+    string? EngagementNotes);
+// All fields nullable for partial update. Power/Interest changes
+// recompute Score and (unless EngagementApproach is explicitly set in
+// the same request) the Mendelow quadrant.
+public record UpdateStakeholderRequest(
+    string? Name,
+    string? Organisation,
+    string? Role,
+    string? Email,
+    string? Phone,
+    int? Power,
+    int? Interest,
+    EngagementApproach? EngagementApproach,
+    string? EngagementNotes);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.
