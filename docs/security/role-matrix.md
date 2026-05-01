@@ -90,6 +90,14 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 | POST | `/api/v1/projects/{projectId}/payment-certificates/{certificateId}/issue` | authenticated | `ProjectManager+` | T-S1-09. Transitions Draft → Issued. Snapshots the sum of Approved Variations into `IncludedVariationsAmount`; the certificate becomes immutable. Audit: `payment_certificate.issued`. |
 | GET  | `/api/v1/projects/{projectId}/payment-certificates/{certificateId}` | authenticated | membership | T-S1-09. Returns `PaymentCertificateDto` with computed gross / retention / net / previously-certified / amount-due. For Drafts the variations sum is a live preview; for Issued it is the snapshot. |
 
+## Risk & Opportunities
+
+| Method | Route | Global role | Project role | Comment |
+|---|---|---|---|---|
+| POST | `/api/v1/projects/{projectId}/risks` | authenticated | `TaskTeamMember+` | T-S2-04. Body `CreateRiskRequest(title, description?, categoryId?, probability, impact, ownerId?, responseStrategy?, responsePlan?, contingencyAmount?)`. Probability and Impact validated to 1..5; Score = P×I computed server-side. Status defaults to `Identified`. Optional CategoryId must belong to the same project. Audit: `risk.created`. |
+| PUT  | `/api/v1/projects/{projectId}/risks/{riskId}` | authenticated | `TaskTeamMember+` | T-S2-04. Body `UpdateRiskRequest` — all fields nullable for partial update. Probability or Impact changes recompute Score. Setting `Status = Closed` rejected (use the close endpoint so the audit history carries `risk.closed`). No-op calls (no fields set) rejected with `ValidationException`. Already-Closed risks rejected with `ConflictException`. Audit: `risk.updated` with `{ changedFields, scoreBefore, scoreAfter }`. |
+| POST | `/api/v1/projects/{projectId}/risks/{riskId}/close` | authenticated | `ProjectManager+` | T-S2-04. Sets Status = Closed; idempotent rejection on already-Closed. Audit: `risk.closed` with `{ previousStatus }`. |
+
 ## Documents
 
 | Method | Route | Global role | Project role | Comment |

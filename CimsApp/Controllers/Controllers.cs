@@ -534,6 +534,50 @@ public class VariationsController(VariationsService svc, CimsDbContext db) : Cim
     }
 }
 
+// ── Risk & Opportunities ──────────────────────────────────────────────────────
+// PAFM-SD F.3 (S2 module). T-S2-04 controller surface — Create, Update,
+// Close. Per S2 kickoff: TaskTeamMember+ for create/update,
+// ProjectManager+ for close.
+[Route("api/v1/projects/{projectId:guid}/risks")]
+public class RisksController(RisksService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpPost]
+    public async Task<IActionResult> Create(
+        Guid projectId, CreateRiskRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var risk = await svc.CreateAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = risk });
+    }
+
+    [HttpPut("{riskId:guid}")]
+    public async Task<IActionResult> Update(
+        Guid projectId, Guid riskId, UpdateRiskRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var risk = await svc.UpdateAsync(projectId, riskId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = risk });
+    }
+
+    [HttpPost("{riskId:guid}/close")]
+    public async Task<IActionResult> Close(
+        Guid projectId, Guid riskId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var risk = await svc.CloseAsync(projectId, riskId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = risk });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase
