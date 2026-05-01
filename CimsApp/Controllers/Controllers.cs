@@ -1073,6 +1073,102 @@ public class LpsController(LpsService svc, CimsDbContext db) : CimsControllerBas
     }
 }
 
+// ── Change Control (T-S5-05) ──────────────────────────────────────────────────
+// PAFM-SD F.6. Formal change request workflow with 5 transitions.
+[Route("api/v1/projects/{projectId:guid}/change-requests")]
+public class ChangeRequestsController(ChangeRequestService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(
+        Guid projectId,
+        [FromQuery] string? state = null,
+        [FromQuery] string? category = null,
+        CancellationToken ct = default)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        ChangeRequestState? s = Enum.TryParse<ChangeRequestState>(state, true, out var ps) ? ps : null;
+        ChangeRequestCategory? c = Enum.TryParse<ChangeRequestCategory>(category, true, out var pc) ? pc : null;
+        var rows = await svc.ListAsync(projectId, s, c, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpGet("{changeRequestId:guid}")]
+    public async Task<IActionResult> Get(
+        Guid projectId, Guid changeRequestId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var row = await svc.GetAsync(projectId, changeRequestId, ct);
+        return Ok(new { success = true, data = row });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Raise(
+        Guid projectId, RaiseChangeRequestRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var c = await svc.RaiseAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = c });
+    }
+
+    [HttpPost("{changeRequestId:guid}/assess")]
+    public async Task<IActionResult> Assess(
+        Guid projectId, Guid changeRequestId,
+        AssessChangeRequestRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var c = await svc.AssessAsync(projectId, changeRequestId, req,
+            CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = c });
+    }
+
+    [HttpPost("{changeRequestId:guid}/approve")]
+    public async Task<IActionResult> Approve(
+        Guid projectId, Guid changeRequestId,
+        ApproveChangeRequestRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var c = await svc.ApproveAsync(projectId, changeRequestId, req,
+            CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = c });
+    }
+
+    [HttpPost("{changeRequestId:guid}/reject")]
+    public async Task<IActionResult> Reject(
+        Guid projectId, Guid changeRequestId,
+        RejectChangeRequestRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var c = await svc.RejectAsync(projectId, changeRequestId, req,
+            CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = c });
+    }
+
+    [HttpPost("{changeRequestId:guid}/implement")]
+    public async Task<IActionResult> Implement(
+        Guid projectId, Guid changeRequestId,
+        ImplementChangeRequestRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var c = await svc.ImplementAsync(projectId, changeRequestId, req,
+            CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = c });
+    }
+
+    [HttpPost("{changeRequestId:guid}/close")]
+    public async Task<IActionResult> Close(
+        Guid projectId, Guid changeRequestId,
+        CloseChangeRequestRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var c = await svc.CloseAsync(projectId, changeRequestId, req,
+            CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = c });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase
