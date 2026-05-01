@@ -134,6 +134,13 @@ public record UpdateStakeholderRequest(
     int? Interest,
     EngagementApproach? EngagementApproach,
     string? EngagementNotes);
+// T-S3-06 engagement log entry. Summary is required (the whole point
+// of recording an interaction is the summary); ActionsAgreed optional.
+public record RecordEngagementRequest(
+    EngagementType Type,
+    DateTime OccurredAt,
+    string Summary,
+    string? ActionsAgreed);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

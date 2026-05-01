@@ -48,6 +48,7 @@ public class CimsDbContext(
     public DbSet<Risk>               Risks               => Set<Risk>();
     public DbSet<RiskDrawdown>       RiskDrawdowns       => Set<RiskDrawdown>();
     public DbSet<Stakeholder>        Stakeholders        => Set<Stakeholder>();
+    public DbSet<EngagementLog>      EngagementLogs      => Set<EngagementLog>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -376,6 +377,21 @@ public class CimsDbContext(
              .HasForeignKey(s => s.ProjectId).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<EngagementLog>(e =>
+        {
+            // Listings hit (StakeholderId, OccurredAt desc) for the
+            // per-stakeholder log and (ProjectId, OccurredAt desc)
+            // for project-wide engagement reporting.
+            e.HasIndex(g => new { g.StakeholderId, g.OccurredAt });
+            e.HasIndex(g => new { g.ProjectId, g.OccurredAt });
+            e.HasOne(g => g.Project).WithMany()
+             .HasForeignKey(g => g.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(g => g.Stakeholder).WithMany(s => s.Engagements)
+             .HasForeignKey(g => g.StakeholderId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(g => g.RecordedBy).WithMany()
+             .HasForeignKey(g => g.RecordedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -415,6 +431,7 @@ public class CimsDbContext(
         m.Entity<Risk>().HasQueryFilter(r => r.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<RiskDrawdown>().HasQueryFilter(d => d.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<Stakeholder>().HasQueryFilter(s => s.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<EngagementLog>().HasQueryFilter(g => g.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()

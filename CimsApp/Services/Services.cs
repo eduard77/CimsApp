@@ -2246,6 +2246,66 @@ public class StakeholdersService(CimsDbContext db, AuditService audit)
         if (interest < 1 || interest > 5) errors.Add("Interest must be 1..5");
         if (errors.Count > 0) throw new ValidationException(errors);
     }
+
+    /// <summary>
+    /// Record one interaction with a stakeholder (T-S3-06). Summary
+    /// required; ActionsAgreed optional. Cross-tenant /
+    /// wrong-project stakeholderIds 404 via the query filter.
+    /// </summary>
+    public async Task<EngagementLog> RecordEngagementAsync(
+        Guid projectId, Guid stakeholderId, RecordEngagementRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Summary))
+            throw new ValidationException(["Summary is required"]);
+
+        var stakeholderExists = await db.Stakeholders.AnyAsync(
+            s => s.Id == stakeholderId && s.ProjectId == projectId, ct);
+        if (!stakeholderExists) throw new NotFoundException("Stakeholder");
+
+        var entry = new EngagementLog
+        {
+            ProjectId     = projectId,
+            StakeholderId = stakeholderId,
+            Type          = req.Type,
+            OccurredAt    = req.OccurredAt,
+            Summary       = req.Summary.Trim(),
+            ActionsAgreed = req.ActionsAgreed,
+            RecordedById  = actorId,
+        };
+        db.EngagementLogs.Add(entry);
+
+        await audit.WriteAsync(actorId, "engagement.recorded", "EngagementLog",
+            entry.Id.ToString(), projectId,
+            detail: new
+            {
+                stakeholderId = stakeholderId,
+                type          = req.Type.ToString(),
+                occurredAt    = req.OccurredAt,
+                hasActions    = !string.IsNullOrWhiteSpace(req.ActionsAgreed),
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return entry;
+    }
+
+    /// <summary>List the most-recent engagements with a stakeholder,
+    /// newest first, capped at 200. Per the S3 kickoff Top-3 risks
+    /// throughput mitigation; full pagination is a v1.1 candidate.
+    /// Cross-tenant 404 via the query filter.</summary>
+    public async Task<List<EngagementLog>> ListEngagementsAsync(
+        Guid projectId, Guid stakeholderId, CancellationToken ct = default)
+    {
+        var stakeholderExists = await db.Stakeholders.AnyAsync(
+            s => s.Id == stakeholderId && s.ProjectId == projectId, ct);
+        if (!stakeholderExists) throw new NotFoundException("Stakeholder");
+
+        return await db.EngagementLogs
+            .Where(g => g.StakeholderId == stakeholderId)
+            .OrderByDescending(g => g.OccurredAt)
+            .ThenByDescending(g => g.CreatedAt)
+            .Take(200)
+            .ToListAsync(ct);
+    }
 }
 
 // ── CDE ───────────────────────────────────────────────────────────────────────

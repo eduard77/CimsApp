@@ -715,6 +715,29 @@ public class StakeholdersController(StakeholdersService svc, CimsDbContext db) :
             CurrentUserId, ClientIp, ClientAgent, ct);
         return Ok(new { success = true, data = s });
     }
+
+    // T-S3-06 engagement log: record + list per stakeholder.
+    [HttpPost("{stakeholderId:guid}/engagements")]
+    public async Task<IActionResult> RecordEngagement(
+        Guid projectId, Guid stakeholderId,
+        RecordEngagementRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var entry = await svc.RecordEngagementAsync(projectId, stakeholderId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = entry });
+    }
+
+    [HttpGet("{stakeholderId:guid}/engagements")]
+    public async Task<IActionResult> ListEngagements(
+        Guid projectId, Guid stakeholderId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListEngagementsAsync(projectId, stakeholderId, ct);
+        return Ok(new { success = true, data = rows });
+    }
 }
 
 // ── Documents ─────────────────────────────────────────────────────────────────

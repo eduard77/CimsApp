@@ -912,5 +912,48 @@ public class Stakeholder
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<EngagementLog> Engagements { get; set; } = [];
+}
+
+/// <summary>
+/// One recorded interaction with a stakeholder — meeting, call, email,
+/// letter etc. (T-S3-06, PAFM-SD F.4 third bullet — "Engagement log").
+/// Tenant-scoped indirectly through Project.AppointingPartyId. Listing
+/// is bounded to the most-recent 200 entries per stakeholder per the
+/// S2 kickoff Top-3-risks throughput mitigation; full pagination is a
+/// v1.1 candidate.
+/// </summary>
+public class EngagementLog
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Denormalised for the tenant query filter — same
+    /// pattern as RiskDrawdown.ProjectId. Always equals
+    /// Stakeholder.ProjectId; service enforces.</summary>
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid StakeholderId { get; set; }
+    public Stakeholder Stakeholder { get; set; } = null!;
+
+    public EngagementType Type { get; set; }
+
+    /// <summary>UTC date / time of the interaction. Distinct from
+    /// CreatedAt (row-write time) — meetings can be logged days
+    /// after they happened.</summary>
+    public DateTime OccurredAt { get; set; }
+
+    [Required] public string Summary { get; set; } = "";
+
+    /// <summary>Optional follow-up actions agreed in the interaction.
+    /// Free-text in v1.0; a v1.1 candidate is to link Actions to the
+    /// existing ActionItem entity (S0).</summary>
+    public string? ActionsAgreed { get; set; }
+
+    public Guid RecordedById { get; set; }
+    public User RecordedBy { get; set; } = null!;
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
