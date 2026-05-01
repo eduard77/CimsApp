@@ -44,22 +44,39 @@ public abstract class CimsControllerBase : ControllerBase
 // running the bootstrap → register flow against real SQL Server
 // (2026-04-29).
 [ApiController]
-[AllowAnonymous, Route("api/v1/auth")]
+[Route("api/v1/auth")]
 public class AuthController(AuthService svc) : ControllerBase
 {
-    [HttpPost("register"), EnableRateLimiting("anon-default")]
+    // Class-level [AllowAnonymous] used to live here. Per ASP.NET
+    // Core docs, [AllowAnonymous] at the controller level overrides
+    // EVERY [Authorize] attribute on every action — meaning the
+    // [Authorize, HttpGet("me")] and [Authorize, HttpPost("logout-everywhere")]
+    // declarations below were silently ignored, and those endpoints
+    // were reachable without a token. Calling /me without auth threw
+    // ArgumentNullException at Guid.Parse(User.FindFirstValue(NameIdentifier)!)
+    // → HTTP 500 instead of the expected 401. Found 2026-04-30 by
+    // smoke-testing /logout-everywhere then re-calling /me with the
+    // (now post-cutoff) access token.
+    //
+    // Fix: scope [AllowAnonymous] to the genuinely-anonymous actions
+    // (register / login / refresh / logout). Me + LogoutEverywhere
+    // get the default [Authorize] behaviour (auth middleware
+    // short-circuits unauthenticated callers with 401 before the
+    // action runs).
+
+    [AllowAnonymous, HttpPost("register"), EnableRateLimiting("anon-default")]
     public async Task<IActionResult> Register(RegisterRequest req) =>
         Created("", new { success = true, data = await svc.RegisterAsync(req) });
 
-    [HttpPost("login"), EnableRateLimiting("anon-login")]
+    [AllowAnonymous, HttpPost("login"), EnableRateLimiting("anon-login")]
     public async Task<IActionResult> Login(LoginRequest req) =>
         Ok(new { success = true, data = await svc.LoginAsync(req, Request.Headers.UserAgent.ToString(), HttpContext.Connection.RemoteIpAddress?.ToString()) });
 
-    [HttpPost("refresh"), EnableRateLimiting("anon-default")]
+    [AllowAnonymous, HttpPost("refresh"), EnableRateLimiting("anon-default")]
     public async Task<IActionResult> Refresh(RefreshRequest req)
     { var (a, r) = await svc.RefreshAsync(req.RefreshToken); return Ok(new { success = true, data = new { accessToken = a, refreshToken = r } }); }
 
-    [HttpPost("logout"), EnableRateLimiting("anon-default")]
+    [AllowAnonymous, HttpPost("logout"), EnableRateLimiting("anon-default")]
     public async Task<IActionResult> Logout(RefreshRequest req)
     { await svc.LogoutAsync(req.RefreshToken); return Ok(new { success = true }); }
 
