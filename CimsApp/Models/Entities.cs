@@ -654,3 +654,42 @@ public class Invitation
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// Risk Breakdown Structure (RBS) category for a Project. Hierarchical
+/// via self-referencing ParentId — a project's RBS is a tree of these
+/// rows. Tenant-scoped indirectly through Project.AppointingPartyId
+/// (query filter in CimsDbContext). Per PAFM-SD Appendix F.3 (S2 DoD)
+/// — the "Risk register with RBS taxonomy" bullet.
+///
+/// v1.0: per-project ownership (each project has its own RBS tree),
+/// matching the CostBreakdownItem pattern from S1. v1.1 candidate:
+/// org-level RBS templates that seed new projects (similar shape to
+/// the project-template feature already present for documents).
+/// </summary>
+public class RiskCategory
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Null for top-level RBS categories.</summary>
+    public Guid? ParentId { get; set; }
+    public RiskCategory? Parent { get; set; }
+    public ICollection<RiskCategory> Children { get; set; } = [];
+
+    /// <summary>WBS-style code, project-unique. Examples: "1", "1.1", "1.2.3".
+    /// Common RBS top-level codes: 1=Technical, 2=External, 3=Organisational,
+    /// 4=Project Management — but the convention is per-project, not enforced.</summary>
+    [Required, MaxLength(50)] public string Code { get; set; } = "";
+    [Required, MaxLength(200)] public string Name { get; set; } = "";
+    public string? Description { get; set; }
+
+    /// <summary>Sort order among siblings of the same Parent.</summary>
+    public int SortOrder { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
