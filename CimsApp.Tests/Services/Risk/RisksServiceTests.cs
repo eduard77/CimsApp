@@ -605,6 +605,136 @@ public class RisksServiceTests
     }
 
     [Fact]
+    public async Task RecordDrawdownAsync_persists_drawdown_and_emits_audit_twin()
+    {
+        var (options, tenant, _, userId, projectId, _) = BuildFixture();
+        Guid riskId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            riskId = (await svc.CreateAsync(projectId,
+                BasicCreate() with { ContingencyAmount = 50_000m }, userId)).Id;
+        }
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            await svc.RecordDrawdownAsync(projectId, riskId,
+                new RecordRiskDrawdownRequest(
+                    Amount: 12_500m,
+                    OccurredAt: new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc),
+                    Reference: "PO-1234",
+                    Note: "Geotechnical remediation invoice 1 of 2"),
+                userId);
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var d = await verify.RiskDrawdowns.SingleAsync();
+        Assert.Equal(riskId, d.RiskId);
+        Assert.Equal(projectId, d.ProjectId);
+        Assert.Equal(12_500m, d.Amount);
+        Assert.Equal("PO-1234", d.Reference);
+        Assert.Equal(userId, d.RecordedById);
+
+        var auditRow = await verify.AuditLogs.IgnoreQueryFilters()
+            .SingleAsync(a => a.Action == "risk.drawdown_recorded");
+        Assert.Contains("PO-1234", auditRow.Detail!);
+        Assert.Equal("RiskDrawdown", auditRow.Entity);
+    }
+
+    [Fact]
+    public async Task RecordDrawdownAsync_rejects_zero_or_negative_amount()
+    {
+        var (options, tenant, _, userId, projectId, _) = BuildFixture();
+        Guid riskId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            riskId = (await svc.CreateAsync(projectId, BasicCreate(), userId)).Id;
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new RisksService(db2, new AuditService(db2));
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            svc2.RecordDrawdownAsync(projectId, riskId,
+                new RecordRiskDrawdownRequest(0, DateTime.UtcNow, null, null), userId));
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            svc2.RecordDrawdownAsync(projectId, riskId,
+                new RecordRiskDrawdownRequest(-100, DateTime.UtcNow, null, null), userId));
+    }
+
+    [Fact]
+    public async Task RecordDrawdownAsync_allows_overrun_beyond_ContingencyAmount()
+    {
+        // Real construction practice: contingency overruns happen and
+        // must be tracked, not blocked. v1.0 records the overrun
+        // honestly; the UI can flag it.
+        var (options, tenant, _, userId, projectId, _) = BuildFixture();
+        Guid riskId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            riskId = (await svc.CreateAsync(projectId,
+                BasicCreate() with { ContingencyAmount = 10_000m }, userId)).Id;
+        }
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            await svc.RecordDrawdownAsync(projectId, riskId,
+                new RecordRiskDrawdownRequest(8_000, DateTime.UtcNow, null, "first call"), userId);
+            await svc.RecordDrawdownAsync(projectId, riskId,
+                new RecordRiskDrawdownRequest(7_500, DateTime.UtcNow, null, "overrun"), userId);
+        }
+
+        using var verify = new CimsDbContext(options, tenant);
+        var rows = await verify.RiskDrawdowns.ToListAsync();
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(15_500m, rows.Sum(r => r.Amount));
+    }
+
+    [Fact]
+    public async Task RecordDrawdownAsync_rejects_already_closed_risk()
+    {
+        var (options, tenant, _, userId, projectId, _) = BuildFixture();
+        Guid riskId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            riskId = (await svc.CreateAsync(projectId, BasicCreate(), userId)).Id;
+            await svc.CloseAsync(projectId, riskId, userId);
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new RisksService(db2, new AuditService(db2));
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            svc2.RecordDrawdownAsync(projectId, riskId,
+                new RecordRiskDrawdownRequest(100, DateTime.UtcNow, null, null), userId));
+    }
+
+    [Fact]
+    public async Task ListDrawdownsAsync_returns_drawdowns_ordered_by_OccurredAt()
+    {
+        var (options, tenant, _, userId, projectId, _) = BuildFixture();
+        Guid riskId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            riskId = (await svc.CreateAsync(projectId, BasicCreate(), userId)).Id;
+            await svc.RecordDrawdownAsync(projectId, riskId,
+                new RecordRiskDrawdownRequest(500, new DateTime(2026, 5, 10, 0, 0, 0, DateTimeKind.Utc), null, "later"), userId);
+            await svc.RecordDrawdownAsync(projectId, riskId,
+                new RecordRiskDrawdownRequest(300, new DateTime(2026, 5, 1,  0, 0, 0, DateTimeKind.Utc), null, "earlier"), userId);
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new RisksService(db2, new AuditService(db2));
+        var rows = await svc2.ListDrawdownsAsync(projectId, riskId);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("earlier", rows[0].Note);
+        Assert.Equal("later",   rows[1].Note);
+    }
+
+    [Fact]
     public async Task UpdateAsync_cross_tenant_lookup_404s()
     {
         var (options, tenant, _, userId, projectId, _) = BuildFixture();
