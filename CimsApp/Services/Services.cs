@@ -2211,6 +2211,22 @@ public class StakeholdersService(CimsDbContext db, AuditService audit)
             .ToListAsync(ct);
     }
 
+    /// <summary>
+    /// Build the 25-cell 5×5 Power/Interest matrix for the project —
+    /// one cell per (Power, Interest) coordinate with StakeholderIds.
+    /// Excludes deactivated rows (matrix is a live-register view).
+    /// </summary>
+    public async Task<List<CimsApp.Core.StakeholderMatrixCell>> GetMatrixAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        var live = await db.Stakeholders
+            .Where(s => s.ProjectId == projectId && s.IsActive)
+            .ToListAsync(ct);
+        return CimsApp.Core.StakeholderMatrix.Build(live);
+    }
+
     /// <summary>Mendelow quadrant from Power/Interest at fixed
     /// 3-as-midpoint. v1.1 candidate: per-tenant threshold override
     /// via S14 Admin Console.</summary>

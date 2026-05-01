@@ -320,6 +320,30 @@ public class StakeholdersServiceTests
     }
 
     [Fact]
+    public async Task GetMatrixAsync_returns_25_cells_excluding_deactivated()
+    {
+        var (options, tenant, _, userId, projectId) = BuildFixture();
+        Guid stale;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new StakeholdersService(db, new AuditService(db));
+            await svc.CreateAsync(projectId, Basic(4, 5) with { Name = "Live A" }, userId);
+            await svc.CreateAsync(projectId, Basic(4, 5) with { Name = "Live B" }, userId);
+            stale = (await svc.CreateAsync(projectId, Basic(4, 5) with { Name = "Stale" }, userId)).Id;
+            await svc.DeactivateAsync(projectId, stale, userId);
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new StakeholdersService(db2, new AuditService(db2));
+        var cells = await svc2.GetMatrixAsync(projectId);
+
+        Assert.Equal(25, cells.Count);
+        var c45 = cells.Single(c => c.Power == 4 && c.Interest == 5);
+        Assert.Equal(2, c45.StakeholderIds.Count);
+        Assert.DoesNotContain(stale, c45.StakeholderIds);
+    }
+
+    [Fact]
     public async Task UpdateAsync_cross_tenant_lookup_404s()
     {
         var (options, tenant, _, userId, projectId) = BuildFixture();

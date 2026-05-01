@@ -670,6 +670,15 @@ public class StakeholdersController(StakeholdersService svc, CimsDbContext db) :
         return Ok(new { success = true, data = rows });
     }
 
+    [HttpGet("matrix")]
+    public async Task<IActionResult> Matrix(Guid projectId, CancellationToken ct)
+    {
+        // Membership-only: heat-map is a read view.
+        await GetProjectRoleAsync(db, projectId);
+        var cells = await svc.GetMatrixAsync(projectId, ct);
+        return Ok(new { success = true, data = cells });
+    }
+
     [HttpPost]
     public async Task<IActionResult> Create(
         Guid projectId, CreateStakeholderRequest req, CancellationToken ct)
