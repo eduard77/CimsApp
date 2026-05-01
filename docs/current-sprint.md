@@ -5,7 +5,19 @@ non-trivial AI session so the model starts with the right scope anchor.
 
 ---
 
-**Status:** Between sprints — S1 closed, S2 not yet kicked off.
+**Status:** Sprint S2 active — Risk & Opportunities kickoff landed 2026-05-01.
+
+**Active sprint:** S2 — Risk & Opportunities. PAFM-SD Ch 6.4 / Appendix
+F.3. Branch `sprint/s2-risk-management` off master (`c0cfd53`). Kickoff
++ CR-004 capacity cut both committed Day 1; T-S2-02 (RiskCategory
+entity) is next. See `docs/sprint-log/s2.md`.
+
+CR-004 deferrals to v1.1 backlog: B-028 (schedule-side Monte Carlo),
+B-029 (opportunity register), B-030 (cross-module contingency
+drawdown link).
+
+**Last sprint:** S1 — Cost & Commercial. Merged at `330a09c`
+(2026-04-27). Tag `v0.1-sprint-s1`. See `docs/retrospectives/s1.md`.
 
 **Last sprint:** S1 — Cost & Commercial. Merged at `330a09c`
 (2026-04-27). Tag `v0.1-sprint-s1`. See
