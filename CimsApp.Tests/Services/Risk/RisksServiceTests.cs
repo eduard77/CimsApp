@@ -546,6 +546,65 @@ public class RisksServiceTests
     }
 
     [Fact]
+    public async Task RunMonteCarloAsync_excludes_unquantified_and_closed_risks()
+    {
+        var (options, tenant, _, userId, projectId, _) = BuildFixture();
+
+        // Three risks: A quantified + active, B unquantified, C
+        // quantified but closed. Only A should drive the simulation.
+        Guid aId, cId;
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            aId = (await svc.CreateAsync(projectId, BasicCreate() with { Title = "A" }, userId)).Id;
+            await svc.RecordQuantitativeAssessmentAsync(projectId, aId,
+                new RecordQuantitativeAssessmentRequest(100, 250, 800,
+                    DistributionShape.Triangular), userId);
+
+            await svc.CreateAsync(projectId, BasicCreate() with { Title = "B-unquantified" }, userId);
+
+            cId = (await svc.CreateAsync(projectId, BasicCreate() with { Title = "C-closed" }, userId)).Id;
+            await svc.RecordQuantitativeAssessmentAsync(projectId, cId,
+                new RecordQuantitativeAssessmentRequest(50, 75, 200,
+                    DistributionShape.Triangular), userId);
+            await svc.CloseAsync(projectId, cId, userId);
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new RisksService(db2, new AuditService(db2));
+        var r = await svc2.RunMonteCarloAsync(projectId, iterations: 2000, seed: 17);
+
+        Assert.Equal(2000, r.IterationsRun);
+        // A is the only contributor: P=4 → 0.7 occurrence on each
+        // iteration sampling Triangular(100, 250, 800). Theoretical
+        // mean ≈ 0.7 * (100 + 250 + 800) / 3 ≈ 269.
+        // ±20% tolerance comfortably covers stochastic noise + the
+        // C-closed exclusion (if C leaked in the mean would be much
+        // higher).
+        Assert.InRange(r.Mean, 215, 325);
+        Assert.True(r.P50 <= r.P90);
+    }
+
+    [Fact]
+    public async Task RunMonteCarloAsync_with_no_quantified_risks_returns_zero_distribution()
+    {
+        var (options, tenant, _, userId, projectId, _) = BuildFixture();
+        using (var db = new CimsDbContext(options, tenant))
+        {
+            var svc = new RisksService(db, new AuditService(db));
+            // Two unquantified risks — distribution defaults to null.
+            await svc.CreateAsync(projectId, BasicCreate(), userId);
+            await svc.CreateAsync(projectId, BasicCreate() with { Title = "Other" }, userId);
+        }
+
+        using var db2 = new CimsDbContext(options, tenant);
+        var svc2 = new RisksService(db2, new AuditService(db2));
+        var r = await svc2.RunMonteCarloAsync(projectId, iterations: 1000, seed: 1);
+        Assert.Equal(0, r.Mean);
+        Assert.Equal(0, r.P90);
+    }
+
+    [Fact]
     public async Task UpdateAsync_cross_tenant_lookup_404s()
     {
         var (options, tenant, _, userId, projectId, _) = BuildFixture();
