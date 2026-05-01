@@ -47,6 +47,7 @@ public class CimsDbContext(
     public DbSet<RiskCategory>       RiskCategories      => Set<RiskCategory>();
     public DbSet<Risk>               Risks               => Set<Risk>();
     public DbSet<RiskDrawdown>       RiskDrawdowns       => Set<RiskDrawdown>();
+    public DbSet<Stakeholder>        Stakeholders        => Set<Stakeholder>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -364,6 +365,17 @@ public class CimsDbContext(
              .HasForeignKey(d => d.RecordedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<Stakeholder>(e =>
+        {
+            // Register listings hit (ProjectId, Score) for "highest
+            // priority first" and (ProjectId, IsActive) for filtering
+            // out deactivated rows.
+            e.HasIndex(s => new { s.ProjectId, s.Score });
+            e.HasIndex(s => new { s.ProjectId, s.IsActive });
+            e.HasOne(s => s.Project).WithMany()
+             .HasForeignKey(s => s.ProjectId).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -402,6 +414,7 @@ public class CimsDbContext(
         m.Entity<RiskCategory>().HasQueryFilter(r => r.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<Risk>().HasQueryFilter(r => r.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<RiskDrawdown>().HasQueryFilter(d => d.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Stakeholder>().HasQueryFilter(s => s.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -425,6 +438,7 @@ public class CimsDbContext(
             else if (e.Entity is Commitment cm) cm.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is RiskCategory rc) rc.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is Risk risk) risk.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is Stakeholder s) s.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

@@ -853,3 +853,64 @@ public class RiskDrawdown
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// A project stakeholder (T-S3-02, PAFM-SD F.4 first bullet —
+/// "Stakeholder register with power/interest scoring"). Tenant-scoped
+/// indirectly through Project.AppointingPartyId.
+///
+/// Identity fields (Name, Organisation as free text, Role, Email,
+/// Phone) describe the person; Power and Impact 1..5 drive the
+/// Mendelow Power/Interest grid. EngagementApproach is auto-computed
+/// by the service from Power/Interest at 3-as-midpoint unless the
+/// caller overrides — same denormalisation pattern as Risk.Score.
+/// EngagementNotes is the free-text plan for engagement; together
+/// with EngagementApproach this satisfies F.4's second bullet
+/// ("Engagement plan per stakeholder") without a separate entity.
+/// </summary>
+public class Stakeholder
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    [Required, MaxLength(200)] public string Name { get; set; } = "";
+
+    /// <summary>Free-text organisation name (NOT a FK to the Organisation
+    /// entity — stakeholders typically belong to external organisations
+    /// outside the tenant's own row set, e.g. the local authority,
+    /// a neighbour, the principal contractor's client). v1.1 candidate:
+    /// optional FK to Organisation when the stakeholder is from a
+    /// known tenant, with this field as a fallback.</summary>
+    [MaxLength(200)] public string? Organisation { get; set; }
+
+    [MaxLength(100)] public string? Role { get; set; }
+
+    [MaxLength(200)] public string? Email { get; set; }
+    [MaxLength(50)]  public string? Phone { get; set; }
+
+    /// <summary>1-5 Mendelow power axis. Service-enforced range.</summary>
+    public int Power { get; set; }
+
+    /// <summary>1-5 Mendelow interest axis. Service-enforced range.</summary>
+    public int Interest { get; set; }
+
+    /// <summary>Persisted P×I — denormalised for fast queries / heat-map
+    /// rendering. Recomputed by the service on every Power or Interest
+    /// change. Same pattern as Risk.Score.</summary>
+    public int Score { get; set; }
+
+    /// <summary>Mendelow quadrant — auto-computed from Power/Interest at
+    /// 3-as-midpoint by the service unless the caller overrides.
+    /// Per-tenant threshold override is S14 Admin Console territory.</summary>
+    public EngagementApproach EngagementApproach { get; set; } = EngagementApproach.Monitor;
+
+    /// <summary>Free-text engagement plan — what cadence, what messages,
+    /// who owns the relationship.</summary>
+    public string? EngagementNotes { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+

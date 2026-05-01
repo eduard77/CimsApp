@@ -24,3 +24,15 @@ public enum ResponseStrategy { Avoid, Transfer, Mitigate, Accept }
 // quantitative-risk literature; v1.0 ships parameter-shape selection
 // only, the actual distribution sampling lands in T-S2-08 Monte Carlo.
 public enum DistributionShape { Triangular, Pert, Beta }
+
+// S3 Stakeholder & Communications module (PAFM-SD F.4).
+// Mendelow's Power/Interest grid quadrants. Service auto-computes the
+// approach from Power and Interest at write time (3-as-midpoint);
+// v1.1 candidate: per-tenant threshold override in S14 Admin Console.
+public enum EngagementApproach { ManageClosely, KeepSatisfied, KeepInformed, Monitor }
+// Type of recorded interaction with a stakeholder (T-S3-06).
+public enum EngagementType { Meeting, Call, Email, Letter, Workshop, Other }
+// Frequency / channel for a row in the project-level communications
+// matrix (T-S3-07).
+public enum CommunicationFrequency { Daily, Weekly, Fortnightly, Monthly, Quarterly, AdHoc }
+public enum CommunicationChannel { Email, Meeting, Portal, Letter, Phone, Other }
