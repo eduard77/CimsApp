@@ -534,6 +534,129 @@ public class VariationsController(VariationsService svc, CimsDbContext db) : Cim
     }
 }
 
+// ── Risk & Opportunities ──────────────────────────────────────────────────────
+// PAFM-SD F.3 (S2 module). T-S2-04 controller surface — Create, Update,
+// Close. Per S2 kickoff: TaskTeamMember+ for create/update,
+// ProjectManager+ for close.
+[Route("api/v1/projects/{projectId:guid}/risks")]
+public class RisksController(RisksService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
+    {
+        // Membership-only: any project member can read the register.
+        await GetProjectRoleAsync(db, projectId);
+        var risks = await svc.ListAsync(projectId, ct);
+        return Ok(new { success = true, data = risks });
+    }
+
+    [HttpGet("matrix")]
+    public async Task<IActionResult> Matrix(Guid projectId, CancellationToken ct)
+    {
+        // Membership-only: heat-map is a read view.
+        await GetProjectRoleAsync(db, projectId);
+        var cells = await svc.GetMatrixAsync(projectId, ct);
+        return Ok(new { success = true, data = cells });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Create(
+        Guid projectId, CreateRiskRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var risk = await svc.CreateAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = risk });
+    }
+
+    [HttpPut("{riskId:guid}")]
+    public async Task<IActionResult> Update(
+        Guid projectId, Guid riskId, UpdateRiskRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var risk = await svc.UpdateAsync(projectId, riskId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = risk });
+    }
+
+    [HttpPost("{riskId:guid}/close")]
+    public async Task<IActionResult> Close(
+        Guid projectId, Guid riskId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var risk = await svc.CloseAsync(projectId, riskId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = risk });
+    }
+
+    [HttpPost("{riskId:guid}/assess")]
+    public async Task<IActionResult> Assess(
+        Guid projectId, Guid riskId,
+        RecordQualitativeAssessmentRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var risk = await svc.RecordQualitativeAssessmentAsync(projectId, riskId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = risk });
+    }
+
+    [HttpPost("{riskId:guid}/quantify")]
+    public async Task<IActionResult> Quantify(
+        Guid projectId, Guid riskId,
+        RecordQuantitativeAssessmentRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var risk = await svc.RecordQuantitativeAssessmentAsync(projectId, riskId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = risk });
+    }
+
+    [HttpGet("monte-carlo")]
+    public async Task<IActionResult> MonteCarlo(
+        Guid projectId,
+        [FromQuery] int iterations = 10_000,
+        [FromQuery] int? seed = null,
+        CancellationToken ct = default)
+    {
+        // Membership-only: simulation is a read-side aggregation.
+        await GetProjectRoleAsync(db, projectId);
+        var result = await svc.RunMonteCarloAsync(projectId, iterations, seed, ct);
+        return Ok(new { success = true, data = result });
+    }
+
+    [HttpPost("{riskId:guid}/drawdowns")]
+    public async Task<IActionResult> RecordDrawdown(
+        Guid projectId, Guid riskId,
+        RecordRiskDrawdownRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var d = await svc.RecordDrawdownAsync(projectId, riskId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = d });
+    }
+
+    [HttpGet("{riskId:guid}/drawdowns")]
+    public async Task<IActionResult> ListDrawdowns(
+        Guid projectId, Guid riskId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListDrawdownsAsync(projectId, riskId, ct);
+        return Ok(new { success = true, data = rows });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

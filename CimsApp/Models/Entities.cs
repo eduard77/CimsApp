@@ -654,3 +654,202 @@ public class Invitation
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// Risk Breakdown Structure (RBS) category for a Project. Hierarchical
+/// via self-referencing ParentId — a project's RBS is a tree of these
+/// rows. Tenant-scoped indirectly through Project.AppointingPartyId
+/// (query filter in CimsDbContext). Per PAFM-SD Appendix F.3 (S2 DoD)
+/// — the "Risk register with RBS taxonomy" bullet.
+///
+/// v1.0: per-project ownership (each project has its own RBS tree),
+/// matching the CostBreakdownItem pattern from S1. v1.1 candidate:
+/// org-level RBS templates that seed new projects (similar shape to
+/// the project-template feature already present for documents).
+/// </summary>
+public class RiskCategory
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Null for top-level RBS categories.</summary>
+    public Guid? ParentId { get; set; }
+    public RiskCategory? Parent { get; set; }
+    public ICollection<RiskCategory> Children { get; set; } = [];
+
+    /// <summary>WBS-style code, project-unique. Examples: "1", "1.1", "1.2.3".
+    /// Common RBS top-level codes: 1=Technical, 2=External, 3=Organisational,
+    /// 4=Project Management — but the convention is per-project, not enforced.</summary>
+    [Required, MaxLength(50)] public string Code { get; set; } = "";
+    [Required, MaxLength(200)] public string Name { get; set; } = "";
+    public string? Description { get; set; }
+
+    /// <summary>Sort order among siblings of the same Parent.</summary>
+    public int SortOrder { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// A project risk per PAFM-SD Appendix F.3 / PMBOK 5 Risk knowledge area
+/// (T-S2-03). Tenant-scoped indirectly through Project.AppointingPartyId.
+///
+/// v1.0 ships the identity, classification, qualitative scoring (P×I on
+/// the 5×5 matrix per F.3), response strategy, and contingency amount.
+/// 3-point estimates (BestCase / MostLikely / WorstCase + Distribution
+/// choice) for quantitative assessment land in T-S2-07 via a separate
+/// migration. Qualitative-assessment metadata (notes, assessor, date)
+/// lands in T-S2-06. The two are deferred to keep T-S2-03 focused on
+/// the identity and base scoring shape — same incremental pattern S1
+/// used for CostBreakdownItem (T-S1-02) → Budget (T-S1-04) → Schedule
+/// (B-017).
+/// </summary>
+public class Risk
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Optional RBS classification. Null = unclassified
+    /// (acceptable while a risk is initially registered).</summary>
+    public Guid? CategoryId { get; set; }
+    public RiskCategory? Category { get; set; }
+
+    [Required, MaxLength(200)] public string Title { get; set; } = "";
+    public string? Description { get; set; }
+
+    /// <summary>1-5 on the standard 5×5 matrix. Service layer enforces
+    /// the range at write time.</summary>
+    public int Probability { get; set; }
+
+    /// <summary>1-5 on the standard 5×5 matrix. Service layer enforces
+    /// the range at write time.</summary>
+    public int Impact { get; set; }
+
+    /// <summary>Persisted P×I — denormalised for fast queries / heat-map
+    /// rendering. Recomputed by the service on every Probability or
+    /// Impact change. Range 1..25. Numeric only — threshold mapping
+    /// (low / medium / high) belongs to S14 Admin Console as a
+    /// per-tenant setting per the S2 kickoff Top-3-risks mitigation.</summary>
+    public int Score { get; set; }
+
+    public RiskStatus Status { get; set; } = RiskStatus.Identified;
+
+    /// <summary>The responsible owner. Null at registration; set when
+    /// the risk is assessed and assigned (T-S2-04 service path).</summary>
+    public Guid? OwnerId { get; set; }
+    public User? Owner { get; set; }
+
+    /// <summary>F.3 negative-risk response. Null while the risk is in
+    /// the Identified / Assessed phase pre-decision.</summary>
+    public ResponseStrategy? ResponseStrategy { get; set; }
+
+    /// <summary>Free-text plan describing how the chosen strategy is
+    /// being executed. Set when ResponseStrategy is set.</summary>
+    public string? ResponsePlan { get; set; }
+
+    /// <summary>Allocated contingency for this specific risk (if the
+    /// response is Accept or Mitigate with reserved budget). v1.0:
+    /// drawdown amounts manually tracked per-risk via T-S2-09's
+    /// RiskDrawdown entity. Cross-module link to specific Commitments /
+    /// Actuals deferred to v1.1 — see B-030.</summary>
+    public decimal? ContingencyAmount { get; set; }
+
+    /// <summary>T-S2-06 qualitative assessment — free-text rationale
+    /// for the Probability/Impact scores. Null until first assessment.
+    /// Subsequent re-assessments overwrite (history is captured
+    /// passively via the AuditInterceptor's per-row before/after
+    /// JSON; an explicit assessment-history entity is a v1.1
+    /// candidate if real workflows need point-in-time queries).</summary>
+    public string? QualitativeNotes { get; set; }
+
+    /// <summary>UTC timestamp of the most recent qualitative
+    /// assessment. Bumped by RecordQualitativeAssessmentAsync.</summary>
+    public DateTime? AssessedAt { get; set; }
+
+    /// <summary>The assessor — typically the Owner or a delegated
+    /// risk analyst. Null until first assessment.</summary>
+    public Guid? AssessedById { get; set; }
+    public User? AssessedBy { get; set; }
+
+    /// <summary>T-S2-07 quantitative assessment — 3-point estimate.
+    /// Best-case (lowest realistic cost) of the risk's monetary impact.
+    /// Currency follows Project.Currency. Either all three (Best /
+    /// MostLikely / Worst) are set together with a Distribution, or
+    /// all four are null. RisksService validates this invariant plus
+    /// Best ≤ MostLikely ≤ Worst at write time.</summary>
+    public decimal? BestCase { get; set; }
+
+    /// <summary>3-point estimate — expected cost.</summary>
+    public decimal? MostLikely { get; set; }
+
+    /// <summary>3-point estimate — catastrophic cost (worst realistic).</summary>
+    public decimal? WorstCase { get; set; }
+
+    /// <summary>Distribution shape used for Monte Carlo sampling
+    /// (T-S2-08). Triangular is the v1.0 default. Per
+    /// <see cref="DistributionShape"/> notes, the sampler itself
+    /// lands in T-S2-08; this column captures the analyst's choice
+    /// at quantitative-assessment time.</summary>
+    public DistributionShape? Distribution { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<RiskDrawdown> Drawdowns { get; set; } = [];
+}
+
+/// <summary>
+/// One drawdown event against a Risk's allocated contingency
+/// (T-S2-09, PAFM-SD F.3 fifth bullet — "Contingency drawdown
+/// tracking"). v1.0 records amount + date + free-text reference;
+/// cross-module link to specific Commitments / ActualCosts is
+/// deferred to v1.1 (B-030 per CR-004) so the v1.0 audit trail
+/// stays self-contained even before the Cost-domain integration
+/// lands. Tenant-scoped indirectly through Risk → Project.
+/// </summary>
+public class RiskDrawdown
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Denormalised for the tenant query filter — matches
+    /// the rest of the cost-domain entities. Always equals
+    /// Risk.ProjectId; service enforces.</summary>
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid RiskId { get; set; }
+    public Risk Risk { get; set; } = null!;
+
+    /// <summary>Amount drawn down, in Project.Currency. Must be > 0.
+    /// Cumulative drawdowns may exceed Risk.ContingencyAmount —
+    /// over-runs are tracked honestly rather than blocked, matching
+    /// real construction practice where contingency overruns happen
+    /// and need to be visible.</summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>UTC date the drawdown was incurred / recorded —
+    /// distinct from CreatedAt which is row-write time.</summary>
+    public DateTime OccurredAt { get; set; }
+
+    /// <summary>Free-text reference: PO number, invoice number, or
+    /// description of the event triggering the drawdown. The richer
+    /// "link to specific Commitment / ActualCost row" is the v1.1
+    /// B-030 deferral.</summary>
+    [MaxLength(200)] public string? Reference { get; set; }
+
+    public string? Note { get; set; }
+
+    /// <summary>Who recorded the drawdown (typically the Risk Owner
+    /// or a delegated cost engineer).</summary>
+    public Guid RecordedById { get; set; }
+    public User RecordedBy { get; set; } = null!;
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+

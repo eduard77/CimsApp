@@ -4,6 +4,7 @@ using CimsApp.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CimsApp.Migrations
 {
     [DbContext(typeof(CimsDbContext))]
-    partial class CimsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260501094224_AddRiskQuantitativeEstimates")]
+    partial class AddRiskQuantitativeEstimates
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1205,49 +1208,6 @@ namespace CimsApp.Migrations
                     b.ToTable("RiskCategories");
                 });
 
-            modelBuilder.Entity("CimsApp.Models.RiskDrawdown", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("Amount")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Note")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("OccurredAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("RecordedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Reference")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<Guid>("RiskId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("RecordedById");
-
-                    b.HasIndex("ProjectId", "OccurredAt");
-
-                    b.HasIndex("RiskId", "OccurredAt");
-
-                    b.ToTable("RiskDrawdowns");
-                });
-
             modelBuilder.Entity("CimsApp.Models.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1774,33 +1734,6 @@ namespace CimsApp.Migrations
                     b.Navigation("Project");
                 });
 
-            modelBuilder.Entity("CimsApp.Models.RiskDrawdown", b =>
-                {
-                    b.HasOne("CimsApp.Models.Project", "Project")
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.User", "RecordedBy")
-                        .WithMany()
-                        .HasForeignKey("RecordedById")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.Risk", "Risk")
-                        .WithMany("Drawdowns")
-                        .HasForeignKey("RiskId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.Navigation("Project");
-
-                    b.Navigation("RecordedBy");
-
-                    b.Navigation("Risk");
-                });
-
             modelBuilder.Entity("CimsApp.Models.User", b =>
                 {
                     b.HasOne("CimsApp.Models.Organisation", "Organisation")
@@ -1898,11 +1831,6 @@ namespace CimsApp.Migrations
             modelBuilder.Entity("CimsApp.Models.Rfi", b =>
                 {
                     b.Navigation("Documents");
-                });
-
-            modelBuilder.Entity("CimsApp.Models.Risk", b =>
-                {
-                    b.Navigation("Drawdowns");
                 });
 
             modelBuilder.Entity("CimsApp.Models.RiskCategory", b =>

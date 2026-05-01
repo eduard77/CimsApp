@@ -44,6 +44,9 @@ public class CimsDbContext(
     public DbSet<ActualCost>         ActualCosts         => Set<ActualCost>();
     public DbSet<Variation>          Variations          => Set<Variation>();
     public DbSet<PaymentCertificate> PaymentCertificates => Set<PaymentCertificate>();
+    public DbSet<RiskCategory>       RiskCategories      => Set<RiskCategory>();
+    public DbSet<Risk>               Risks               => Set<Risk>();
+    public DbSet<RiskDrawdown>       RiskDrawdowns       => Set<RiskDrawdown>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -297,6 +300,70 @@ public class CimsDbContext(
              .HasForeignKey(v => v.DecidedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<RiskCategory>(e =>
+        {
+            // RBS Code unique within a project at any depth in the tree —
+            // mirrors the CostBreakdownItem index pattern.
+            e.HasIndex(r => new { r.ProjectId, r.Code }).IsUnique();
+            // Fast lookup of children for tree traversal.
+            e.HasIndex(r => new { r.ProjectId, r.ParentId });
+            e.HasOne(r => r.Project).WithMany()
+             .HasForeignKey(r => r.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            // Self-referencing tree: NoAction on parent so deleting a
+            // category does not silently orphan its children — service
+            // layer in T-S2-04 onwards handles cascade decisions
+            // explicitly. Same shape as CostBreakdownItem.
+            e.HasOne(r => r.Parent).WithMany(r => r.Children)
+             .HasForeignKey(r => r.ParentId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<Risk>(e =>
+        {
+            // Heat-map / register queries hit (ProjectId, Status) and
+            // (ProjectId, Score) frequently; index both. Score
+            // descending matches the natural "highest risks first"
+            // listing order.
+            e.HasIndex(r => new { r.ProjectId, r.Status });
+            e.HasIndex(r => new { r.ProjectId, r.Score });
+            e.Property(r => r.ContingencyAmount).HasPrecision(18, 2);
+            // T-S2-07 3-point estimates — same precision as
+            // ContingencyAmount and the cost-domain decimals.
+            e.Property(r => r.BestCase).HasPrecision(18, 2);
+            e.Property(r => r.MostLikely).HasPrecision(18, 2);
+            e.Property(r => r.WorstCase).HasPrecision(18, 2);
+            // All FKs NoAction for the same multi-cascade-path reasoning
+            // that drives the Variation / Invitation configs. Project,
+            // Category, and Owner each ultimately resolve to
+            // Organisation.
+            e.HasOne(r => r.Project).WithMany()
+             .HasForeignKey(r => r.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(r => r.Category).WithMany()
+             .HasForeignKey(r => r.CategoryId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(r => r.Owner).WithMany()
+             .HasForeignKey(r => r.OwnerId).OnDelete(DeleteBehavior.NoAction);
+            // T-S2-06 qualitative assessment FK — also NoAction.
+            e.HasOne(r => r.AssessedBy).WithMany()
+             .HasForeignKey(r => r.AssessedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<RiskDrawdown>(e =>
+        {
+            // Drawdown listings hit (RiskId, OccurredAt) and
+            // (ProjectId, OccurredAt) for register and project rollup
+            // views; index both.
+            e.HasIndex(d => new { d.RiskId, d.OccurredAt });
+            e.HasIndex(d => new { d.ProjectId, d.OccurredAt });
+            e.Property(d => d.Amount).HasPrecision(18, 2);
+            // All FKs NoAction for the same multi-cascade-path reasoning
+            // that drives the rest of the cost-domain configs.
+            e.HasOne(d => d.Project).WithMany()
+             .HasForeignKey(d => d.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(d => d.Risk).WithMany(r => r.Drawdowns)
+             .HasForeignKey(d => d.RiskId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(d => d.RecordedBy).WithMany()
+             .HasForeignKey(d => d.RecordedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -332,6 +399,9 @@ public class CimsDbContext(
         m.Entity<ActualCost>().HasQueryFilter(a => a.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<Variation>().HasQueryFilter(v => v.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<PaymentCertificate>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<RiskCategory>().HasQueryFilter(r => r.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Risk>().HasQueryFilter(r => r.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<RiskDrawdown>().HasQueryFilter(d => d.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -352,6 +422,9 @@ public class CimsDbContext(
             else if (e.Entity is Rfi r)      r.UpdatedAt  = DateTime.UtcNow;
             else if (e.Entity is ActionItem a) a.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is CostBreakdownItem cbi) cbi.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is Commitment cm) cm.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is RiskCategory rc) rc.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is Risk risk) risk.UpdatedAt = DateTime.UtcNow;
         }
     }
 }
