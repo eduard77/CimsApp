@@ -335,6 +335,9 @@ public class CimsDbContext(
              .HasForeignKey(r => r.CategoryId).OnDelete(DeleteBehavior.NoAction);
             e.HasOne(r => r.Owner).WithMany()
              .HasForeignKey(r => r.OwnerId).OnDelete(DeleteBehavior.NoAction);
+            // T-S2-06 qualitative assessment FK — also NoAction.
+            e.HasOne(r => r.AssessedBy).WithMany()
+             .HasForeignKey(r => r.AssessedById).OnDelete(DeleteBehavior.NoAction);
         });
 
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────

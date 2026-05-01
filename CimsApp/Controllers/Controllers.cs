@@ -594,6 +594,19 @@ public class RisksController(RisksService svc, CimsDbContext db) : CimsControlle
             CurrentUserId, ClientIp, ClientAgent, ct);
         return Ok(new { success = true, data = risk });
     }
+
+    [HttpPost("{riskId:guid}/assess")]
+    public async Task<IActionResult> Assess(
+        Guid projectId, Guid riskId,
+        RecordQualitativeAssessmentRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var risk = await svc.RecordQualitativeAssessmentAsync(projectId, riskId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = risk });
+    }
 }
 
 // ── Documents ─────────────────────────────────────────────────────────────────

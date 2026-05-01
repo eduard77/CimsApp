@@ -1853,6 +1853,47 @@ public class RisksService(CimsDbContext db, AuditService audit)
             .ToListAsync(ct);
         return CimsApp.Core.RiskMatrix.Build(live);
     }
+
+    /// <summary>
+    /// Record a qualitative assessment on a Risk (T-S2-06). Sets
+    /// QualitativeNotes, stamps AssessedAt = UtcNow, AssessedById =
+    /// caller. Re-assessment overwrites the previous notes (history
+    /// captured passively via the AuditInterceptor's per-row
+    /// before/after JSON; an explicit assessment-history entity is a
+    /// v1.1 candidate). Bumps Status from Identified to Assessed if
+    /// currently Identified — other statuses stay as they were.
+    /// Already-Closed risks rejected.
+    /// </summary>
+    public async Task<Risk> RecordQualitativeAssessmentAsync(
+        Guid projectId, Guid riskId, RecordQualitativeAssessmentRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Notes))
+            throw new ValidationException(["Notes is required"]);
+
+        var risk = await db.Risks
+            .FirstOrDefaultAsync(r => r.Id == riskId && r.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Risk");
+
+        if (risk.Status == RiskStatus.Closed)
+            throw new ConflictException("Risk is Closed; cannot record assessment");
+
+        var statusChanged = risk.Status == RiskStatus.Identified;
+        risk.QualitativeNotes = req.Notes;
+        risk.AssessedAt       = DateTime.UtcNow;
+        risk.AssessedById     = actorId;
+        if (statusChanged) risk.Status = RiskStatus.Assessed;
+
+        await audit.WriteAsync(actorId, "risk.qualitative_assessed", "Risk",
+            risk.Id.ToString(), projectId,
+            detail: new
+            {
+                statusTransition = statusChanged ? "Identified -> Assessed" : null,
+                notesLength      = req.Notes.Length,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return risk;
+    }
 }
 
 // ── CDE ───────────────────────────────────────────────────────────────────────

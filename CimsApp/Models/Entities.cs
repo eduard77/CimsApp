@@ -759,6 +759,23 @@ public class Risk
     /// Actuals deferred to v1.1 — see B-030.</summary>
     public decimal? ContingencyAmount { get; set; }
 
+    /// <summary>T-S2-06 qualitative assessment — free-text rationale
+    /// for the Probability/Impact scores. Null until first assessment.
+    /// Subsequent re-assessments overwrite (history is captured
+    /// passively via the AuditInterceptor's per-row before/after
+    /// JSON; an explicit assessment-history entity is a v1.1
+    /// candidate if real workflows need point-in-time queries).</summary>
+    public string? QualitativeNotes { get; set; }
+
+    /// <summary>UTC timestamp of the most recent qualitative
+    /// assessment. Bumped by RecordQualitativeAssessmentAsync.</summary>
+    public DateTime? AssessedAt { get; set; }
+
+    /// <summary>The assessor — typically the Owner or a delegated
+    /// risk analyst. Null until first assessment.</summary>
+    public Guid? AssessedById { get; set; }
+    public User? AssessedBy { get; set; }
+
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

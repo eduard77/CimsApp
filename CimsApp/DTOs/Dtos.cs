@@ -88,6 +88,10 @@ public record UpdateRiskRequest(
     ResponseStrategy? ResponseStrategy,
     string? ResponsePlan,
     decimal? ContingencyAmount);
+// T-S2-06 qualitative assessment. Notes are required (the whole point
+// of recording an assessment is the rationale); AssessedAt is set to
+// UtcNow server-side; the assessor is the calling user.
+public record RecordQualitativeAssessmentRequest(string Notes);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.
