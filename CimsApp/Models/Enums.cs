@@ -124,3 +124,10 @@ public enum ContractForm
     JctDesignAndBuild,
     Other,
 }
+// 3-state TenderPackage workflow — F.7 second bullet.
+// Draft → Issued → Closed. Draft is editable; once Issued the
+// package is frozen (bidders are working on it). Closed is
+// terminal — reached via Award (T-S6-06) or via explicit Close
+// (abandon-without-award). State-machine enforcement in
+// Core/TenderPackageWorkflow.cs.
+public enum TenderPackageState { Draft, Issued, Closed }

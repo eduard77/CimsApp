@@ -3848,6 +3848,213 @@ public class ProcurementStrategyService(CimsDbContext db, AuditService audit)
     }
 }
 
+/// <summary>
+/// TenderPackagesService — CRUD + 3-state workflow for tender
+/// packages (T-S6-03, PAFM-SD F.7 second bullet). State machine
+/// in <see cref="CimsApp.Core.TenderPackageWorkflow"/>; this
+/// service wraps with persistence + audit-twin emission. Award
+/// (T-S6-06) extends this service with the atomic Award→Contract
+/// spawn.
+/// </summary>
+public class TenderPackagesService(CimsDbContext db, AuditService audit)
+{
+    public async Task<TenderPackage> CreateAsync(
+        Guid projectId, CreateTenderPackageRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Name))
+            throw new ValidationException(["Name is required"]);
+        if (req.EstimatedValue.HasValue && req.EstimatedValue.Value < 0m)
+            throw new ValidationException(["EstimatedValue cannot be negative"]);
+        if (req.IssueDate.HasValue && req.ReturnDate.HasValue
+            && req.ReturnDate.Value <= req.IssueDate.Value)
+            throw new ValidationException(["ReturnDate must be after IssueDate"]);
+
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        // Concurrency note: same shape as VariationsService /
+        // ChangeRequestService — count + 1 racing produces duplicates
+        // that the unique (ProjectId, Number) index catches at
+        // SaveChanges. Strict serial counter is a v1.1 candidate.
+        var count = await db.TenderPackages.CountAsync(t => t.ProjectId == projectId, ct);
+
+        var t = new TenderPackage
+        {
+            ProjectId      = projectId,
+            Number         = $"TP-{(count + 1):D4}",
+            Name           = req.Name.Trim(),
+            Description    = req.Description,
+            EstimatedValue = req.EstimatedValue,
+            IssueDate      = req.IssueDate,
+            ReturnDate     = req.ReturnDate,
+            State          = TenderPackageState.Draft,
+            CreatedById    = actorId,
+        };
+        db.TenderPackages.Add(t);
+        await audit.WriteAsync(actorId, "tender_package.created", "TenderPackage",
+            t.Id.ToString(), projectId,
+            detail: new { number = t.Number, name = t.Name, estimatedValue = t.EstimatedValue },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return t;
+    }
+
+    /// <summary>
+    /// Partial update of a Draft TenderPackage. Update of an
+    /// Issued or Closed package is rejected with ConflictException
+    /// — the package is frozen post-Issue. No-op rejected.
+    /// </summary>
+    public async Task<TenderPackage> UpdateAsync(
+        Guid projectId, Guid tenderPackageId, UpdateTenderPackageRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var t = await LoadAsync(projectId, tenderPackageId, ct);
+        if (t.State != TenderPackageState.Draft)
+            throw new ConflictException(
+                $"TenderPackage is in state {t.State}; only Draft packages can be updated");
+
+        var changed = new List<string>();
+        if (req.Name is not null)
+        {
+            if (string.IsNullOrWhiteSpace(req.Name))
+                throw new ValidationException(["Name cannot be empty"]);
+            t.Name = req.Name.Trim();
+            changed.Add("Name");
+        }
+        if (req.Description is not null) { t.Description = req.Description; changed.Add("Description"); }
+        if (req.EstimatedValue.HasValue)
+        {
+            if (req.EstimatedValue.Value < 0m)
+                throw new ValidationException(["EstimatedValue cannot be negative"]);
+            t.EstimatedValue = req.EstimatedValue;
+            changed.Add("EstimatedValue");
+        }
+        if (req.IssueDate is not null)  { t.IssueDate  = req.IssueDate;  changed.Add("IssueDate"); }
+        if (req.ReturnDate is not null) { t.ReturnDate = req.ReturnDate; changed.Add("ReturnDate"); }
+
+        // Cross-field validation: if both dates set, ReturnDate > IssueDate.
+        if (t.IssueDate.HasValue && t.ReturnDate.HasValue
+            && t.ReturnDate.Value <= t.IssueDate.Value)
+            throw new ValidationException(["ReturnDate must be after IssueDate"]);
+
+        if (changed.Count == 0)
+            throw new ValidationException(["No updatable fields provided"]);
+
+        await audit.WriteAsync(actorId, "tender_package.updated", "TenderPackage",
+            t.Id.ToString(), projectId,
+            detail: new { changedFields = changed }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return t;
+    }
+
+    /// <summary>
+    /// Issue transition: Draft → Issued. Freezes the package — bidders
+    /// can now submit tenders against the issued details. State-machine
+    /// + role gate via TenderPackageWorkflow.CanTransition (PM+).
+    /// </summary>
+    public async Task<TenderPackage> IssueAsync(
+        Guid projectId, Guid tenderPackageId,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var t = await LoadAsync(projectId, tenderPackageId, ct);
+        EnforceTransition(t.State, TenderPackageState.Issued, role);
+
+        t.State      = TenderPackageState.Issued;
+        t.IssuedById = actorId;
+        t.IssuedAt   = DateTime.UtcNow;
+
+        await audit.WriteAsync(actorId, "tender_package.issued", "TenderPackage",
+            t.Id.ToString(), projectId,
+            detail: new { number = t.Number, issueDate = t.IssueDate, returnDate = t.ReturnDate },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return t;
+    }
+
+    /// <summary>
+    /// Close transition: Issued → Closed. The "abandon-without-award"
+    /// path. Award (T-S6-06) calls into the same transition with
+    /// additional side-effects (winning Tender → Awarded; others →
+    /// Rejected; Contract spawn).
+    /// </summary>
+    public async Task<TenderPackage> CloseAsync(
+        Guid projectId, Guid tenderPackageId,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var t = await LoadAsync(projectId, tenderPackageId, ct);
+        EnforceTransition(t.State, TenderPackageState.Closed, role);
+
+        t.State      = TenderPackageState.Closed;
+        t.ClosedById = actorId;
+        t.ClosedAt   = DateTime.UtcNow;
+
+        await audit.WriteAsync(actorId, "tender_package.closed", "TenderPackage",
+            t.Id.ToString(), projectId,
+            detail: new { number = t.Number, awarded = t.AwardedTenderId.HasValue },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return t;
+    }
+
+    /// <summary>
+    /// Soft-delete a Draft TenderPackage. Issued / Closed packages
+    /// cannot be deactivated — they're part of the audit chain.
+    /// Idempotent rejection on already-deactivated.
+    /// </summary>
+    public async Task<TenderPackage> DeactivateAsync(
+        Guid projectId, Guid tenderPackageId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var t = await LoadAsync(projectId, tenderPackageId, ct);
+        if (!t.IsActive)
+            throw new ConflictException("TenderPackage is already deactivated");
+        if (t.State != TenderPackageState.Draft)
+            throw new ConflictException(
+                $"TenderPackage is in state {t.State}; only Draft packages can be deactivated");
+
+        t.IsActive = false;
+        await audit.WriteAsync(actorId, "tender_package.deactivated", "TenderPackage",
+            t.Id.ToString(), projectId,
+            detail: new { number = t.Number, name = t.Name }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return t;
+    }
+
+    public Task<TenderPackage> GetAsync(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct = default)
+        => LoadAsync(projectId, tenderPackageId, ct);
+
+    public async Task<List<TenderPackage>> ListAsync(
+        Guid projectId, TenderPackageState? state, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        var q = db.TenderPackages.Where(t => t.ProjectId == projectId && t.IsActive);
+        if (state.HasValue) q = q.Where(t => t.State == state.Value);
+        return await q.OrderByDescending(t => t.CreatedAt).ToListAsync(ct);
+    }
+
+    private async Task<TenderPackage> LoadAsync(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct)
+        => await db.TenderPackages
+            .FirstOrDefaultAsync(t => t.Id == tenderPackageId && t.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("TenderPackage");
+
+    private static void EnforceTransition(
+        TenderPackageState from, TenderPackageState to, UserRole role)
+    {
+        if (!CimsApp.Core.TenderPackageWorkflow.IsValidTransition(from, to))
+            throw new ConflictException(
+                $"Cannot transition TenderPackage from {from} to {to}");
+        if (!CimsApp.Core.TenderPackageWorkflow.CanTransition(from, to, role))
+            throw new ForbiddenException(
+                $"Role {role} cannot perform the {from} → {to} transition");
+    }
+}
+
 public class CdeService(CimsDbContext db, AuditService audit)
 {
     public async Task<List<CdeContainer>> ListContainersAsync(Guid projectId) =>

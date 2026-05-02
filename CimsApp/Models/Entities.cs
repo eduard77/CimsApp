@@ -1404,3 +1404,53 @@ public class ProcurementStrategy
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// One tender package on a project (T-S6-03, PAFM-SD F.7 second
+/// bullet — "Tender package creation"). Project-scoped sequential
+/// `TP-NNNN`. Multiple packages per project (Concrete frame; MEP;
+/// Fit-out, etc). 3-state workflow Draft → Issued → Closed in
+/// <see cref="CimsApp.Core.TenderPackageWorkflow"/>. Soft-delete
+/// via IsActive — Draft packages can be deactivated; Issued
+/// packages cannot (real bidders are working on them).
+/// </summary>
+public class TenderPackage
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Project-scoped sequential number, e.g. "TP-0001".
+    /// Unique within project; service auto-generates on Create.</summary>
+    [Required, MaxLength(20)] public string Number { get; set; } = "";
+
+    [Required, MaxLength(300)] public string Name { get; set; } = "";
+    public string? Description { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? EstimatedValue { get; set; }
+
+    public DateTime? IssueDate { get; set; }
+    public DateTime? ReturnDate { get; set; }
+
+    public TenderPackageState State { get; set; } = TenderPackageState.Draft;
+
+    public Guid? IssuedById { get; set; }
+    public User? IssuedBy { get; set; }
+    public DateTime? IssuedAt { get; set; }
+
+    public Guid? ClosedById { get; set; }
+    public User? ClosedBy { get; set; }
+    public DateTime? ClosedAt { get; set; }
+
+    /// <summary>Optional FK to the winning Tender once Awarded.
+    /// Set by the Award workflow (T-S6-06).</summary>
+    public Guid? AwardedTenderId { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public Guid CreatedById { get; set; }
+    public User CreatedBy { get; set; } = null!;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+

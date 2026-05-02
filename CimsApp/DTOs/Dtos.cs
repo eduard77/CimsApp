@@ -354,6 +354,22 @@ public record UpsertProcurementStrategyRequest(
     decimal? EstimatedTotalValue,
     string? KeyDates,
     string? PackageBreakdownNotes);
+// T-S6-03 TenderPackage create. Name + EstimatedValue typically
+// required at creation; dates can be filled in before Issue.
+public record CreateTenderPackageRequest(
+    string Name,
+    string? Description,
+    decimal? EstimatedValue,
+    DateTime? IssueDate,
+    DateTime? ReturnDate);
+// All fields nullable for partial update. Update only allowed in
+// Draft state (service enforces).
+public record UpdateTenderPackageRequest(
+    string? Name,
+    string? Description,
+    decimal? EstimatedValue,
+    DateTime? IssueDate,
+    DateTime? ReturnDate);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

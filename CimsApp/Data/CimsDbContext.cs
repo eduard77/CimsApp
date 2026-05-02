@@ -59,6 +59,7 @@ public class CimsDbContext(
     public DbSet<WeeklyTaskCommitment> WeeklyTaskCommitments => Set<WeeklyTaskCommitment>();
     public DbSet<ChangeRequest>       ChangeRequests       => Set<ChangeRequest>();
     public DbSet<ProcurementStrategy> ProcurementStrategies => Set<ProcurementStrategy>();
+    public DbSet<TenderPackage>       TenderPackages       => Set<TenderPackage>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -536,6 +537,23 @@ public class CimsDbContext(
              .HasForeignKey(s => s.ApprovedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<TenderPackage>(e =>
+        {
+            // Project-scoped sequential number — unique within project.
+            e.HasIndex(t => new { t.ProjectId, t.Number }).IsUnique();
+            // Listing renders by (ProjectId, State, IsActive).
+            e.HasIndex(t => new { t.ProjectId, t.State });
+            e.HasIndex(t => new { t.ProjectId, t.IsActive });
+            e.HasOne(t => t.Project).WithMany()
+             .HasForeignKey(t => t.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(t => t.CreatedBy).WithMany()
+             .HasForeignKey(t => t.CreatedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(t => t.IssuedBy).WithMany()
+             .HasForeignKey(t => t.IssuedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(t => t.ClosedBy).WithMany()
+             .HasForeignKey(t => t.ClosedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -586,6 +604,7 @@ public class CimsDbContext(
         m.Entity<WeeklyTaskCommitment>().HasQueryFilter(c => c.WeeklyWorkPlan.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<ChangeRequest>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<ProcurementStrategy>().HasQueryFilter(s => s.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<TenderPackage>().HasQueryFilter(t => t.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -615,6 +634,7 @@ public class CimsDbContext(
             else if (e.Entity is WeeklyTaskCommitment wtc) wtc.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is ChangeRequest cr) cr.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is ProcurementStrategy ps) ps.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is TenderPackage tp) tp.UpdatedAt = DateTime.UtcNow;
         }
     }
 }
