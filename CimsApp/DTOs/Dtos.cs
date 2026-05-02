@@ -345,6 +345,108 @@ public record RejectChangeRequestRequest(string DecisionNote);
 // just a marker that the transition occurred).
 public record ImplementChangeRequestRequest(string? Note);
 public record CloseChangeRequestRequest(string? Note);
+// T-S6-02 ProcurementStrategy upsert. One row per project; the
+// service does the read-then-update dance. Approve transition is
+// a separate endpoint (POST .../approve).
+public record UpsertProcurementStrategyRequest(
+    ProcurementApproach Approach,
+    ContractForm ContractForm,
+    decimal? EstimatedTotalValue,
+    string? KeyDates,
+    string? PackageBreakdownNotes);
+// T-S6-03 TenderPackage create. Name + EstimatedValue typically
+// required at creation; dates can be filled in before Issue.
+public record CreateTenderPackageRequest(
+    string Name,
+    string? Description,
+    decimal? EstimatedValue,
+    DateTime? IssueDate,
+    DateTime? ReturnDate);
+// All fields nullable for partial update. Update only allowed in
+// Draft state (service enforces).
+public record UpdateTenderPackageRequest(
+    string? Name,
+    string? Description,
+    decimal? EstimatedValue,
+    DateTime? IssueDate,
+    DateTime? ReturnDate);
+// T-S6-04 Tender submission. The act of "submitting" is just
+// recording — bidders submit externally; the project admin / PM
+// captures the bid receipt. SubmittedAt is set to UtcNow at
+// create.
+public record SubmitTenderRequest(
+    string BidderName,
+    string? BidderOrganisation,
+    string? ContactEmail,
+    decimal BidAmount);
+// Bidder withdraws — only allowed before evaluation / award
+// (Submitted state only). Note required so the audit trail
+// captures the rationale.
+public record WithdrawTenderRequest(string Note);
+// T-S6-05 EvaluationCriterion + Score DTOs.
+public record AddEvaluationCriterionRequest(
+    string Name,
+    EvaluationCriterionType Type,
+    decimal Weight);
+public record UpdateEvaluationCriterionRequest(
+    string? Name,
+    EvaluationCriterionType? Type,
+    decimal? Weight);
+// Score in [0, 100]; Notes optional rationale.
+public record SetEvaluationScoreRequest(
+    decimal Score,
+    string? Notes);
+// Per-(criterion) cell in the evaluation matrix view.
+public record EvaluationMatrixCellDto(
+    Guid CriterionId, string CriterionName, EvaluationCriterionType Type,
+    decimal Weight, decimal? Score, string? Notes);
+// Per-tender row in the evaluation matrix view.
+public record EvaluationMatrixRowDto(
+    Guid TenderId, string BidderName, decimal BidAmount, TenderState State,
+    decimal? OverallScore,
+    List<EvaluationMatrixCellDto> Cells);
+// The whole matrix. TotalWeight should be 1.0 (epsilon 0.0001);
+// IsValid = false flags weight-sum drift to the UI.
+public record EvaluationMatrixDto(
+    Guid TenderPackageId,
+    decimal TotalWeight,
+    bool IsValid,
+    List<EvaluationMatrixRowDto> Tenders);
+// T-S6-06 Award request. Atomically transitions winning Tender →
+// Awarded, all other active Tenders in the package → Rejected,
+// closes the package, and spawns a Contract row. ContractForm
+// optional (defaults to ProcurementStrategy.ContractForm if a
+// strategy exists, else Other). Start / End dates optional at
+// award time — typically filled in once the contract is signed.
+public record AwardTenderPackageRequest(
+    Guid AwardedTenderId,
+    string AwardNote,
+    ContractForm? ContractForm,
+    DateTime? ContractStartDate,
+    DateTime? ContractEndDate);
+// T-S6-07 EarlyWarning DTOs.
+public record RaiseEarlyWarningRequest(
+    string Title,
+    string? Description);
+// Review: ResponseNote required (the analysis IS the review).
+public record ReviewEarlyWarningRequest(string ResponseNote);
+// Close: optional ClosureNote.
+public record CloseEarlyWarningRequest(string? ClosureNote);
+// T-S6-08 CompensationEvent DTOs (NEC4 clause 60.1).
+public record NotifyCompensationEventRequest(
+    string Title,
+    string? Description);
+// Quote: contractor submits the cost / time impact quotation.
+// Both impact fields required so the matrix has data to evaluate.
+public record QuoteCompensationEventRequest(
+    decimal EstimatedCostImpact,
+    int EstimatedTimeImpactDays,
+    string QuotationNote);
+// Decide (accept / reject): DecisionNote required so the trail
+// captures the rationale.
+public record DecideCompensationEventRequest(string DecisionNote);
+// Implement: optional note.
+public record ImplementCompensationEventRequest(string? Note);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

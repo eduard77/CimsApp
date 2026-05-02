@@ -3762,6 +3762,1167 @@ public class ChangeRequestService(CimsDbContext db, AuditService audit)
     }
 }
 
+/// <summary>
+/// ProcurementStrategyService — single-row-per-project strategy
+/// capture (T-S6-02, PAFM-SD F.7 first bullet). Upsert semantics:
+/// `CreateOrUpdateAsync` creates the strategy on first call, updates
+/// it on subsequent calls. Approve transition is a separate
+/// `ApproveAsync` that records the approver + timestamp; v1.0 does
+/// not enforce a state-machine on the strategy itself (re-approval
+/// is allowed and timestamps refresh).
+/// </summary>
+public class ProcurementStrategyService(CimsDbContext db, AuditService audit)
+{
+    /// <summary>
+    /// Upsert the project's procurement strategy. Returns the
+    /// (created or updated) row. Audit emits `procurement_strategy.created`
+    /// on first write, `procurement_strategy.updated` on subsequent
+    /// writes.
+    /// </summary>
+    public async Task<ProcurementStrategy> CreateOrUpdateAsync(
+        Guid projectId, UpsertProcurementStrategyRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        if (req.EstimatedTotalValue.HasValue && req.EstimatedTotalValue.Value < 0m)
+            throw new ValidationException(["EstimatedTotalValue cannot be negative"]);
+
+        var existing = await db.ProcurementStrategies
+            .FirstOrDefaultAsync(s => s.ProjectId == projectId, ct);
+
+        var isCreate = existing is null;
+        var s = existing ?? new ProcurementStrategy { ProjectId = projectId };
+        s.Approach              = req.Approach;
+        s.ContractForm          = req.ContractForm;
+        s.EstimatedTotalValue   = req.EstimatedTotalValue;
+        s.KeyDates              = req.KeyDates;
+        s.PackageBreakdownNotes = req.PackageBreakdownNotes;
+        if (isCreate) db.ProcurementStrategies.Add(s);
+
+        var action = isCreate ? "procurement_strategy.created" : "procurement_strategy.updated";
+        await audit.WriteAsync(actorId, action, "ProcurementStrategy",
+            s.Id.ToString(), projectId,
+            detail: new
+            {
+                approach     = req.Approach.ToString(),
+                contractForm = req.ContractForm.ToString(),
+                estimatedValue = req.EstimatedTotalValue,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return s;
+    }
+
+    /// <summary>
+    /// Approve the strategy. Records the approver + UtcNow. v1.0
+    /// allows re-approval (timestamps refresh) — there's no
+    /// "already approved" rejection because real workflows revisit
+    /// strategies after risk reviews / cost feedback. Audit logs
+    /// each approval distinctly so the trail captures the history.
+    /// </summary>
+    public async Task<ProcurementStrategy> ApproveAsync(
+        Guid projectId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var s = await db.ProcurementStrategies
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("ProcurementStrategy");
+
+        s.ApprovedById = actorId;
+        s.ApprovedAt   = DateTime.UtcNow;
+        await audit.WriteAsync(actorId, "procurement_strategy.approved", "ProcurementStrategy",
+            s.Id.ToString(), projectId,
+            detail: new { approach = s.Approach.ToString(), contractForm = s.ContractForm.ToString() },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return s;
+    }
+
+    public async Task<ProcurementStrategy?> GetAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        return await db.ProcurementStrategies
+            .FirstOrDefaultAsync(s => s.ProjectId == projectId, ct);
+    }
+}
+
+/// <summary>
+/// TenderPackagesService — CRUD + 3-state workflow for tender
+/// packages (T-S6-03, PAFM-SD F.7 second bullet). State machine
+/// in <see cref="CimsApp.Core.TenderPackageWorkflow"/>; this
+/// service wraps with persistence + audit-twin emission. Award
+/// (T-S6-06) extends this service with the atomic Award→Contract
+/// spawn.
+/// </summary>
+public class TenderPackagesService(CimsDbContext db, AuditService audit)
+{
+    public async Task<TenderPackage> CreateAsync(
+        Guid projectId, CreateTenderPackageRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Name))
+            throw new ValidationException(["Name is required"]);
+        if (req.EstimatedValue.HasValue && req.EstimatedValue.Value < 0m)
+            throw new ValidationException(["EstimatedValue cannot be negative"]);
+        if (req.IssueDate.HasValue && req.ReturnDate.HasValue
+            && req.ReturnDate.Value <= req.IssueDate.Value)
+            throw new ValidationException(["ReturnDate must be after IssueDate"]);
+
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        // Concurrency note: same shape as VariationsService /
+        // ChangeRequestService — count + 1 racing produces duplicates
+        // that the unique (ProjectId, Number) index catches at
+        // SaveChanges. Strict serial counter is a v1.1 candidate.
+        var count = await db.TenderPackages.CountAsync(t => t.ProjectId == projectId, ct);
+
+        var t = new TenderPackage
+        {
+            ProjectId      = projectId,
+            Number         = $"TP-{(count + 1):D4}",
+            Name           = req.Name.Trim(),
+            Description    = req.Description,
+            EstimatedValue = req.EstimatedValue,
+            IssueDate      = req.IssueDate,
+            ReturnDate     = req.ReturnDate,
+            State          = TenderPackageState.Draft,
+            CreatedById    = actorId,
+        };
+        db.TenderPackages.Add(t);
+        await audit.WriteAsync(actorId, "tender_package.created", "TenderPackage",
+            t.Id.ToString(), projectId,
+            detail: new { number = t.Number, name = t.Name, estimatedValue = t.EstimatedValue },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return t;
+    }
+
+    /// <summary>
+    /// Partial update of a Draft TenderPackage. Update of an
+    /// Issued or Closed package is rejected with ConflictException
+    /// — the package is frozen post-Issue. No-op rejected.
+    /// </summary>
+    public async Task<TenderPackage> UpdateAsync(
+        Guid projectId, Guid tenderPackageId, UpdateTenderPackageRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var t = await LoadAsync(projectId, tenderPackageId, ct);
+        if (t.State != TenderPackageState.Draft)
+            throw new ConflictException(
+                $"TenderPackage is in state {t.State}; only Draft packages can be updated");
+
+        var changed = new List<string>();
+        if (req.Name is not null)
+        {
+            if (string.IsNullOrWhiteSpace(req.Name))
+                throw new ValidationException(["Name cannot be empty"]);
+            t.Name = req.Name.Trim();
+            changed.Add("Name");
+        }
+        if (req.Description is not null) { t.Description = req.Description; changed.Add("Description"); }
+        if (req.EstimatedValue.HasValue)
+        {
+            if (req.EstimatedValue.Value < 0m)
+                throw new ValidationException(["EstimatedValue cannot be negative"]);
+            t.EstimatedValue = req.EstimatedValue;
+            changed.Add("EstimatedValue");
+        }
+        if (req.IssueDate is not null)  { t.IssueDate  = req.IssueDate;  changed.Add("IssueDate"); }
+        if (req.ReturnDate is not null) { t.ReturnDate = req.ReturnDate; changed.Add("ReturnDate"); }
+
+        // Cross-field validation: if both dates set, ReturnDate > IssueDate.
+        if (t.IssueDate.HasValue && t.ReturnDate.HasValue
+            && t.ReturnDate.Value <= t.IssueDate.Value)
+            throw new ValidationException(["ReturnDate must be after IssueDate"]);
+
+        if (changed.Count == 0)
+            throw new ValidationException(["No updatable fields provided"]);
+
+        await audit.WriteAsync(actorId, "tender_package.updated", "TenderPackage",
+            t.Id.ToString(), projectId,
+            detail: new { changedFields = changed }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return t;
+    }
+
+    /// <summary>
+    /// Issue transition: Draft → Issued. Freezes the package — bidders
+    /// can now submit tenders against the issued details. State-machine
+    /// + role gate via TenderPackageWorkflow.CanTransition (PM+).
+    /// </summary>
+    public async Task<TenderPackage> IssueAsync(
+        Guid projectId, Guid tenderPackageId,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var t = await LoadAsync(projectId, tenderPackageId, ct);
+        EnforceTransition(t.State, TenderPackageState.Issued, role);
+
+        t.State      = TenderPackageState.Issued;
+        t.IssuedById = actorId;
+        t.IssuedAt   = DateTime.UtcNow;
+
+        await audit.WriteAsync(actorId, "tender_package.issued", "TenderPackage",
+            t.Id.ToString(), projectId,
+            detail: new { number = t.Number, issueDate = t.IssueDate, returnDate = t.ReturnDate },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return t;
+    }
+
+    /// <summary>
+    /// Close transition: Issued → Closed. The "abandon-without-award"
+    /// path. Award (T-S6-06) calls into the same transition with
+    /// additional side-effects (winning Tender → Awarded; others →
+    /// Rejected; Contract spawn).
+    /// </summary>
+    public async Task<TenderPackage> CloseAsync(
+        Guid projectId, Guid tenderPackageId,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var t = await LoadAsync(projectId, tenderPackageId, ct);
+        EnforceTransition(t.State, TenderPackageState.Closed, role);
+
+        t.State      = TenderPackageState.Closed;
+        t.ClosedById = actorId;
+        t.ClosedAt   = DateTime.UtcNow;
+
+        await audit.WriteAsync(actorId, "tender_package.closed", "TenderPackage",
+            t.Id.ToString(), projectId,
+            detail: new { number = t.Number, awarded = t.AwardedTenderId.HasValue },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return t;
+    }
+
+    /// <summary>
+    /// Soft-delete a Draft TenderPackage. Issued / Closed packages
+    /// cannot be deactivated — they're part of the audit chain.
+    /// Idempotent rejection on already-deactivated.
+    /// </summary>
+    public async Task<TenderPackage> DeactivateAsync(
+        Guid projectId, Guid tenderPackageId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var t = await LoadAsync(projectId, tenderPackageId, ct);
+        if (!t.IsActive)
+            throw new ConflictException("TenderPackage is already deactivated");
+        if (t.State != TenderPackageState.Draft)
+            throw new ConflictException(
+                $"TenderPackage is in state {t.State}; only Draft packages can be deactivated");
+
+        t.IsActive = false;
+        await audit.WriteAsync(actorId, "tender_package.deactivated", "TenderPackage",
+            t.Id.ToString(), projectId,
+            detail: new { number = t.Number, name = t.Name }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return t;
+    }
+
+    public Task<TenderPackage> GetAsync(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct = default)
+        => LoadAsync(projectId, tenderPackageId, ct);
+
+    public async Task<List<TenderPackage>> ListAsync(
+        Guid projectId, TenderPackageState? state, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        var q = db.TenderPackages.Where(t => t.ProjectId == projectId && t.IsActive);
+        if (state.HasValue) q = q.Where(t => t.State == state.Value);
+        return await q.OrderByDescending(t => t.CreatedAt).ToListAsync(ct);
+    }
+
+    private async Task<TenderPackage> LoadAsync(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct)
+        => await db.TenderPackages
+            .FirstOrDefaultAsync(t => t.Id == tenderPackageId && t.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("TenderPackage");
+
+    private static void EnforceTransition(
+        TenderPackageState from, TenderPackageState to, UserRole role)
+    {
+        if (!CimsApp.Core.TenderPackageWorkflow.IsValidTransition(from, to))
+            throw new ConflictException(
+                $"Cannot transition TenderPackage from {from} to {to}");
+        if (!CimsApp.Core.TenderPackageWorkflow.CanTransition(from, to, role))
+            throw new ForbiddenException(
+                $"Role {role} cannot perform the {from} → {to} transition");
+    }
+
+    // ── Award (T-S6-06) ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Award a TenderPackage to a winning Tender (PAFM-SD F.7
+    /// fourth bullet). Mirrors the S5 ChangeRequest.ApproveAsync
+    /// approve-and-spawn pattern: one transactional SaveChanges
+    /// holds:
+    /// 1) winning Tender → Awarded;
+    /// 2) all other active Tenders in the package → Rejected
+    ///    automatically with a "not awarded" note;
+    /// 3) TenderPackage → Closed (sets AwardedTenderId);
+    /// 4) Contract spawned with copied BidAmount + BidderName +
+    ///    ContractorOrganisation;
+    /// 5) winning Tender's GeneratedContractId set to the new
+    ///    Contract's Id;
+    /// 6) Audit-twin emits tender.awarded + per-loser
+    ///    tender.rejected + tender_package.closed +
+    ///    contract.created.
+    ///
+    /// Role gate: ProjectManager+ via the state-machine path
+    /// (Issued → Closed transition).
+    /// </summary>
+    public async Task<Contract> AwardAsync(
+        Guid projectId, Guid tenderPackageId, AwardTenderPackageRequest req,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.AwardNote))
+            throw new ValidationException(["AwardNote is required"]);
+
+        var pkg = await LoadAsync(projectId, tenderPackageId, ct);
+        EnforceTransition(pkg.State, TenderPackageState.Closed, role);
+
+        var winner = await db.Tenders
+            .FirstOrDefaultAsync(t => t.Id == req.AwardedTenderId
+                                    && t.TenderPackageId == tenderPackageId
+                                    && t.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Tender");
+
+        if (winner.State is TenderState.Withdrawn or TenderState.Awarded or TenderState.Rejected)
+            throw new ConflictException(
+                $"Tender is in state {winner.State}; cannot be awarded");
+
+        // Determine ContractForm: explicit override → strategy default → Other.
+        var contractForm = req.ContractForm;
+        if (!contractForm.HasValue)
+        {
+            var strategy = await db.ProcurementStrategies
+                .FirstOrDefaultAsync(s => s.ProjectId == projectId, ct);
+            contractForm = strategy?.ContractForm ?? ContractForm.Other;
+        }
+
+        // Spawn the Contract row.
+        var contractCount = await db.Contracts.CountAsync(c => c.ProjectId == projectId, ct);
+        var contract = new Contract
+        {
+            ProjectId               = projectId,
+            Number                  = $"CON-{(contractCount + 1):D4}",
+            TenderPackageId         = tenderPackageId,
+            AwardedTenderId         = winner.Id,
+            ContractorName          = winner.BidderName,
+            ContractorOrganisation  = winner.BidderOrganisation,
+            ContractValue           = winner.BidAmount,
+            ContractForm            = contractForm.Value,
+            StartDate               = req.ContractStartDate,
+            EndDate                 = req.ContractEndDate,
+            State                   = ContractState.Active,
+            AwardNote               = req.AwardNote.Trim(),
+            AwardedById             = actorId,
+            AwardedAt               = DateTime.UtcNow,
+        };
+        db.Contracts.Add(contract);
+
+        // Winner: → Awarded; carry the contract FK.
+        winner.State               = TenderState.Awarded;
+        winner.StateNote           = req.AwardNote.Trim();
+        winner.GeneratedContractId = contract.Id;
+
+        // Losers: any Tender in the same package not the winner and
+        // currently in Submitted / Evaluated → Rejected automatically.
+        var losers = await db.Tenders
+            .Where(t => t.TenderPackageId == tenderPackageId
+                     && t.Id != winner.Id
+                     && (t.State == TenderState.Submitted || t.State == TenderState.Evaluated))
+            .ToListAsync(ct);
+        foreach (var l in losers)
+        {
+            l.State     = TenderState.Rejected;
+            l.StateNote = $"Not awarded; package awarded to {winner.BidderName}";
+        }
+
+        // Package: → Closed.
+        pkg.State           = TenderPackageState.Closed;
+        pkg.ClosedById      = actorId;
+        pkg.ClosedAt        = DateTime.UtcNow;
+        pkg.AwardedTenderId = winner.Id;
+
+        // Audit chain.
+        await audit.WriteAsync(actorId, "tender.awarded", "Tender",
+            winner.Id.ToString(), projectId,
+            detail: new
+            {
+                tenderPackageId,
+                bidderName = winner.BidderName,
+                bidAmount  = winner.BidAmount,
+                contractId = contract.Id,
+                contractNumber = contract.Number,
+            }, ip: ip, ua: ua);
+
+        foreach (var l in losers)
+        {
+            await audit.WriteAsync(actorId, "tender.rejected", "Tender",
+                l.Id.ToString(), projectId,
+                detail: new
+                {
+                    tenderPackageId,
+                    bidderName = l.BidderName,
+                    reason     = "Not awarded",
+                }, ip: ip, ua: ua);
+        }
+
+        await audit.WriteAsync(actorId, "tender_package.closed", "TenderPackage",
+            pkg.Id.ToString(), projectId,
+            detail: new
+            {
+                number   = pkg.Number,
+                awarded  = true,
+                awardedTenderId = winner.Id,
+            }, ip: ip, ua: ua);
+
+        await audit.WriteAsync(actorId, "contract.created", "Contract",
+            contract.Id.ToString(), projectId,
+            detail: new
+            {
+                number          = contract.Number,
+                tenderPackageId,
+                awardedTenderId = winner.Id,
+                contractorName  = contract.ContractorName,
+                contractValue   = contract.ContractValue,
+                contractForm    = contract.ContractForm.ToString(),
+            }, ip: ip, ua: ua);
+
+        await db.SaveChangesAsync(ct);
+        return contract;
+    }
+}
+
+/// <summary>
+/// TendersService — bid receipt + lifecycle (T-S6-04, PAFM-SD F.7
+/// second bullet downstream). Submit (create) records a bid against
+/// an Issued TenderPackage; Withdraw is the bidder-pulls-out branch
+/// (Submitted state only). Evaluated transition arrives via T-S6-05
+/// (after all required scores are recorded); Awarded / Rejected
+/// transitions arrive via T-S6-06 Award workflow.
+/// </summary>
+public class TendersService(CimsDbContext db, AuditService audit)
+{
+    /// <summary>
+    /// Record a bid against an Issued TenderPackage. Validates
+    /// the package is currently in Issued state — submissions
+    /// against Draft (not yet released) or Closed (already
+    /// awarded / abandoned) packages are rejected with
+    /// ConflictException. SubmittedAt = UtcNow at create.
+    /// </summary>
+    public async Task<Tender> SubmitAsync(
+        Guid projectId, Guid tenderPackageId, SubmitTenderRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.BidderName))
+            throw new ValidationException(["BidderName is required"]);
+        if (req.BidAmount <= 0m)
+            throw new ValidationException(["BidAmount must be greater than zero"]);
+
+        var pkg = await db.TenderPackages
+            .FirstOrDefaultAsync(p => p.Id == tenderPackageId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("TenderPackage");
+
+        if (pkg.State != TenderPackageState.Issued)
+            throw new ConflictException(
+                $"TenderPackage is in state {pkg.State}; tenders can only be submitted against Issued packages");
+
+        var t = new Tender
+        {
+            ProjectId          = projectId,
+            TenderPackageId    = tenderPackageId,
+            BidderName         = req.BidderName.Trim(),
+            BidderOrganisation = req.BidderOrganisation,
+            ContactEmail       = req.ContactEmail,
+            BidAmount          = req.BidAmount,
+            SubmittedAt        = DateTime.UtcNow,
+            State              = TenderState.Submitted,
+            CreatedById        = actorId,
+        };
+        db.Tenders.Add(t);
+
+        await audit.WriteAsync(actorId, "tender.submitted", "Tender",
+            t.Id.ToString(), projectId,
+            detail: new
+            {
+                tenderPackageId    = tenderPackageId,
+                tenderPackageNumber = pkg.Number,
+                bidderName         = t.BidderName,
+                bidderOrganisation = t.BidderOrganisation,
+                bidAmount          = t.BidAmount,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return t;
+    }
+
+    /// <summary>
+    /// Bidder withdraws: Submitted → Withdrawn. Note required so
+    /// the audit trail captures the rationale. Withdrawn is
+    /// terminal — once withdrawn the bid is out of evaluation
+    /// scope. v1.0 doesn't allow re-submission of the same bidder
+    /// in the same package (the audit chain is preferable to the
+    /// workflow churn); a fresh bid would be a new Tender row.
+    /// </summary>
+    public async Task<Tender> WithdrawAsync(
+        Guid projectId, Guid tenderId, WithdrawTenderRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Note))
+            throw new ValidationException(["Note is required"]);
+
+        var t = await db.Tenders
+            .FirstOrDefaultAsync(x => x.Id == tenderId && x.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Tender");
+
+        if (t.State != TenderState.Submitted)
+            throw new ConflictException(
+                $"Tender is in state {t.State}; only Submitted tenders can be withdrawn");
+
+        t.State     = TenderState.Withdrawn;
+        t.StateNote = req.Note.Trim();
+
+        await audit.WriteAsync(actorId, "tender.withdrawn", "Tender",
+            t.Id.ToString(), projectId,
+            detail: new { bidderName = t.BidderName, note = req.Note },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return t;
+    }
+
+    public async Task<List<Tender>> ListAsync(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct = default)
+    {
+        // Validate the package belongs to the project (cross-tenant
+        // 404 via the query filter); empty list if no tenders yet.
+        _ = await db.TenderPackages
+            .FirstOrDefaultAsync(p => p.Id == tenderPackageId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("TenderPackage");
+        return await db.Tenders
+            .Where(t => t.TenderPackageId == tenderPackageId)
+            .OrderBy(t => t.BidAmount)
+            .ToListAsync(ct);
+    }
+
+    public Task<Tender> GetAsync(
+        Guid projectId, Guid tenderId, CancellationToken ct = default)
+        => LoadAsync(projectId, tenderId, ct);
+
+    private async Task<Tender> LoadAsync(
+        Guid projectId, Guid tenderId, CancellationToken ct)
+        => await db.Tenders
+            .FirstOrDefaultAsync(t => t.Id == tenderId && t.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Tender");
+}
+
+/// <summary>
+/// EvaluationService — criteria CRUD + per-tender score recording
+/// + matrix calculation (T-S6-05, PAFM-SD F.7 third bullet).
+/// Criteria can only be added / removed when the parent
+/// TenderPackage is in Draft state — once Issued the criteria are
+/// frozen so bidders see stable evaluation rules. Scores can be
+/// recorded once the package is Issued and tenders are Submitted.
+/// Weight-sum invariant (Σ ≈ 1.0) is checked at matrix-calc time
+/// rather than at criterion-write time, allowing weight edits
+/// during Draft set-up.
+/// </summary>
+public class EvaluationService(CimsDbContext db, AuditService audit)
+{
+    // ── Criteria ────────────────────────────────────────────────────
+
+    public async Task<EvaluationCriterion> AddCriterionAsync(
+        Guid projectId, Guid tenderPackageId, AddEvaluationCriterionRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Name))
+            throw new ValidationException(["Name is required"]);
+        if (req.Weight < 0m || req.Weight > 1m)
+            throw new ValidationException(["Weight must be in [0, 1]"]);
+
+        var pkg = await db.TenderPackages
+            .FirstOrDefaultAsync(p => p.Id == tenderPackageId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("TenderPackage");
+        if (pkg.State != TenderPackageState.Draft)
+            throw new ConflictException(
+                $"TenderPackage is in state {pkg.State}; criteria can only be added to Draft packages");
+
+        var c = new EvaluationCriterion
+        {
+            ProjectId       = projectId,
+            TenderPackageId = tenderPackageId,
+            Name            = req.Name.Trim(),
+            Type            = req.Type,
+            Weight          = req.Weight,
+        };
+        db.EvaluationCriteria.Add(c);
+        await audit.WriteAsync(actorId, "evaluation_criterion.added", "EvaluationCriterion",
+            c.Id.ToString(), projectId,
+            detail: new { tenderPackageId, name = c.Name, type = c.Type.ToString(), weight = c.Weight },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return c;
+    }
+
+    public async Task<EvaluationCriterion> UpdateCriterionAsync(
+        Guid projectId, Guid tenderPackageId, Guid criterionId,
+        UpdateEvaluationCriterionRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var c = await db.EvaluationCriteria
+            .FirstOrDefaultAsync(x => x.Id == criterionId
+                                    && x.TenderPackageId == tenderPackageId
+                                    && x.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("EvaluationCriterion");
+
+        var pkg = await db.TenderPackages
+            .FirstAsync(p => p.Id == tenderPackageId && p.ProjectId == projectId, ct);
+        if (pkg.State != TenderPackageState.Draft)
+            throw new ConflictException(
+                $"TenderPackage is in state {pkg.State}; criteria can only be edited in Draft");
+
+        var changed = new List<string>();
+        if (req.Name is not null)
+        {
+            if (string.IsNullOrWhiteSpace(req.Name))
+                throw new ValidationException(["Name cannot be empty"]);
+            c.Name = req.Name.Trim();
+            changed.Add("Name");
+        }
+        if (req.Type.HasValue) { c.Type = req.Type.Value; changed.Add("Type"); }
+        if (req.Weight.HasValue)
+        {
+            if (req.Weight.Value < 0m || req.Weight.Value > 1m)
+                throw new ValidationException(["Weight must be in [0, 1]"]);
+            c.Weight = req.Weight.Value;
+            changed.Add("Weight");
+        }
+        if (changed.Count == 0)
+            throw new ValidationException(["No updatable fields provided"]);
+
+        await audit.WriteAsync(actorId, "evaluation_criterion.updated", "EvaluationCriterion",
+            c.Id.ToString(), projectId,
+            detail: new { changedFields = changed }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return c;
+    }
+
+    public async Task RemoveCriterionAsync(
+        Guid projectId, Guid tenderPackageId, Guid criterionId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var c = await db.EvaluationCriteria
+            .FirstOrDefaultAsync(x => x.Id == criterionId
+                                    && x.TenderPackageId == tenderPackageId
+                                    && x.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("EvaluationCriterion");
+
+        var pkg = await db.TenderPackages
+            .FirstAsync(p => p.Id == tenderPackageId && p.ProjectId == projectId, ct);
+        if (pkg.State != TenderPackageState.Draft)
+            throw new ConflictException(
+                $"TenderPackage is in state {pkg.State}; criteria can only be removed in Draft");
+
+        db.EvaluationCriteria.Remove(c);
+        await audit.WriteAsync(actorId, "evaluation_criterion.removed", "EvaluationCriterion",
+            c.Id.ToString(), projectId,
+            detail: new { tenderPackageId, name = c.Name }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<List<EvaluationCriterion>> ListCriteriaAsync(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct = default)
+    {
+        _ = await db.TenderPackages
+            .FirstOrDefaultAsync(p => p.Id == tenderPackageId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("TenderPackage");
+        return await db.EvaluationCriteria
+            .Where(c => c.TenderPackageId == tenderPackageId)
+            .OrderBy(c => c.Type).ThenBy(c => c.Name)
+            .ToListAsync(ct);
+    }
+
+    // ── Scores ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Set or update the score for a (Tender, Criterion) pair.
+    /// Validates: score in [0, 100]; tender in Submitted or
+    /// Evaluated state (not Awarded / Rejected / Withdrawn);
+    /// criterion belongs to the tender's package; package is
+    /// Issued (scoring happens during the evaluation window after
+    /// issue and before award).
+    /// Re-scoring updates in place; a separate audit row is
+    /// emitted each time so the trail is complete.
+    /// </summary>
+    public async Task<EvaluationScore> SetScoreAsync(
+        Guid projectId, Guid tenderId, Guid criterionId, SetEvaluationScoreRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (req.Score < 0m || req.Score > 100m)
+            throw new ValidationException(["Score must be in [0, 100]"]);
+
+        var tender = await db.Tenders
+            .FirstOrDefaultAsync(t => t.Id == tenderId && t.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Tender");
+        if (tender.State is TenderState.Withdrawn or TenderState.Awarded or TenderState.Rejected)
+            throw new ConflictException(
+                $"Tender is in state {tender.State}; scoring is closed");
+
+        var criterion = await db.EvaluationCriteria
+            .FirstOrDefaultAsync(c => c.Id == criterionId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("EvaluationCriterion");
+        if (criterion.TenderPackageId != tender.TenderPackageId)
+            throw new ValidationException(["Criterion belongs to a different TenderPackage than the Tender"]);
+
+        var pkg = await db.TenderPackages
+            .FirstAsync(p => p.Id == tender.TenderPackageId, ct);
+        if (pkg.State != TenderPackageState.Issued)
+            throw new ConflictException(
+                $"TenderPackage is in state {pkg.State}; scoring is only allowed when Issued");
+
+        var existing = await db.EvaluationScores
+            .FirstOrDefaultAsync(s => s.TenderId == tenderId && s.CriterionId == criterionId, ct);
+        var isCreate = existing is null;
+        var s = existing ?? new EvaluationScore
+        {
+            ProjectId   = projectId,
+            TenderId    = tenderId,
+            CriterionId = criterionId,
+        };
+        s.Score      = req.Score;
+        s.Notes      = req.Notes;
+        s.ScoredById = actorId;
+        s.ScoredAt   = DateTime.UtcNow;
+        if (isCreate) db.EvaluationScores.Add(s);
+
+        await audit.WriteAsync(actorId, "evaluation_score.set", "EvaluationScore",
+            s.Id.ToString(), projectId,
+            detail: new
+            {
+                tenderId, criterionId,
+                score = req.Score,
+                isUpdate = !isCreate,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return s;
+    }
+
+    // ── Matrix ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Build the evaluation matrix for a TenderPackage. Returns
+    /// per-tender weighted overall scores plus the per-criterion
+    /// breakdown. TotalWeight + IsValid are reported alongside —
+    /// the caller can render "weights sum to 0.85; please fix"
+    /// when IsValid is false. Withdrawn tenders are excluded
+    /// (they're out of scope for evaluation).
+    /// </summary>
+    public async Task<EvaluationMatrixDto> GetMatrixAsync(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct = default)
+    {
+        _ = await db.TenderPackages
+            .FirstOrDefaultAsync(p => p.Id == tenderPackageId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("TenderPackage");
+
+        var criteria = await db.EvaluationCriteria
+            .Where(c => c.TenderPackageId == tenderPackageId)
+            .OrderBy(c => c.Type).ThenBy(c => c.Name)
+            .ToListAsync(ct);
+        var tenders = await db.Tenders
+            .Where(t => t.TenderPackageId == tenderPackageId
+                     && t.State != TenderState.Withdrawn)
+            .OrderBy(t => t.BidAmount)
+            .ToListAsync(ct);
+        var scores = await db.EvaluationScores
+            .Where(s => criteria.Select(c => c.Id).Contains(s.CriterionId))
+            .ToListAsync(ct);
+
+        // Pure-function aggregator.
+        var coreInput = criteria.Select(c =>
+            new CimsApp.Core.EvaluationMatrix.CriterionInput(c.Id, c.Weight)).ToList();
+        var coreScores = scores.Select(s =>
+            new CimsApp.Core.EvaluationMatrix.ScoreInput(s.TenderId, s.CriterionId, s.Score)).ToList();
+        var matrixResult = CimsApp.Core.EvaluationMatrix.Compute(
+            tenders.Select(t => t.Id).ToList(), coreInput, coreScores);
+
+        // Compose the DTO. Score lookup for the per-cell breakdown.
+        var scoresByPair = scores
+            .ToDictionary(s => (s.TenderId, s.CriterionId), s => s);
+        var resultsByTender = matrixResult.Tenders
+            .ToDictionary(r => r.TenderId, r => r.OverallScore);
+
+        var rows = tenders.Select(t => new EvaluationMatrixRowDto(
+            t.Id, t.BidderName, t.BidAmount, t.State,
+            resultsByTender.TryGetValue(t.Id, out var os) ? os : null,
+            criteria.Select(c =>
+            {
+                scoresByPair.TryGetValue((t.Id, c.Id), out var s);
+                return new EvaluationMatrixCellDto(
+                    c.Id, c.Name, c.Type, c.Weight,
+                    s?.Score, s?.Notes);
+            }).ToList())).ToList();
+
+        return new EvaluationMatrixDto(
+            tenderPackageId,
+            matrixResult.TotalWeight,
+            matrixResult.IsValid,
+            rows);
+    }
+}
+
+/// <summary>
+/// EarlyWarningsService — NEC4 clause-15 early-warning notices
+/// per Contract (T-S6-07, PAFM-SD F.7 fifth bullet). Linear
+/// 3-state workflow Raised → UnderReview → Closed; the inline
+/// service-layer guard does the state-machine work since it's
+/// only three states (no separate Core/<X>.cs file warranted).
+/// </summary>
+public class EarlyWarningsService(CimsDbContext db, AuditService audit)
+{
+    /// <summary>
+    /// Raise a new early-warning notice against an Active Contract.
+    /// Title required. Initial state Raised. Audit:
+    /// early_warning.raised.
+    /// </summary>
+    public async Task<EarlyWarning> RaiseAsync(
+        Guid projectId, Guid contractId, RaiseEarlyWarningRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(["Title is required"]);
+
+        var contract = await db.Contracts
+            .FirstOrDefaultAsync(c => c.Id == contractId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Contract");
+        if (contract.State != ContractState.Active)
+            throw new ConflictException(
+                $"Contract is in state {contract.State}; early warnings can only be raised against Active contracts");
+
+        var w = new EarlyWarning
+        {
+            ProjectId   = projectId,
+            ContractId  = contractId,
+            Title       = req.Title.Trim(),
+            Description = req.Description,
+            State       = EarlyWarningState.Raised,
+            RaisedById  = actorId,
+            RaisedAt    = DateTime.UtcNow,
+        };
+        db.EarlyWarnings.Add(w);
+
+        await audit.WriteAsync(actorId, "early_warning.raised", "EarlyWarning",
+            w.Id.ToString(), projectId,
+            detail: new
+            {
+                contractId,
+                contractNumber = contract.Number,
+                title = w.Title,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return w;
+    }
+
+    /// <summary>
+    /// Review transition: Raised → UnderReview. ResponseNote
+    /// required — the reviewer's analysis is the whole point of
+    /// the review step.
+    /// </summary>
+    public async Task<EarlyWarning> ReviewAsync(
+        Guid projectId, Guid earlyWarningId, ReviewEarlyWarningRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.ResponseNote))
+            throw new ValidationException(["ResponseNote is required"]);
+
+        var w = await LoadAsync(projectId, earlyWarningId, ct);
+        if (w.State != EarlyWarningState.Raised)
+            throw new ConflictException(
+                $"EarlyWarning is in state {w.State}; only Raised early warnings can be reviewed");
+
+        w.State        = EarlyWarningState.UnderReview;
+        w.ReviewedById = actorId;
+        w.ReviewedAt   = DateTime.UtcNow;
+        w.ResponseNote = req.ResponseNote.Trim();
+
+        await audit.WriteAsync(actorId, "early_warning.reviewed", "EarlyWarning",
+            w.Id.ToString(), projectId,
+            detail: new { title = w.Title }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return w;
+    }
+
+    /// <summary>
+    /// Close transition: UnderReview → Closed. Optional note.
+    /// Closed is terminal.
+    /// </summary>
+    public async Task<EarlyWarning> CloseAsync(
+        Guid projectId, Guid earlyWarningId, CloseEarlyWarningRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var w = await LoadAsync(projectId, earlyWarningId, ct);
+        if (w.State != EarlyWarningState.UnderReview)
+            throw new ConflictException(
+                $"EarlyWarning is in state {w.State}; only UnderReview early warnings can be closed");
+
+        w.State       = EarlyWarningState.Closed;
+        w.ClosedById  = actorId;
+        w.ClosedAt    = DateTime.UtcNow;
+        w.ClosureNote = req.ClosureNote;
+
+        await audit.WriteAsync(actorId, "early_warning.closed", "EarlyWarning",
+            w.Id.ToString(), projectId,
+            detail: new { title = w.Title }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return w;
+    }
+
+    public async Task<List<EarlyWarning>> ListAsync(
+        Guid projectId, Guid contractId, EarlyWarningState? state, CancellationToken ct = default)
+    {
+        _ = await db.Contracts
+            .FirstOrDefaultAsync(c => c.Id == contractId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Contract");
+        var q = db.EarlyWarnings.Where(w => w.ContractId == contractId);
+        if (state.HasValue) q = q.Where(w => w.State == state.Value);
+        return await q.OrderByDescending(w => w.RaisedAt).ToListAsync(ct);
+    }
+
+    public Task<EarlyWarning> GetAsync(
+        Guid projectId, Guid earlyWarningId, CancellationToken ct = default)
+        => LoadAsync(projectId, earlyWarningId, ct);
+
+    private async Task<EarlyWarning> LoadAsync(
+        Guid projectId, Guid earlyWarningId, CancellationToken ct)
+        => await db.EarlyWarnings
+            .FirstOrDefaultAsync(w => w.Id == earlyWarningId && w.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("EarlyWarning");
+}
+
+/// <summary>
+/// CompensationEventsService — NEC4 clause-60.1 5-state workflow
+/// per Contract (T-S6-08, PAFM-SD F.7 fifth bullet). State machine
+/// in <see cref="CimsApp.Core.CompensationEventWorkflow"/>; this
+/// service wraps with persistence + audit-twin emission. v1.0
+/// limitations explicitly deferred to v1.1 inline (B-048 PM 4-week
+/// notification deadline; B-049 contractor 3-week quotation
+/// deadline; B-050 risk-allowance pricing rules).
+/// </summary>
+public class CompensationEventsService(CimsDbContext db, AuditService audit)
+{
+    /// <summary>
+    /// Notify a new compensation event against an Active Contract.
+    /// Title required. Auto-generates `CE-NNNN` per project.
+    /// Initial state Notified. Audit:
+    /// compensation_event.notified.
+    /// </summary>
+    public async Task<CompensationEvent> NotifyAsync(
+        Guid projectId, Guid contractId, NotifyCompensationEventRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(["Title is required"]);
+
+        var contract = await db.Contracts
+            .FirstOrDefaultAsync(c => c.Id == contractId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Contract");
+        if (contract.State != ContractState.Active)
+            throw new ConflictException(
+                $"Contract is in state {contract.State}; CEs can only be notified against Active contracts");
+
+        // Concurrency note: same shape as Variation / ChangeRequest /
+        // TenderPackage — count + 1 racing produces duplicates that
+        // the unique (ProjectId, Number) index catches at SaveChanges.
+        var count = await db.CompensationEvents
+            .CountAsync(c => c.ProjectId == projectId, ct);
+
+        var ce = new CompensationEvent
+        {
+            ProjectId    = projectId,
+            ContractId   = contractId,
+            Number       = $"CE-{(count + 1):D4}",
+            Title        = req.Title.Trim(),
+            Description  = req.Description,
+            State        = CompensationEventState.Notified,
+            NotifiedById = actorId,
+            NotifiedAt   = DateTime.UtcNow,
+        };
+        db.CompensationEvents.Add(ce);
+
+        await audit.WriteAsync(actorId, "compensation_event.notified", "CompensationEvent",
+            ce.Id.ToString(), projectId,
+            detail: new
+            {
+                number         = ce.Number,
+                contractId,
+                contractNumber = contract.Number,
+                title          = ce.Title,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ce;
+    }
+
+    /// <summary>
+    /// Quote transition: Notified → Quoted. Records the contractor's
+    /// quotation (cost + time impact + rationale). State machine +
+    /// role gate via CompensationEventWorkflow.CanTransition
+    /// (TaskTeamMember+ — contractor-side input).
+    /// </summary>
+    public async Task<CompensationEvent> QuoteAsync(
+        Guid projectId, Guid compensationEventId, QuoteCompensationEventRequest req,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.QuotationNote))
+            throw new ValidationException(["QuotationNote is required"]);
+        if (req.EstimatedCostImpact < 0m)
+            throw new ValidationException(["EstimatedCostImpact cannot be negative"]);
+
+        var ce = await LoadAsync(projectId, compensationEventId, ct);
+        EnforceTransition(ce.State, CompensationEventState.Quoted, role);
+
+        ce.State                    = CompensationEventState.Quoted;
+        ce.EstimatedCostImpact      = req.EstimatedCostImpact;
+        ce.EstimatedTimeImpactDays  = req.EstimatedTimeImpactDays;
+        ce.QuotationNote            = req.QuotationNote.Trim();
+        ce.QuotedById               = actorId;
+        ce.QuotedAt                 = DateTime.UtcNow;
+
+        await audit.WriteAsync(actorId, "compensation_event.quoted", "CompensationEvent",
+            ce.Id.ToString(), projectId,
+            detail: new
+            {
+                number         = ce.Number,
+                costImpact     = req.EstimatedCostImpact,
+                timeImpactDays = req.EstimatedTimeImpactDays,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ce;
+    }
+
+    /// <summary>
+    /// Accept transition: Quoted → Accepted. DecisionNote required.
+    /// Role gate ProjectManager+.
+    /// </summary>
+    public async Task<CompensationEvent> AcceptAsync(
+        Guid projectId, Guid compensationEventId, DecideCompensationEventRequest req,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.DecisionNote))
+            throw new ValidationException(["DecisionNote is required"]);
+
+        var ce = await LoadAsync(projectId, compensationEventId, ct);
+        EnforceTransition(ce.State, CompensationEventState.Accepted, role);
+
+        ce.State        = CompensationEventState.Accepted;
+        ce.DecisionById = actorId;
+        ce.DecisionAt   = DateTime.UtcNow;
+        ce.DecisionNote = req.DecisionNote.Trim();
+
+        await audit.WriteAsync(actorId, "compensation_event.accepted", "CompensationEvent",
+            ce.Id.ToString(), projectId,
+            detail: new
+            {
+                number         = ce.Number,
+                costImpact     = ce.EstimatedCostImpact,
+                timeImpactDays = ce.EstimatedTimeImpactDays,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ce;
+    }
+
+    /// <summary>
+    /// Reject transition: Notified → Rejected (clause 61.4) OR
+    /// Quoted → Rejected. DecisionNote required. Role gate
+    /// ProjectManager+.
+    /// </summary>
+    public async Task<CompensationEvent> RejectAsync(
+        Guid projectId, Guid compensationEventId, DecideCompensationEventRequest req,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.DecisionNote))
+            throw new ValidationException(["DecisionNote is required"]);
+
+        var ce = await LoadAsync(projectId, compensationEventId, ct);
+        EnforceTransition(ce.State, CompensationEventState.Rejected, role);
+
+        ce.State        = CompensationEventState.Rejected;
+        ce.DecisionById = actorId;
+        ce.DecisionAt   = DateTime.UtcNow;
+        ce.DecisionNote = req.DecisionNote.Trim();
+
+        await audit.WriteAsync(actorId, "compensation_event.rejected", "CompensationEvent",
+            ce.Id.ToString(), projectId,
+            detail: new { number = ce.Number, decisionNote = req.DecisionNote },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ce;
+    }
+
+    /// <summary>
+    /// Implement transition: Accepted → Implemented. Optional note.
+    /// Terminal state.
+    /// </summary>
+    public async Task<CompensationEvent> ImplementAsync(
+        Guid projectId, Guid compensationEventId, ImplementCompensationEventRequest req,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var ce = await LoadAsync(projectId, compensationEventId, ct);
+        EnforceTransition(ce.State, CompensationEventState.Implemented, role);
+
+        ce.State           = CompensationEventState.Implemented;
+        ce.ImplementedById = actorId;
+        ce.ImplementedAt   = DateTime.UtcNow;
+
+        await audit.WriteAsync(actorId, "compensation_event.implemented", "CompensationEvent",
+            ce.Id.ToString(), projectId,
+            detail: new { number = ce.Number, note = req.Note },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ce;
+    }
+
+    public async Task<List<CompensationEvent>> ListAsync(
+        Guid projectId, Guid contractId, CompensationEventState? state, CancellationToken ct = default)
+    {
+        _ = await db.Contracts
+            .FirstOrDefaultAsync(c => c.Id == contractId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Contract");
+        var q = db.CompensationEvents.Where(c => c.ContractId == contractId);
+        if (state.HasValue) q = q.Where(c => c.State == state.Value);
+        return await q.OrderByDescending(c => c.NotifiedAt).ToListAsync(ct);
+    }
+
+    public Task<CompensationEvent> GetAsync(
+        Guid projectId, Guid compensationEventId, CancellationToken ct = default)
+        => LoadAsync(projectId, compensationEventId, ct);
+
+    private async Task<CompensationEvent> LoadAsync(
+        Guid projectId, Guid compensationEventId, CancellationToken ct)
+        => await db.CompensationEvents
+            .FirstOrDefaultAsync(c => c.Id == compensationEventId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CompensationEvent");
+
+    private static void EnforceTransition(
+        CompensationEventState from, CompensationEventState to, UserRole role)
+    {
+        if (!CimsApp.Core.CompensationEventWorkflow.IsValidTransition(from, to))
+            throw new ConflictException(
+                $"Cannot transition CompensationEvent from {from} to {to}");
+        if (!CimsApp.Core.CompensationEventWorkflow.CanTransition(from, to, role))
+            throw new ForbiddenException(
+                $"Role {role} cannot perform the {from} → {to} transition");
+    }
+}
+
 public class CdeService(CimsDbContext db, AuditService audit)
 {
     public async Task<List<CdeContainer>> ListContainersAsync(Guid projectId) =>

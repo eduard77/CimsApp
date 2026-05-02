@@ -1358,3 +1358,402 @@ public class ChangeRequest
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// Project-level procurement strategy (T-S6-02, PAFM-SD F.7 first
+/// bullet — "Procurement strategy capture"). Single row per project
+/// (unique index on ProjectId — service enforces upsert semantics).
+/// Captures the procurement Approach + ContractForm + headline
+/// estimated value + key dates + package-breakdown notes. Approval
+/// (F.7 fourth bullet downstream) is recorded via ApprovedById /
+/// ApprovedAt.
+/// </summary>
+public class ProcurementStrategy
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public ProcurementApproach Approach { get; set; }
+    public ContractForm ContractForm { get; set; }
+
+    /// <summary>Headline estimated total project value, in
+    /// Project.Currency. Optional at strategy-capture time —
+    /// finalised after Tender Packages are built up.</summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? EstimatedTotalValue { get; set; }
+
+    /// <summary>Free-text key dates summary (e.g. "OJEU notice
+    /// 2026-06-01; Tender issue 2026-07-01; Award 2026-09-15").
+    /// v1.1 candidate: structured key-dates table (B-NNN — defer
+    /// inline at first real customer demand).</summary>
+    public string? KeyDates { get; set; }
+
+    /// <summary>Free-text breakdown of how the project will be
+    /// packaged for tender (e.g. "Concrete frame; MEP; Fit-out;
+    /// Lifts"). Each named package becomes a TenderPackage row.
+    /// Free text in v1.0; structural link is the TenderPackage
+    /// rows themselves.</summary>
+    public string? PackageBreakdownNotes { get; set; }
+
+    public Guid? ApprovedById { get; set; }
+    public User? ApprovedBy { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// One tender package on a project (T-S6-03, PAFM-SD F.7 second
+/// bullet — "Tender package creation"). Project-scoped sequential
+/// `TP-NNNN`. Multiple packages per project (Concrete frame; MEP;
+/// Fit-out, etc). 3-state workflow Draft → Issued → Closed in
+/// <see cref="CimsApp.Core.TenderPackageWorkflow"/>. Soft-delete
+/// via IsActive — Draft packages can be deactivated; Issued
+/// packages cannot (real bidders are working on them).
+/// </summary>
+public class TenderPackage
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Project-scoped sequential number, e.g. "TP-0001".
+    /// Unique within project; service auto-generates on Create.</summary>
+    [Required, MaxLength(20)] public string Number { get; set; } = "";
+
+    [Required, MaxLength(300)] public string Name { get; set; } = "";
+    public string? Description { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? EstimatedValue { get; set; }
+
+    public DateTime? IssueDate { get; set; }
+    public DateTime? ReturnDate { get; set; }
+
+    public TenderPackageState State { get; set; } = TenderPackageState.Draft;
+
+    public Guid? IssuedById { get; set; }
+    public User? IssuedBy { get; set; }
+    public DateTime? IssuedAt { get; set; }
+
+    public Guid? ClosedById { get; set; }
+    public User? ClosedBy { get; set; }
+    public DateTime? ClosedAt { get; set; }
+
+    /// <summary>Optional FK to the winning Tender once Awarded.
+    /// Set by the Award workflow (T-S6-06).</summary>
+    public Guid? AwardedTenderId { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public Guid CreatedById { get; set; }
+    public User CreatedBy { get; set; } = null!;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<Tender> Tenders { get; set; } = [];
+}
+
+/// <summary>
+/// One bid submitted against a <see cref="TenderPackage"/> (T-S6-04,
+/// PAFM-SD F.7 second bullet — bids received). Recorded by the
+/// project admin / PM at receipt; SubmittedAt is set to UtcNow at
+/// create. Bidders are identified by free-text BidderName +
+/// optional BidderOrganisation; v1.1 candidate is the
+/// pre-qualification register at B-054 which would replace the
+/// free-text identification with a structural FK to a Bidder
+/// entity.
+/// State machine: Submitted → Evaluated (T-S6-05 once criteria
+/// scored) → Awarded | Rejected (T-S6-06 Award workflow). Submitted
+/// → Withdrawn is the bidder-pulls-out branch, allowed only before
+/// evaluation / award (Submitted state only). Awarded / Rejected /
+/// Withdrawn are terminal.
+/// </summary>
+public class Tender
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Denormalised for the tenant query filter — same
+    /// pattern as Dependency.ProjectId. Always equals
+    /// TenderPackage.ProjectId; service enforces.</summary>
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid TenderPackageId { get; set; }
+    public TenderPackage TenderPackage { get; set; } = null!;
+
+    [Required, MaxLength(200)] public string BidderName { get; set; } = "";
+    [MaxLength(200)] public string? BidderOrganisation { get; set; }
+    [MaxLength(200)] public string? ContactEmail { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal BidAmount { get; set; }
+
+    public DateTime SubmittedAt { get; set; } = DateTime.UtcNow;
+
+    public TenderState State { get; set; } = TenderState.Submitted;
+
+    /// <summary>Reason / rationale recorded at the terminal-state
+    /// transition (Withdrawn / Rejected / Awarded). Single field
+    /// covers all three since at most one transition is reached.</summary>
+    public string? StateNote { get; set; }
+
+    /// <summary>Set by the T-S6-06 Award workflow once a winner is
+    /// chosen and a Contract spawned.</summary>
+    public Guid? GeneratedContractId { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public Guid CreatedById { get; set; }
+    public User CreatedBy { get; set; } = null!;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<EvaluationScore> Scores { get; set; } = [];
+}
+
+/// <summary>
+/// One evaluation criterion attached to a <see cref="TenderPackage"/>
+/// (T-S6-05, PAFM-SD F.7 third bullet — "price and quality
+/// weighted"). Per-package weights must sum to 1.0 (epsilon
+/// 0.0001) for the matrix to be valid; the service-layer
+/// validation runs at GetMatrixAsync time so individual weight
+/// edits during Draft don't reject prematurely. Add / Remove
+/// criteria allowed only when the parent TenderPackage is in
+/// Draft state — once Issued the criteria are frozen.
+/// </summary>
+public class EvaluationCriterion
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Denormalised — equals TenderPackage.ProjectId.
+    /// Drives the tenant query filter without a join.</summary>
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid TenderPackageId { get; set; }
+    public TenderPackage TenderPackage { get; set; } = null!;
+
+    [Required, MaxLength(200)] public string Name { get; set; } = "";
+
+    public EvaluationCriterionType Type { get; set; }
+
+    /// <summary>Weight in [0, 1]. The matrix is valid iff Σ
+    /// weights ≈ 1.0 across the package. Stored as decimal(5, 4)
+    /// so weight changes round-trip without floating-point drift.</summary>
+    [Column(TypeName = "decimal(5,4)")]
+    public decimal Weight { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// One score recorded for a specific (Tender, EvaluationCriterion)
+/// pair (T-S6-05). Score in [0, 100]. Optional Notes carries the
+/// evaluator's rationale. Tenant-scoped via the parent Tender.
+/// Service enforces uniqueness on (TenderId, CriterionId) — one
+/// score per pair; re-scoring updates the row in-place.
+/// </summary>
+public class EvaluationScore
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Denormalised — equals Tender.ProjectId.</summary>
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid TenderId { get; set; }
+    public Tender Tender { get; set; } = null!;
+
+    public Guid CriterionId { get; set; }
+    public EvaluationCriterion Criterion { get; set; } = null!;
+
+    [Column(TypeName = "decimal(6,2)")]
+    public decimal Score { get; set; }
+
+    public string? Notes { get; set; }
+
+    public Guid ScoredById { get; set; }
+    public User ScoredBy { get; set; } = null!;
+    public DateTime ScoredAt { get; set; } = DateTime.UtcNow;
+
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// One contract awarded against a winning <see cref="Tender"/>
+/// (T-S6-06, PAFM-SD F.7 fourth bullet — "Award and contract
+/// record"). Spawned atomically by
+/// <see cref="CimsApp.Services.TenderPackagesService"/>'s
+/// AwardAsync method (mirrors the S5 Approve→Variation pattern).
+/// Project-scoped sequential `CON-NNNN`. ContractValue +
+/// ContractorName + ContractorOrganisation are copied from the
+/// winning Tender at award time so the contract record is stable
+/// even if the Tender row is later modified.
+/// </summary>
+public class Contract
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Project-scoped sequential number, e.g. "CON-0001".
+    /// Unique within project; service auto-generates at Award.</summary>
+    [Required, MaxLength(20)] public string Number { get; set; } = "";
+
+    public Guid TenderPackageId { get; set; }
+    public TenderPackage TenderPackage { get; set; } = null!;
+
+    public Guid AwardedTenderId { get; set; }
+    public Tender AwardedTender { get; set; } = null!;
+
+    /// <summary>Copied from <see cref="Tender.BidderName"/> at
+    /// award time; persisted distinctly so the contract record
+    /// remains stable.</summary>
+    [Required, MaxLength(200)] public string ContractorName { get; set; } = "";
+    [MaxLength(200)] public string? ContractorOrganisation { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal ContractValue { get; set; }
+
+    /// <summary>Form of contract under which the award lands. v1.0
+    /// defaults to <see cref="CimsApp.Models.ContractForm.Other"/>
+    /// if not supplied at award time and no
+    /// <see cref="ProcurementStrategy"/> exists; takes the
+    /// strategy's <see cref="ProcurementStrategy.ContractForm"/>
+    /// otherwise. Caller can override at award time.</summary>
+    public ContractForm ContractForm { get; set; } = ContractForm.Other;
+
+    public DateTime? StartDate { get; set; }
+    public DateTime? EndDate { get; set; }
+
+    public ContractState State { get; set; } = ContractState.Active;
+
+    /// <summary>Award rationale captured at AwardAsync time.</summary>
+    public string? AwardNote { get; set; }
+
+    public DateTime AwardedAt { get; set; } = DateTime.UtcNow;
+    public Guid AwardedById { get; set; }
+    public User AwardedBy { get; set; } = null!;
+
+    public DateTime? ClosedAt { get; set; }
+    public Guid? ClosedById { get; set; }
+    public User? ClosedBy { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<EarlyWarning> EarlyWarnings { get; set; } = [];
+}
+
+/// <summary>
+/// Per-contract early-warning notice (T-S6-07, PAFM-SD F.7 fifth
+/// bullet — NEC4 clause 15 "Early Warning Notice"). The contractor
+/// or PM raises an EW when an event becomes likely that could
+/// increase cost / delay completion / impair performance. Linear
+/// 3-state workflow Raised → UnderReview → Closed. Tenant-scoped
+/// indirectly through Contract.Project.
+/// </summary>
+public class EarlyWarning
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Denormalised — equals Contract.ProjectId. Drives
+    /// the tenant query filter without a join.</summary>
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid ContractId { get; set; }
+    public Contract Contract { get; set; } = null!;
+
+    [Required, MaxLength(300)] public string Title { get; set; } = "";
+    public string? Description { get; set; }
+
+    public EarlyWarningState State { get; set; } = EarlyWarningState.Raised;
+
+    public Guid RaisedById { get; set; }
+    public User RaisedBy { get; set; } = null!;
+    public DateTime RaisedAt { get; set; } = DateTime.UtcNow;
+
+    public Guid? ReviewedById { get; set; }
+    public User? ReviewedBy { get; set; }
+    public DateTime? ReviewedAt { get; set; }
+    /// <summary>Required when transitioning to UnderReview — the
+    /// reviewer's analysis is the whole point of the review step.</summary>
+    public string? ResponseNote { get; set; }
+
+    public Guid? ClosedById { get; set; }
+    public User? ClosedBy { get; set; }
+    public DateTime? ClosedAt { get; set; }
+    /// <summary>Optional rationale at close-out.</summary>
+    public string? ClosureNote { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Per-contract compensation event (T-S6-08, PAFM-SD F.7 fifth
+/// bullet — NEC4 clause 60.1 "Compensation Events"). Formal
+/// notice with cost / time impact. 5-state workflow Notified →
+/// Quoted → Accepted | Rejected → Implemented (with the
+/// Notified → Rejected branch for clause 61.4 "PM notifies it is
+/// not a CE"). State-machine enforcement in
+/// <see cref="CimsApp.Core.CompensationEventWorkflow"/>.
+/// Project-scoped sequential `CE-NNNN`. Tenant-scoped indirectly
+/// through Contract.Project.
+/// </summary>
+public class CompensationEvent
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Denormalised — equals Contract.ProjectId.</summary>
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid ContractId { get; set; }
+    public Contract Contract { get; set; } = null!;
+
+    /// <summary>Project-scoped sequential number, e.g. "CE-0001".
+    /// Unique within project; service auto-generates on Notify.</summary>
+    [Required, MaxLength(20)] public string Number { get; set; } = "";
+
+    [Required, MaxLength(300)] public string Title { get; set; } = "";
+    public string? Description { get; set; }
+
+    public CompensationEventState State { get; set; } = CompensationEventState.Notified;
+
+    public Guid NotifiedById { get; set; }
+    public User NotifiedBy { get; set; } = null!;
+    public DateTime NotifiedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>Quotation cost impact (decimal(18,2) nullable).
+    /// Recorded at Quote transition. Always null at Notified state.
+    /// Risk-allowance / disallowance rules deferred to v1.1 / B-050.</summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? EstimatedCostImpact { get; set; }
+    public int? EstimatedTimeImpactDays { get; set; }
+
+    public Guid? QuotedById { get; set; }
+    public User? QuotedBy { get; set; }
+    public DateTime? QuotedAt { get; set; }
+    /// <summary>Quotation rationale captured at Quote.</summary>
+    public string? QuotationNote { get; set; }
+
+    public Guid? DecisionById { get; set; }
+    public User? DecisionBy { get; set; }
+    public DateTime? DecisionAt { get; set; }
+    /// <summary>Approval / rejection rationale; required at the
+    /// accept / reject transition.</summary>
+    public string? DecisionNote { get; set; }
+
+    public DateTime? ImplementedAt { get; set; }
+    public Guid? ImplementedById { get; set; }
+    public User? ImplementedBy { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+

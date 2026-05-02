@@ -95,3 +95,73 @@ public enum BsaHrbCategory { NotApplicable, A, B, C }
 // Implemented → Closed. State-machine enforcement in
 // Core/ChangeWorkflow.cs.
 public enum ChangeRequestState { Raised, Assessed, Approved, Rejected, Implemented, Closed }
+
+// S6 Procurement module (PAFM-SD F.7).
+// Procurement approach — F.7 first bullet (strategy capture). UK
+// construction default options. v1.1 candidate: per-tenant
+// configurable approach catalogue.
+public enum ProcurementApproach
+{
+    Traditional,
+    DesignAndBuild,
+    ConstructionManagement,
+    ManagementContracting,
+    PartneringFramework,
+    Other,
+}
+// Contract form — F.7 first bullet. NEC4 Options A..F + JCT
+// Standard Building / Design and Build are the dominant UK forms.
+// "Other" covers JCT minor works, FIDIC, bespoke contracts, etc.
+public enum ContractForm
+{
+    Nec4OptionA,   // Priced contract with activity schedule
+    Nec4OptionB,   // Priced contract with bill of quantities
+    Nec4OptionC,   // Target contract with activity schedule
+    Nec4OptionD,   // Target contract with bill of quantities
+    Nec4OptionE,   // Cost reimbursable contract
+    Nec4OptionF,   // Management contract
+    JctStandardBuilding,
+    JctDesignAndBuild,
+    Other,
+}
+// 3-state TenderPackage workflow — F.7 second bullet.
+// Draft → Issued → Closed. Draft is editable; once Issued the
+// package is frozen (bidders are working on it). Closed is
+// terminal — reached via Award (T-S6-06) or via explicit Close
+// (abandon-without-award). State-machine enforcement in
+// Core/TenderPackageWorkflow.cs.
+public enum TenderPackageState { Draft, Issued, Closed }
+// Tender lifecycle (T-S6-04 onwards). Submitted is the initial
+// state when the bid is recorded. Evaluated is set by T-S6-05
+// once all required criteria scores are recorded. Awarded /
+// Rejected are set by the T-S6-06 Award workflow. Withdrawn is
+// the bidder-pulls-out branch (only allowed before evaluation /
+// award). Awarded / Rejected / Withdrawn are all terminal.
+public enum TenderState { Submitted, Evaluated, Awarded, Rejected, Withdrawn }
+// EvaluationCriterion type — F.7 third bullet ("price and quality
+// weighted"). v1.0 buckets every criterion as Price or Quality;
+// finer typology (e.g. social value, sustainability) lands as
+// per-tenant configurable categories in v1.1 (B-NNN, deferred).
+public enum EvaluationCriterionType { Price, Quality }
+// Contract state — F.7 fourth bullet ("Award and contract
+// record"). v1.0 ships Active → Closed only. Richer states
+// (Suspended, Terminated, Disputed, etc.) are a v1.1 extension
+// driven by NEC4 / JCT contract clauses; deferred until pilot
+// usage surfaces the need.
+public enum ContractState { Active, Closed }
+// EarlyWarning workflow — F.7 fifth bullet (NEC clause 15).
+// Linear 3-state: Raised → UnderReview → Closed. Inline state
+// guard in the service — too small to warrant a Core/<X>.cs file.
+public enum EarlyWarningState { Raised, UnderReview, Closed }
+// CompensationEvent workflow — F.7 fifth bullet (NEC4 clause 60.1).
+// 5-state: Notified → Quoted → Accepted | Rejected → Implemented.
+// Notified → Rejected branch covers NEC4 clause 61.4 ("PM notifies
+// it is not a CE"). v1.0 ships the bare workflow without the
+// deadline-driven automatic transitions (PM 4-week notification
+// → B-048, contractor 3-week quotation → B-049, risk-allowance
+// pricing → B-050; all in v1.1 backlog).
+// State-machine enforcement in Core/CompensationEventWorkflow.cs.
+public enum CompensationEventState
+{
+    Notified, Quoted, Accepted, Rejected, Implemented,
+}

@@ -1169,6 +1169,404 @@ public class ChangeRequestsController(ChangeRequestService svc, CimsDbContext db
     }
 }
 
+// ── Procurement (T-S6-02) ─────────────────────────────────────────────────────
+// PAFM-SD F.7. Project-level procurement strategy (single row per project).
+[Route("api/v1/projects/{projectId:guid}/procurement/strategy")]
+public class ProcurementStrategyController(ProcurementStrategyService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> Get(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var s = await svc.GetAsync(projectId, ct);
+        return Ok(new { success = true, data = s });
+    }
+
+    [HttpPut]
+    public async Task<IActionResult> Upsert(
+        Guid projectId, UpsertProcurementStrategyRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var s = await svc.CreateOrUpdateAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = s });
+    }
+
+    [HttpPost("approve")]
+    public async Task<IActionResult> Approve(Guid projectId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var s = await svc.ApproveAsync(projectId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = s });
+    }
+}
+
+// PAFM-SD F.7 second bullet — Tender packages.
+[Route("api/v1/projects/{projectId:guid}/procurement/tender-packages")]
+public class TenderPackagesController(TenderPackagesService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(
+        Guid projectId, [FromQuery] string? state = null, CancellationToken ct = default)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        TenderPackageState? s = Enum.TryParse<TenderPackageState>(state, true, out var p) ? p : null;
+        var rows = await svc.ListAsync(projectId, s, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpGet("{tenderPackageId:guid}")]
+    public async Task<IActionResult> Get(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var t = await svc.GetAsync(projectId, tenderPackageId, ct);
+        return Ok(new { success = true, data = t });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Create(
+        Guid projectId, CreateTenderPackageRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var t = await svc.CreateAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = t });
+    }
+
+    [HttpPut("{tenderPackageId:guid}")]
+    public async Task<IActionResult> Update(
+        Guid projectId, Guid tenderPackageId,
+        UpdateTenderPackageRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var t = await svc.UpdateAsync(projectId, tenderPackageId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = t });
+    }
+
+    [HttpPost("{tenderPackageId:guid}/issue")]
+    public async Task<IActionResult> Issue(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var t = await svc.IssueAsync(projectId, tenderPackageId,
+            CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = t });
+    }
+
+    [HttpPost("{tenderPackageId:guid}/close")]
+    public async Task<IActionResult> Close(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var t = await svc.CloseAsync(projectId, tenderPackageId,
+            CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = t });
+    }
+
+    [HttpPost("{tenderPackageId:guid}/deactivate")]
+    public async Task<IActionResult> Deactivate(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var t = await svc.DeactivateAsync(projectId, tenderPackageId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = t });
+    }
+
+    [HttpPost("{tenderPackageId:guid}/award")]
+    public async Task<IActionResult> Award(
+        Guid projectId, Guid tenderPackageId,
+        AwardTenderPackageRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var contract = await svc.AwardAsync(projectId, tenderPackageId, req,
+            CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = contract });
+    }
+}
+
+// PAFM-SD F.7 — Tenders (bids submitted against an Issued package).
+[Route("api/v1/projects/{projectId:guid}/procurement/tender-packages/{tenderPackageId:guid}/tenders")]
+public class TendersController(TendersService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListAsync(projectId, tenderPackageId, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpGet("{tenderId:guid}")]
+    public async Task<IActionResult> Get(
+        Guid projectId, Guid tenderPackageId, Guid tenderId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var t = await svc.GetAsync(projectId, tenderId, ct);
+        return Ok(new { success = true, data = t });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Submit(
+        Guid projectId, Guid tenderPackageId,
+        SubmitTenderRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var t = await svc.SubmitAsync(projectId, tenderPackageId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = t });
+    }
+
+    [HttpPost("{tenderId:guid}/withdraw")]
+    public async Task<IActionResult> Withdraw(
+        Guid projectId, Guid tenderPackageId, Guid tenderId,
+        WithdrawTenderRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var t = await svc.WithdrawAsync(projectId, tenderId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = t });
+    }
+}
+
+// PAFM-SD F.7 third bullet — evaluation matrix (criteria + scores).
+[Route("api/v1/projects/{projectId:guid}/procurement/tender-packages/{tenderPackageId:guid}")]
+public class EvaluationController(EvaluationService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet("evaluation-criteria")]
+    public async Task<IActionResult> ListCriteria(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListCriteriaAsync(projectId, tenderPackageId, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpPost("evaluation-criteria")]
+    public async Task<IActionResult> AddCriterion(
+        Guid projectId, Guid tenderPackageId,
+        AddEvaluationCriterionRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var c = await svc.AddCriterionAsync(projectId, tenderPackageId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = c });
+    }
+
+    [HttpPut("evaluation-criteria/{criterionId:guid}")]
+    public async Task<IActionResult> UpdateCriterion(
+        Guid projectId, Guid tenderPackageId, Guid criterionId,
+        UpdateEvaluationCriterionRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var c = await svc.UpdateCriterionAsync(projectId, tenderPackageId, criterionId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = c });
+    }
+
+    [HttpDelete("evaluation-criteria/{criterionId:guid}")]
+    public async Task<IActionResult> RemoveCriterion(
+        Guid projectId, Guid tenderPackageId, Guid criterionId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.RemoveCriterionAsync(projectId, tenderPackageId, criterionId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
+
+    [HttpPut("tenders/{tenderId:guid}/scores/{criterionId:guid}")]
+    public async Task<IActionResult> SetScore(
+        Guid projectId, Guid tenderPackageId, Guid tenderId, Guid criterionId,
+        SetEvaluationScoreRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.InformationManager))
+            throw new ForbiddenException();
+        var s = await svc.SetScoreAsync(projectId, tenderId, criterionId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = s });
+    }
+
+    [HttpGet("evaluation-matrix")]
+    public async Task<IActionResult> GetMatrix(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetMatrixAsync(projectId, tenderPackageId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+}
+
+// PAFM-SD F.7 fifth bullet — early warnings (NEC4 clause 15).
+[Route("api/v1/projects/{projectId:guid}/procurement/contracts/{contractId:guid}/early-warnings")]
+public class EarlyWarningsController(EarlyWarningsService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(
+        Guid projectId, Guid contractId,
+        [FromQuery] string? state = null, CancellationToken ct = default)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        EarlyWarningState? s = Enum.TryParse<EarlyWarningState>(state, true, out var p) ? p : null;
+        var rows = await svc.ListAsync(projectId, contractId, s, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpGet("{earlyWarningId:guid}")]
+    public async Task<IActionResult> Get(
+        Guid projectId, Guid contractId, Guid earlyWarningId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var w = await svc.GetAsync(projectId, earlyWarningId, ct);
+        return Ok(new { success = true, data = w });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Raise(
+        Guid projectId, Guid contractId,
+        RaiseEarlyWarningRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var w = await svc.RaiseAsync(projectId, contractId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = w });
+    }
+
+    [HttpPost("{earlyWarningId:guid}/review")]
+    public async Task<IActionResult> Review(
+        Guid projectId, Guid contractId, Guid earlyWarningId,
+        ReviewEarlyWarningRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.InformationManager))
+            throw new ForbiddenException();
+        var w = await svc.ReviewAsync(projectId, earlyWarningId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = w });
+    }
+
+    [HttpPost("{earlyWarningId:guid}/close")]
+    public async Task<IActionResult> Close(
+        Guid projectId, Guid contractId, Guid earlyWarningId,
+        CloseEarlyWarningRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var w = await svc.CloseAsync(projectId, earlyWarningId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = w });
+    }
+}
+
+// PAFM-SD F.7 fifth bullet — compensation events (NEC4 clause 60.1).
+[Route("api/v1/projects/{projectId:guid}/procurement/contracts/{contractId:guid}/compensation-events")]
+public class CompensationEventsController(CompensationEventsService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(
+        Guid projectId, Guid contractId,
+        [FromQuery] string? state = null, CancellationToken ct = default)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        CompensationEventState? s = Enum.TryParse<CompensationEventState>(state, true, out var p) ? p : null;
+        var rows = await svc.ListAsync(projectId, contractId, s, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpGet("{compensationEventId:guid}")]
+    public async Task<IActionResult> Get(
+        Guid projectId, Guid contractId, Guid compensationEventId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var ce = await svc.GetAsync(projectId, compensationEventId, ct);
+        return Ok(new { success = true, data = ce });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Notify(
+        Guid projectId, Guid contractId,
+        NotifyCompensationEventRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var ce = await svc.NotifyAsync(projectId, contractId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = ce });
+    }
+
+    [HttpPost("{compensationEventId:guid}/quote")]
+    public async Task<IActionResult> Quote(
+        Guid projectId, Guid contractId, Guid compensationEventId,
+        QuoteCompensationEventRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var ce = await svc.QuoteAsync(projectId, compensationEventId, req,
+            CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = ce });
+    }
+
+    [HttpPost("{compensationEventId:guid}/accept")]
+    public async Task<IActionResult> Accept(
+        Guid projectId, Guid contractId, Guid compensationEventId,
+        DecideCompensationEventRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var ce = await svc.AcceptAsync(projectId, compensationEventId, req,
+            CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = ce });
+    }
+
+    [HttpPost("{compensationEventId:guid}/reject")]
+    public async Task<IActionResult> Reject(
+        Guid projectId, Guid contractId, Guid compensationEventId,
+        DecideCompensationEventRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var ce = await svc.RejectAsync(projectId, compensationEventId, req,
+            CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = ce });
+    }
+
+    [HttpPost("{compensationEventId:guid}/implement")]
+    public async Task<IActionResult> Implement(
+        Guid projectId, Guid contractId, Guid compensationEventId,
+        ImplementCompensationEventRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var ce = await svc.ImplementAsync(projectId, compensationEventId, req,
+            CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = ce });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

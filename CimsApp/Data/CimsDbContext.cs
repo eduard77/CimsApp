@@ -58,6 +58,14 @@ public class CimsDbContext(
     public DbSet<WeeklyWorkPlan>      WeeklyWorkPlans      => Set<WeeklyWorkPlan>();
     public DbSet<WeeklyTaskCommitment> WeeklyTaskCommitments => Set<WeeklyTaskCommitment>();
     public DbSet<ChangeRequest>       ChangeRequests       => Set<ChangeRequest>();
+    public DbSet<ProcurementStrategy> ProcurementStrategies => Set<ProcurementStrategy>();
+    public DbSet<TenderPackage>       TenderPackages       => Set<TenderPackage>();
+    public DbSet<Tender>              Tenders              => Set<Tender>();
+    public DbSet<EvaluationCriterion> EvaluationCriteria   => Set<EvaluationCriterion>();
+    public DbSet<EvaluationScore>     EvaluationScores     => Set<EvaluationScore>();
+    public DbSet<Contract>            Contracts            => Set<Contract>();
+    public DbSet<EarlyWarning>        EarlyWarnings        => Set<EarlyWarning>();
+    public DbSet<CompensationEvent>   CompensationEvents   => Set<CompensationEvent>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -522,6 +530,130 @@ public class CimsDbContext(
              .HasForeignKey(c => c.GeneratedVariationId).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<ProcurementStrategy>(e =>
+        {
+            // One row per project — unique constraint enforces
+            // upsert semantics at the DB layer; the service-layer
+            // CreateOrUpdateAsync method does the read-then-update
+            // dance.
+            e.HasIndex(s => s.ProjectId).IsUnique();
+            e.HasOne(s => s.Project).WithMany()
+             .HasForeignKey(s => s.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(s => s.ApprovedBy).WithMany()
+             .HasForeignKey(s => s.ApprovedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<TenderPackage>(e =>
+        {
+            // Project-scoped sequential number — unique within project.
+            e.HasIndex(t => new { t.ProjectId, t.Number }).IsUnique();
+            // Listing renders by (ProjectId, State, IsActive).
+            e.HasIndex(t => new { t.ProjectId, t.State });
+            e.HasIndex(t => new { t.ProjectId, t.IsActive });
+            e.HasOne(t => t.Project).WithMany()
+             .HasForeignKey(t => t.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(t => t.CreatedBy).WithMany()
+             .HasForeignKey(t => t.CreatedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(t => t.IssuedBy).WithMany()
+             .HasForeignKey(t => t.IssuedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(t => t.ClosedBy).WithMany()
+             .HasForeignKey(t => t.ClosedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<Tender>(e =>
+        {
+            // Listings hit (TenderPackageId, State) for the per-package
+            // bid-evaluation view.
+            e.HasIndex(t => new { t.TenderPackageId, t.State });
+            e.HasIndex(t => new { t.ProjectId, t.SubmittedAt });
+            e.HasOne(t => t.Project).WithMany()
+             .HasForeignKey(t => t.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(t => t.TenderPackage).WithMany(p => p.Tenders)
+             .HasForeignKey(t => t.TenderPackageId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(t => t.CreatedBy).WithMany()
+             .HasForeignKey(t => t.CreatedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<EvaluationCriterion>(e =>
+        {
+            e.HasIndex(c => c.TenderPackageId);
+            e.HasOne(c => c.Project).WithMany()
+             .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.TenderPackage).WithMany()
+             .HasForeignKey(c => c.TenderPackageId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<EvaluationScore>(e =>
+        {
+            // One score per (Tender, Criterion) pair — re-scoring
+            // updates in place. Unique index guards against double-write.
+            e.HasIndex(s => new { s.TenderId, s.CriterionId }).IsUnique();
+            e.HasOne(s => s.Project).WithMany()
+             .HasForeignKey(s => s.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(s => s.Tender).WithMany(t => t.Scores)
+             .HasForeignKey(s => s.TenderId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(s => s.Criterion).WithMany()
+             .HasForeignKey(s => s.CriterionId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(s => s.ScoredBy).WithMany()
+             .HasForeignKey(s => s.ScoredById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<Contract>(e =>
+        {
+            // Project-scoped sequential number — unique within project.
+            e.HasIndex(c => new { c.ProjectId, c.Number }).IsUnique();
+            e.HasIndex(c => new { c.ProjectId, c.State });
+            e.HasOne(c => c.Project).WithMany()
+             .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.TenderPackage).WithMany()
+             .HasForeignKey(c => c.TenderPackageId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.AwardedTender).WithMany()
+             .HasForeignKey(c => c.AwardedTenderId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.AwardedBy).WithMany()
+             .HasForeignKey(c => c.AwardedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.ClosedBy).WithMany()
+             .HasForeignKey(c => c.ClosedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<EarlyWarning>(e =>
+        {
+            // Listings hit (ContractId, State) for the per-contract
+            // EW board and (ProjectId, RaisedAt) for project-wide EW
+            // audits.
+            e.HasIndex(w => new { w.ContractId, w.State });
+            e.HasIndex(w => new { w.ProjectId, w.RaisedAt });
+            e.HasOne(w => w.Project).WithMany()
+             .HasForeignKey(w => w.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(w => w.Contract).WithMany(c => c.EarlyWarnings)
+             .HasForeignKey(w => w.ContractId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(w => w.RaisedBy).WithMany()
+             .HasForeignKey(w => w.RaisedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(w => w.ReviewedBy).WithMany()
+             .HasForeignKey(w => w.ReviewedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(w => w.ClosedBy).WithMany()
+             .HasForeignKey(w => w.ClosedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<CompensationEvent>(e =>
+        {
+            // Project-scoped sequential CE-NNNN; unique per project.
+            e.HasIndex(c => new { c.ProjectId, c.Number }).IsUnique();
+            e.HasIndex(c => new { c.ContractId, c.State });
+            e.HasIndex(c => new { c.ProjectId, c.NotifiedAt });
+            e.HasOne(c => c.Project).WithMany()
+             .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.Contract).WithMany()
+             .HasForeignKey(c => c.ContractId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.NotifiedBy).WithMany()
+             .HasForeignKey(c => c.NotifiedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.QuotedBy).WithMany()
+             .HasForeignKey(c => c.QuotedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.DecisionBy).WithMany()
+             .HasForeignKey(c => c.DecisionById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.ImplementedBy).WithMany()
+             .HasForeignKey(c => c.ImplementedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -571,6 +703,14 @@ public class CimsDbContext(
         m.Entity<WeeklyWorkPlan>().HasQueryFilter(w => w.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<WeeklyTaskCommitment>().HasQueryFilter(c => c.WeeklyWorkPlan.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<ChangeRequest>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<ProcurementStrategy>().HasQueryFilter(s => s.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<TenderPackage>().HasQueryFilter(t => t.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Tender>().HasQueryFilter(t => t.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<EvaluationCriterion>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<EvaluationScore>().HasQueryFilter(s => s.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Contract>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<EarlyWarning>().HasQueryFilter(w => w.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<CompensationEvent>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -599,6 +739,14 @@ public class CimsDbContext(
             else if (e.Entity is Activity act) act.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is WeeklyTaskCommitment wtc) wtc.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is ChangeRequest cr) cr.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is ProcurementStrategy ps) ps.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is TenderPackage tp) tp.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is Tender ten) ten.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is EvaluationCriterion ec) ec.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is EvaluationScore es) es.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is Contract con) con.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is EarlyWarning ew) ew.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is CompensationEvent ce) ce.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

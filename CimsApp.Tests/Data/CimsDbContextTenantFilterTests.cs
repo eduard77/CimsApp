@@ -56,6 +56,15 @@ public class CimsDbContextTenantFilterTests
         typeof(WeeklyTaskCommitment),
         // S5 change-control addition (T-S5-02).
         typeof(ChangeRequest),
+        // S6 procurement-domain additions (T-S6-02 onwards).
+        typeof(ProcurementStrategy),
+        typeof(TenderPackage),
+        typeof(Tender),
+        typeof(EvaluationCriterion),
+        typeof(EvaluationScore),
+        typeof(Contract),
+        typeof(EarlyWarning),
+        typeof(CompensationEvent),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =

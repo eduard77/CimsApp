@@ -4,6 +4,7 @@ using CimsApp.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CimsApp.Migrations
 {
     [DbContext(typeof(CimsDbContext))]
-    partial class CimsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260502071908_AddContracts")]
+    partial class AddContracts
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -531,96 +534,6 @@ namespace CimsApp.Migrations
                     b.ToTable("CommunicationItems");
                 });
 
-            modelBuilder.Entity("CimsApp.Models.CompensationEvent", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("ContractId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("DecisionAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("DecisionById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("DecisionNote")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<decimal?>("EstimatedCostImpact")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<int?>("EstimatedTimeImpactDays")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("ImplementedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("ImplementedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("NotifiedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("NotifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Number")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("QuotationNote")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("QuotedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("QuotedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("State")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DecisionById");
-
-                    b.HasIndex("ImplementedById");
-
-                    b.HasIndex("NotifiedById");
-
-                    b.HasIndex("QuotedById");
-
-                    b.HasIndex("ContractId", "State");
-
-                    b.HasIndex("ProjectId", "NotifiedAt");
-
-                    b.HasIndex("ProjectId", "Number")
-                        .IsUnique();
-
-                    b.ToTable("CompensationEvents");
-                });
-
             modelBuilder.Entity("CimsApp.Models.Contract", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1012,74 +925,6 @@ namespace CimsApp.Migrations
                         .IsUnique();
 
                     b.ToTable("DocumentRevisions");
-                });
-
-            modelBuilder.Entity("CimsApp.Models.EarlyWarning", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("ClosedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("ClosedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ClosureNote")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid>("ContractId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("RaisedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("RaisedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ResponseNote")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("ReviewedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("ReviewedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("State")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ClosedById");
-
-                    b.HasIndex("RaisedById");
-
-                    b.HasIndex("ReviewedById");
-
-                    b.HasIndex("ContractId", "State");
-
-                    b.HasIndex("ProjectId", "RaisedAt");
-
-                    b.ToTable("EarlyWarnings");
                 });
 
             modelBuilder.Entity("CimsApp.Models.EngagementLog", b =>
@@ -2667,54 +2512,6 @@ namespace CimsApp.Migrations
                     b.Navigation("Project");
                 });
 
-            modelBuilder.Entity("CimsApp.Models.CompensationEvent", b =>
-                {
-                    b.HasOne("CimsApp.Models.Contract", "Contract")
-                        .WithMany()
-                        .HasForeignKey("ContractId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.User", "DecisionBy")
-                        .WithMany()
-                        .HasForeignKey("DecisionById")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("CimsApp.Models.User", "ImplementedBy")
-                        .WithMany()
-                        .HasForeignKey("ImplementedById")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("CimsApp.Models.User", "NotifiedBy")
-                        .WithMany()
-                        .HasForeignKey("NotifiedById")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.Project", "Project")
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.User", "QuotedBy")
-                        .WithMany()
-                        .HasForeignKey("QuotedById")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.Navigation("Contract");
-
-                    b.Navigation("DecisionBy");
-
-                    b.Navigation("ImplementedBy");
-
-                    b.Navigation("NotifiedBy");
-
-                    b.Navigation("Project");
-
-                    b.Navigation("QuotedBy");
-                });
-
             modelBuilder.Entity("CimsApp.Models.Contract", b =>
                 {
                     b.HasOne("CimsApp.Models.User", "AwardedBy")
@@ -2856,47 +2653,6 @@ namespace CimsApp.Migrations
                     b.Navigation("Document");
 
                     b.Navigation("UploadedBy");
-                });
-
-            modelBuilder.Entity("CimsApp.Models.EarlyWarning", b =>
-                {
-                    b.HasOne("CimsApp.Models.User", "ClosedBy")
-                        .WithMany()
-                        .HasForeignKey("ClosedById")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("CimsApp.Models.Contract", "Contract")
-                        .WithMany("EarlyWarnings")
-                        .HasForeignKey("ContractId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.Project", "Project")
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.User", "RaisedBy")
-                        .WithMany()
-                        .HasForeignKey("RaisedById")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.User", "ReviewedBy")
-                        .WithMany()
-                        .HasForeignKey("ReviewedById")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.Navigation("ClosedBy");
-
-                    b.Navigation("Contract");
-
-                    b.Navigation("Project");
-
-                    b.Navigation("RaisedBy");
-
-                    b.Navigation("ReviewedBy");
                 });
 
             modelBuilder.Entity("CimsApp.Models.EngagementLog", b =>
@@ -3466,11 +3222,6 @@ namespace CimsApp.Migrations
             modelBuilder.Entity("CimsApp.Models.CdeContainer", b =>
                 {
                     b.Navigation("Documents");
-                });
-
-            modelBuilder.Entity("CimsApp.Models.Contract", b =>
-                {
-                    b.Navigation("EarlyWarnings");
                 });
 
             modelBuilder.Entity("CimsApp.Models.CostBreakdownItem", b =>
