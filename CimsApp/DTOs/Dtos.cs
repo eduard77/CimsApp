@@ -412,6 +412,18 @@ public record EvaluationMatrixDto(
     decimal TotalWeight,
     bool IsValid,
     List<EvaluationMatrixRowDto> Tenders);
+// T-S6-06 Award request. Atomically transitions winning Tender →
+// Awarded, all other active Tenders in the package → Rejected,
+// closes the package, and spawns a Contract row. ContractForm
+// optional (defaults to ProcurementStrategy.ContractForm if a
+// strategy exists, else Other). Start / End dates optional at
+// award time — typically filled in once the contract is signed.
+public record AwardTenderPackageRequest(
+    Guid AwardedTenderId,
+    string AwardNote,
+    ContractForm? ContractForm,
+    DateTime? ContractStartDate,
+    DateTime? ContractEndDate);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

@@ -63,6 +63,7 @@ public class CimsDbContext(
     public DbSet<Tender>              Tenders              => Set<Tender>();
     public DbSet<EvaluationCriterion> EvaluationCriteria   => Set<EvaluationCriterion>();
     public DbSet<EvaluationScore>     EvaluationScores     => Set<EvaluationScore>();
+    public DbSet<Contract>            Contracts            => Set<Contract>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -595,6 +596,23 @@ public class CimsDbContext(
              .HasForeignKey(s => s.ScoredById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<Contract>(e =>
+        {
+            // Project-scoped sequential number — unique within project.
+            e.HasIndex(c => new { c.ProjectId, c.Number }).IsUnique();
+            e.HasIndex(c => new { c.ProjectId, c.State });
+            e.HasOne(c => c.Project).WithMany()
+             .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.TenderPackage).WithMany()
+             .HasForeignKey(c => c.TenderPackageId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.AwardedTender).WithMany()
+             .HasForeignKey(c => c.AwardedTenderId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.AwardedBy).WithMany()
+             .HasForeignKey(c => c.AwardedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.ClosedBy).WithMany()
+             .HasForeignKey(c => c.ClosedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -649,6 +667,7 @@ public class CimsDbContext(
         m.Entity<Tender>().HasQueryFilter(t => t.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<EvaluationCriterion>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<EvaluationScore>().HasQueryFilter(s => s.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Contract>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -682,6 +701,7 @@ public class CimsDbContext(
             else if (e.Entity is Tender ten) ten.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is EvaluationCriterion ec) ec.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is EvaluationScore es) es.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is Contract con) con.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

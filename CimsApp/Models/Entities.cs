@@ -1581,3 +1581,68 @@ public class EvaluationScore
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// One contract awarded against a winning <see cref="Tender"/>
+/// (T-S6-06, PAFM-SD F.7 fourth bullet — "Award and contract
+/// record"). Spawned atomically by
+/// <see cref="CimsApp.Services.TenderPackagesService"/>'s
+/// AwardAsync method (mirrors the S5 Approve→Variation pattern).
+/// Project-scoped sequential `CON-NNNN`. ContractValue +
+/// ContractorName + ContractorOrganisation are copied from the
+/// winning Tender at award time so the contract record is stable
+/// even if the Tender row is later modified.
+/// </summary>
+public class Contract
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Project-scoped sequential number, e.g. "CON-0001".
+    /// Unique within project; service auto-generates at Award.</summary>
+    [Required, MaxLength(20)] public string Number { get; set; } = "";
+
+    public Guid TenderPackageId { get; set; }
+    public TenderPackage TenderPackage { get; set; } = null!;
+
+    public Guid AwardedTenderId { get; set; }
+    public Tender AwardedTender { get; set; } = null!;
+
+    /// <summary>Copied from <see cref="Tender.BidderName"/> at
+    /// award time; persisted distinctly so the contract record
+    /// remains stable.</summary>
+    [Required, MaxLength(200)] public string ContractorName { get; set; } = "";
+    [MaxLength(200)] public string? ContractorOrganisation { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal ContractValue { get; set; }
+
+    /// <summary>Form of contract under which the award lands. v1.0
+    /// defaults to <see cref="CimsApp.Models.ContractForm.Other"/>
+    /// if not supplied at award time and no
+    /// <see cref="ProcurementStrategy"/> exists; takes the
+    /// strategy's <see cref="ProcurementStrategy.ContractForm"/>
+    /// otherwise. Caller can override at award time.</summary>
+    public ContractForm ContractForm { get; set; } = ContractForm.Other;
+
+    public DateTime? StartDate { get; set; }
+    public DateTime? EndDate { get; set; }
+
+    public ContractState State { get; set; } = ContractState.Active;
+
+    /// <summary>Award rationale captured at AwardAsync time.</summary>
+    public string? AwardNote { get; set; }
+
+    public DateTime AwardedAt { get; set; } = DateTime.UtcNow;
+    public Guid AwardedById { get; set; }
+    public User AwardedBy { get; set; } = null!;
+
+    public DateTime? ClosedAt { get; set; }
+    public Guid? ClosedById { get; set; }
+    public User? ClosedBy { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+

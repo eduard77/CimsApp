@@ -143,3 +143,9 @@ public enum TenderState { Submitted, Evaluated, Awarded, Rejected, Withdrawn }
 // finer typology (e.g. social value, sustainability) lands as
 // per-tenant configurable categories in v1.1 (B-NNN, deferred).
 public enum EvaluationCriterionType { Price, Quality }
+// Contract state — F.7 fourth bullet ("Award and contract
+// record"). v1.0 ships Active → Closed only. Richer states
+// (Suspended, Terminated, Disputed, etc.) are a v1.1 extension
+// driven by NEC4 / JCT contract clauses; deferred until pilot
+// usage surfaces the need.
+public enum ContractState { Active, Closed }

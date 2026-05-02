@@ -4053,6 +4053,152 @@ public class TenderPackagesService(CimsDbContext db, AuditService audit)
             throw new ForbiddenException(
                 $"Role {role} cannot perform the {from} → {to} transition");
     }
+
+    // ── Award (T-S6-06) ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Award a TenderPackage to a winning Tender (PAFM-SD F.7
+    /// fourth bullet). Mirrors the S5 ChangeRequest.ApproveAsync
+    /// approve-and-spawn pattern: one transactional SaveChanges
+    /// holds:
+    /// 1) winning Tender → Awarded;
+    /// 2) all other active Tenders in the package → Rejected
+    ///    automatically with a "not awarded" note;
+    /// 3) TenderPackage → Closed (sets AwardedTenderId);
+    /// 4) Contract spawned with copied BidAmount + BidderName +
+    ///    ContractorOrganisation;
+    /// 5) winning Tender's GeneratedContractId set to the new
+    ///    Contract's Id;
+    /// 6) Audit-twin emits tender.awarded + per-loser
+    ///    tender.rejected + tender_package.closed +
+    ///    contract.created.
+    ///
+    /// Role gate: ProjectManager+ via the state-machine path
+    /// (Issued → Closed transition).
+    /// </summary>
+    public async Task<Contract> AwardAsync(
+        Guid projectId, Guid tenderPackageId, AwardTenderPackageRequest req,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.AwardNote))
+            throw new ValidationException(["AwardNote is required"]);
+
+        var pkg = await LoadAsync(projectId, tenderPackageId, ct);
+        EnforceTransition(pkg.State, TenderPackageState.Closed, role);
+
+        var winner = await db.Tenders
+            .FirstOrDefaultAsync(t => t.Id == req.AwardedTenderId
+                                    && t.TenderPackageId == tenderPackageId
+                                    && t.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Tender");
+
+        if (winner.State is TenderState.Withdrawn or TenderState.Awarded or TenderState.Rejected)
+            throw new ConflictException(
+                $"Tender is in state {winner.State}; cannot be awarded");
+
+        // Determine ContractForm: explicit override → strategy default → Other.
+        var contractForm = req.ContractForm;
+        if (!contractForm.HasValue)
+        {
+            var strategy = await db.ProcurementStrategies
+                .FirstOrDefaultAsync(s => s.ProjectId == projectId, ct);
+            contractForm = strategy?.ContractForm ?? ContractForm.Other;
+        }
+
+        // Spawn the Contract row.
+        var contractCount = await db.Contracts.CountAsync(c => c.ProjectId == projectId, ct);
+        var contract = new Contract
+        {
+            ProjectId               = projectId,
+            Number                  = $"CON-{(contractCount + 1):D4}",
+            TenderPackageId         = tenderPackageId,
+            AwardedTenderId         = winner.Id,
+            ContractorName          = winner.BidderName,
+            ContractorOrganisation  = winner.BidderOrganisation,
+            ContractValue           = winner.BidAmount,
+            ContractForm            = contractForm.Value,
+            StartDate               = req.ContractStartDate,
+            EndDate                 = req.ContractEndDate,
+            State                   = ContractState.Active,
+            AwardNote               = req.AwardNote.Trim(),
+            AwardedById             = actorId,
+            AwardedAt               = DateTime.UtcNow,
+        };
+        db.Contracts.Add(contract);
+
+        // Winner: → Awarded; carry the contract FK.
+        winner.State               = TenderState.Awarded;
+        winner.StateNote           = req.AwardNote.Trim();
+        winner.GeneratedContractId = contract.Id;
+
+        // Losers: any Tender in the same package not the winner and
+        // currently in Submitted / Evaluated → Rejected automatically.
+        var losers = await db.Tenders
+            .Where(t => t.TenderPackageId == tenderPackageId
+                     && t.Id != winner.Id
+                     && (t.State == TenderState.Submitted || t.State == TenderState.Evaluated))
+            .ToListAsync(ct);
+        foreach (var l in losers)
+        {
+            l.State     = TenderState.Rejected;
+            l.StateNote = $"Not awarded; package awarded to {winner.BidderName}";
+        }
+
+        // Package: → Closed.
+        pkg.State           = TenderPackageState.Closed;
+        pkg.ClosedById      = actorId;
+        pkg.ClosedAt        = DateTime.UtcNow;
+        pkg.AwardedTenderId = winner.Id;
+
+        // Audit chain.
+        await audit.WriteAsync(actorId, "tender.awarded", "Tender",
+            winner.Id.ToString(), projectId,
+            detail: new
+            {
+                tenderPackageId,
+                bidderName = winner.BidderName,
+                bidAmount  = winner.BidAmount,
+                contractId = contract.Id,
+                contractNumber = contract.Number,
+            }, ip: ip, ua: ua);
+
+        foreach (var l in losers)
+        {
+            await audit.WriteAsync(actorId, "tender.rejected", "Tender",
+                l.Id.ToString(), projectId,
+                detail: new
+                {
+                    tenderPackageId,
+                    bidderName = l.BidderName,
+                    reason     = "Not awarded",
+                }, ip: ip, ua: ua);
+        }
+
+        await audit.WriteAsync(actorId, "tender_package.closed", "TenderPackage",
+            pkg.Id.ToString(), projectId,
+            detail: new
+            {
+                number   = pkg.Number,
+                awarded  = true,
+                awardedTenderId = winner.Id,
+            }, ip: ip, ua: ua);
+
+        await audit.WriteAsync(actorId, "contract.created", "Contract",
+            contract.Id.ToString(), projectId,
+            detail: new
+            {
+                number          = contract.Number,
+                tenderPackageId,
+                awardedTenderId = winner.Id,
+                contractorName  = contract.ContractorName,
+                contractValue   = contract.ContractValue,
+                contractForm    = contract.ContractForm.ToString(),
+            }, ip: ip, ua: ua);
+
+        await db.SaveChangesAsync(ct);
+        return contract;
+    }
 }
 
 /// <summary>

@@ -1285,6 +1285,17 @@ public class TenderPackagesController(TenderPackagesService svc, CimsDbContext d
             CurrentUserId, ClientIp, ClientAgent, ct);
         return Ok(new { success = true, data = t });
     }
+
+    [HttpPost("{tenderPackageId:guid}/award")]
+    public async Task<IActionResult> Award(
+        Guid projectId, Guid tenderPackageId,
+        AwardTenderPackageRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var contract = await svc.AwardAsync(projectId, tenderPackageId, req,
+            CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = contract });
+    }
 }
 
 // PAFM-SD F.7 — Tenders (bids submitted against an Issued package).
