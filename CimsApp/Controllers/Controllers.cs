@@ -791,6 +791,288 @@ public class CommunicationsController(CommunicationsService svc, CimsDbContext d
     }
 }
 
+// ── Schedule & Programme (T-S4-05) ────────────────────────────────────────────
+// PAFM-SD F.5. Activity CRUD, dependency CRUD, and CPM recompute.
+[Route("api/v1/projects/{projectId:guid}/schedule")]
+public class ScheduleController(ScheduleService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet("activities")]
+    public async Task<IActionResult> ListActivities(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListActivitiesAsync(projectId, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpGet("activities/{activityId:guid}")]
+    public async Task<IActionResult> GetActivity(
+        Guid projectId, Guid activityId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var row = await svc.GetActivityAsync(projectId, activityId, ct);
+        return Ok(new { success = true, data = row });
+    }
+
+    [HttpPost("activities")]
+    public async Task<IActionResult> CreateActivity(
+        Guid projectId, CreateActivityRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var act = await svc.CreateActivityAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = act });
+    }
+
+    [HttpPut("activities/{activityId:guid}")]
+    public async Task<IActionResult> UpdateActivity(
+        Guid projectId, Guid activityId,
+        UpdateActivityRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var act = await svc.UpdateActivityAsync(projectId, activityId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = act });
+    }
+
+    [HttpPost("activities/{activityId:guid}/deactivate")]
+    public async Task<IActionResult> DeactivateActivity(
+        Guid projectId, Guid activityId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var act = await svc.DeactivateActivityAsync(projectId, activityId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = act });
+    }
+
+    [HttpGet("dependencies")]
+    public async Task<IActionResult> ListDependencies(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListDependenciesAsync(projectId, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpPost("dependencies")]
+    public async Task<IActionResult> AddDependency(
+        Guid projectId, AddDependencyRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var dep = await svc.AddDependencyAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = dep });
+    }
+
+    [HttpDelete("dependencies/{dependencyId:guid}")]
+    public async Task<IActionResult> RemoveDependency(
+        Guid projectId, Guid dependencyId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        await svc.RemoveDependencyAsync(projectId, dependencyId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
+
+    [HttpPost("recompute")]
+    public async Task<IActionResult> Recompute(
+        Guid projectId, RecomputeScheduleRequest? req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var result = await svc.RecomputeAsync(projectId, req?.DataDate,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = result });
+    }
+
+    // T-S4-06 baselines.
+    [HttpGet("baselines")]
+    public async Task<IActionResult> ListBaselines(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListBaselinesAsync(projectId, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpPost("baselines")]
+    public async Task<IActionResult> CreateBaseline(
+        Guid projectId, CreateBaselineRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var b = await svc.CreateBaselineAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = b });
+    }
+
+    [HttpGet("baselines/{baselineId:guid}/comparison")]
+    public async Task<IActionResult> BaselineComparison(
+        Guid projectId, Guid baselineId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetBaselineComparisonAsync(projectId, baselineId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    // T-S4-11 Gantt data endpoint. Read-only, membership.
+    [HttpGet("gantt")]
+    public async Task<IActionResult> Gantt(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetGanttAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    // T-S4-09 MS Project XML import. Multipart `file`. Same shape
+    // as T-S1-03 CBS import. Into-empty only.
+    [HttpPost("import")]
+    public async Task<IActionResult> ImportMsProject(
+        Guid projectId, IFormFile file, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        if (file is null || file.Length == 0)
+            throw new ValidationException(["file is required"]);
+        await using var stream = file.OpenReadStream();
+        var result = await svc.ImportFromMsProjectAsync(projectId, stream,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = result });
+    }
+}
+
+// ── Last Planner System (T-S4-07) ─────────────────────────────────────────────
+// PAFM-SD F.5 third bullet — Lookahead, Weekly Work Plan, PPC.
+[Route("api/v1/projects/{projectId:guid}/schedule/lps")]
+public class LpsController(LpsService svc, CimsDbContext db) : CimsControllerBase
+{
+    // ── Lookahead ──
+    [HttpGet("lookahead")]
+    public async Task<IActionResult> ListLookahead(
+        Guid projectId, [FromQuery] DateTime? weekStarting, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListLookaheadAsync(projectId, weekStarting, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpPost("lookahead")]
+    public async Task<IActionResult> AddLookahead(
+        Guid projectId, CreateLookaheadEntryRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var entry = await svc.AddLookaheadAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = entry });
+    }
+
+    [HttpPut("lookahead/{lookaheadId:guid}")]
+    public async Task<IActionResult> UpdateLookahead(
+        Guid projectId, Guid lookaheadId,
+        UpdateLookaheadEntryRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var entry = await svc.UpdateLookaheadAsync(projectId, lookaheadId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = entry });
+    }
+
+    [HttpDelete("lookahead/{lookaheadId:guid}")]
+    public async Task<IActionResult> RemoveLookahead(
+        Guid projectId, Guid lookaheadId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        await svc.RemoveLookaheadAsync(projectId, lookaheadId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
+
+    // ── Weekly Work Plans ──
+    [HttpGet("weekly-plans")]
+    public async Task<IActionResult> ListWeeklyPlans(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListWeeklyWorkPlansAsync(projectId, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpPost("weekly-plans")]
+    public async Task<IActionResult> CreateWeeklyPlan(
+        Guid projectId, CreateWeeklyWorkPlanRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var wwp = await svc.CreateWeeklyWorkPlanAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = wwp });
+    }
+
+    [HttpGet("weekly-plans/{wwpId:guid}")]
+    public async Task<IActionResult> GetWeeklyPlan(
+        Guid projectId, Guid wwpId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetWeeklyWorkPlanAsync(projectId, wwpId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    // ── Commitments ──
+    [HttpPost("weekly-plans/{wwpId:guid}/commitments")]
+    public async Task<IActionResult> AddCommitment(
+        Guid projectId, Guid wwpId,
+        AddCommitmentRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var c = await svc.AddCommitmentAsync(projectId, wwpId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = c });
+    }
+
+    [HttpPut("weekly-plans/{wwpId:guid}/commitments/{commitmentId:guid}")]
+    public async Task<IActionResult> UpdateCommitment(
+        Guid projectId, Guid wwpId, Guid commitmentId,
+        UpdateCommitmentRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var c = await svc.UpdateCommitmentAsync(projectId, wwpId, commitmentId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = c });
+    }
+
+    [HttpDelete("weekly-plans/{wwpId:guid}/commitments/{commitmentId:guid}")]
+    public async Task<IActionResult> RemoveCommitment(
+        Guid projectId, Guid wwpId, Guid commitmentId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        await svc.RemoveCommitmentAsync(projectId, wwpId, commitmentId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

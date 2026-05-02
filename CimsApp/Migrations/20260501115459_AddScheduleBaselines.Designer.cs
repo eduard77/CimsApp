@@ -4,6 +4,7 @@ using CimsApp.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CimsApp.Migrations
 {
     [DbContext(typeof(CimsDbContext))]
-    partial class CimsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260501115459_AddScheduleBaselines")]
+    partial class AddScheduleBaselines
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -826,47 +829,6 @@ namespace CimsApp.Migrations
                     b.HasIndex("OrganisationId", "ConsumedAt");
 
                     b.ToTable("Invitations");
-                });
-
-            modelBuilder.Entity("CimsApp.Models.LookaheadEntry", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("ActivityId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("ConstraintsRemoved")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("WeekStarting")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CreatedById");
-
-                    b.HasIndex("ActivityId", "WeekStarting");
-
-                    b.HasIndex("ProjectId", "WeekStarting", "IsActive");
-
-                    b.ToTable("LookaheadEntries");
                 });
 
             modelBuilder.Entity("CimsApp.Models.Notification", b =>
@@ -1794,82 +1756,6 @@ namespace CimsApp.Migrations
                     b.ToTable("Variations");
                 });
 
-            modelBuilder.Entity("CimsApp.Models.WeeklyTaskCommitment", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("ActivityId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("Committed")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("Completed")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int?>("Reason")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("WeeklyWorkPlanId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ActivityId");
-
-                    b.HasIndex("ProjectId", "WeeklyWorkPlanId");
-
-                    b.HasIndex("WeeklyWorkPlanId", "ActivityId")
-                        .IsUnique();
-
-                    b.ToTable("WeeklyTaskCommitments");
-                });
-
-            modelBuilder.Entity("CimsApp.Models.WeeklyWorkPlan", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("WeekStarting")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CreatedById");
-
-                    b.HasIndex("ProjectId", "WeekStarting")
-                        .IsUnique();
-
-                    b.ToTable("WeeklyWorkPlans");
-                });
-
             modelBuilder.Entity("CimsApp.Models.ActionItem", b =>
                 {
                     b.HasOne("CimsApp.Models.User", "Assignee")
@@ -2165,33 +2051,6 @@ namespace CimsApp.Migrations
                     b.Navigation("CreatedBy");
 
                     b.Navigation("Organisation");
-                });
-
-            modelBuilder.Entity("CimsApp.Models.LookaheadEntry", b =>
-                {
-                    b.HasOne("CimsApp.Models.Activity", "Activity")
-                        .WithMany()
-                        .HasForeignKey("ActivityId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.User", "CreatedBy")
-                        .WithMany()
-                        .HasForeignKey("CreatedById")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.Project", "Project")
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.Navigation("Activity");
-
-                    b.Navigation("CreatedBy");
-
-                    b.Navigation("Project");
                 });
 
             modelBuilder.Entity("CimsApp.Models.Notification", b =>
@@ -2502,44 +2361,6 @@ namespace CimsApp.Migrations
                     b.Navigation("RaisedBy");
                 });
 
-            modelBuilder.Entity("CimsApp.Models.WeeklyTaskCommitment", b =>
-                {
-                    b.HasOne("CimsApp.Models.Activity", "Activity")
-                        .WithMany()
-                        .HasForeignKey("ActivityId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.WeeklyWorkPlan", "WeeklyWorkPlan")
-                        .WithMany("Commitments")
-                        .HasForeignKey("WeeklyWorkPlanId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.Navigation("Activity");
-
-                    b.Navigation("WeeklyWorkPlan");
-                });
-
-            modelBuilder.Entity("CimsApp.Models.WeeklyWorkPlan", b =>
-                {
-                    b.HasOne("CimsApp.Models.User", "CreatedBy")
-                        .WithMany()
-                        .HasForeignKey("CreatedById")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.Project", "Project")
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.Navigation("CreatedBy");
-
-                    b.Navigation("Project");
-                });
-
             modelBuilder.Entity("CimsApp.Models.Activity", b =>
                 {
                     b.Navigation("PredecessorLinks");
@@ -2637,11 +2458,6 @@ namespace CimsApp.Migrations
                     b.Navigation("RefreshTokens");
 
                     b.Navigation("UploadedRevisions");
-                });
-
-            modelBuilder.Entity("CimsApp.Models.WeeklyWorkPlan", b =>
-                {
-                    b.Navigation("Commitments");
                 });
 #pragma warning restore 612, 618
         }

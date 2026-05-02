@@ -2447,7 +2447,1009 @@ public class CommunicationsService(CimsDbContext db, AuditService audit)
     }
 }
 
-// ── CDE ───────────────────────────────────────────────────────────────────────
+/// <summary>
+/// ScheduleService — the schedule-domain CRUD + CPM solver entry
+/// point (T-S4-03 onwards, PAFM-SD F.5). Dependency Add / Remove
+/// arrives in T-S4-03; Activity CRUD + RecomputeAsync (CPM solve)
+/// arrive in T-S4-05 / T-S4-04.
+/// </summary>
+public class ScheduleService(CimsDbContext db, AuditService audit)
+{
+    /// <summary>
+    /// Add a directed dependency (Predecessor → Successor) to the
+    /// project's schedule. Both endpoints must be active Activity
+    /// rows belonging to the same project. Lag is bounded to
+    /// ±365 days to catch typos; the empirical limit could be
+    /// higher but real construction lags rarely exceed a year.
+    /// Self-loops and cycle-creating edges are rejected with
+    /// ConflictException — the caller fixes the dependency
+    /// topology, the service does not silently drop edges.
+    /// </summary>
+    public async Task<Dependency> AddDependencyAsync(
+        Guid projectId, AddDependencyRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (req.PredecessorId == req.SuccessorId)
+            throw new ValidationException(["Predecessor and Successor cannot be the same activity"]);
+        if (req.Lag < -365m || req.Lag > 365m)
+            throw new ValidationException(["Lag must be in the range -365..365 days"]);
+
+        var endpoints = await db.Activities
+            .Where(a => a.ProjectId == projectId
+                     && a.IsActive
+                     && (a.Id == req.PredecessorId || a.Id == req.SuccessorId))
+            .Select(a => a.Id)
+            .ToListAsync(ct);
+        if (!endpoints.Contains(req.PredecessorId) || !endpoints.Contains(req.SuccessorId))
+            throw new NotFoundException("Activity");
+
+        var duplicate = await db.Dependencies.AnyAsync(d =>
+            d.ProjectId == projectId
+         && d.PredecessorId == req.PredecessorId
+         && d.SuccessorId == req.SuccessorId, ct);
+        if (duplicate)
+            throw new ConflictException("Dependency already exists for this predecessor / successor pair");
+
+        // Cycle detection: pull every active activity ID + every
+        // existing dependency edge in the project, append the proposed
+        // edge, run DFS three-colour. Rejected on cycle (incl. self-loop
+        // — already gated above for fast feedback).
+        var allIds = await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive)
+            .Select(a => a.Id).ToListAsync(ct);
+        var existingEdges = await db.Dependencies
+            .Where(d => d.ProjectId == projectId)
+            .Select(d => new ValueTuple<Guid, Guid>(d.PredecessorId, d.SuccessorId))
+            .ToListAsync(ct);
+        var edges = new List<(Guid, Guid)>(existingEdges.Count + 1);
+        edges.AddRange(existingEdges);
+        edges.Add((req.PredecessorId, req.SuccessorId));
+        var cycle = CimsApp.Core.DependencyGraph.DetectCycle(allIds, edges);
+        if (cycle.HasCycle)
+            throw new ConflictException(
+                $"Adding this dependency would create a cycle: {string.Join(" -> ", cycle.CycleNodes)}");
+
+        var dep = new Dependency
+        {
+            ProjectId     = projectId,
+            PredecessorId = req.PredecessorId,
+            SuccessorId   = req.SuccessorId,
+            Type          = req.Type,
+            Lag           = req.Lag,
+        };
+        db.Dependencies.Add(dep);
+
+        await audit.WriteAsync(actorId, "dependency.added", "Dependency",
+            dep.Id.ToString(), projectId,
+            detail: new
+            {
+                predecessorId = req.PredecessorId,
+                successorId   = req.SuccessorId,
+                type          = req.Type.ToString(),
+                lag           = req.Lag,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return dep;
+    }
+
+    public async Task RemoveDependencyAsync(
+        Guid projectId, Guid dependencyId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var dep = await db.Dependencies
+            .FirstOrDefaultAsync(d => d.Id == dependencyId && d.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Dependency");
+
+        db.Dependencies.Remove(dep);
+        await audit.WriteAsync(actorId, "dependency.removed", "Dependency",
+            dep.Id.ToString(), projectId,
+            detail: new
+            {
+                predecessorId = dep.PredecessorId,
+                successorId   = dep.SuccessorId,
+                type          = dep.Type.ToString(),
+                lag           = dep.Lag,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<List<Dependency>> ListDependenciesAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        return await db.Dependencies
+            .Where(d => d.ProjectId == projectId)
+            .OrderBy(d => d.PredecessorId).ThenBy(d => d.SuccessorId)
+            .ToListAsync(ct);
+    }
+
+    // ── Activity CRUD (T-S4-05) ─────────────────────────────────────
+
+    public async Task<Activity> CreateActivityAsync(
+        Guid projectId, CreateActivityRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        ValidateActivityCommon(req.Code, req.Name, req.Duration,
+            req.PercentComplete, req.ConstraintType, req.ConstraintDate);
+        if (req.AssigneeId.HasValue)
+            await EnsureAssigneeIsProjectMemberAsync(projectId, req.AssigneeId.Value, ct);
+
+        var codeTaken = await db.Activities.AnyAsync(
+            a => a.ProjectId == projectId && a.Code == req.Code.Trim(), ct);
+        if (codeTaken)
+            throw new ConflictException($"Activity code '{req.Code.Trim()}' already exists in this project");
+
+        var act = new Activity
+        {
+            ProjectId        = projectId,
+            Code             = req.Code.Trim(),
+            Name             = req.Name.Trim(),
+            Description      = req.Description,
+            Duration         = req.Duration,
+            DurationUnit     = req.DurationUnit,
+            ScheduledStart   = req.ScheduledStart,
+            ScheduledFinish  = req.ScheduledFinish,
+            ConstraintType   = req.ConstraintType,
+            ConstraintDate   = req.ConstraintDate,
+            PercentComplete  = req.PercentComplete,
+            AssigneeId       = req.AssigneeId,
+            Discipline       = req.Discipline,
+        };
+        db.Activities.Add(act);
+
+        await audit.WriteAsync(actorId, "activity.created", "Activity",
+            act.Id.ToString(), projectId,
+            detail: new
+            {
+                code           = act.Code,
+                duration       = act.Duration,
+                durationUnit   = act.DurationUnit.ToString(),
+                constraintType = act.ConstraintType.ToString(),
+                hasAssignee    = act.AssigneeId.HasValue,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return act;
+    }
+
+    public async Task<Activity> UpdateActivityAsync(
+        Guid projectId, Guid activityId, UpdateActivityRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var act = await db.Activities
+            .FirstOrDefaultAsync(a => a.Id == activityId && a.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Activity");
+
+        if (!act.IsActive)
+            throw new ConflictException("Activity is deactivated; cannot update");
+
+        var changed = new List<string>();
+
+        if (req.Code is not null)
+        {
+            var newCode = req.Code.Trim();
+            if (string.IsNullOrEmpty(newCode))
+                throw new ValidationException(["Code cannot be empty"]);
+            if (newCode != act.Code)
+            {
+                var taken = await db.Activities.AnyAsync(
+                    a => a.ProjectId == projectId && a.Code == newCode && a.Id != activityId, ct);
+                if (taken)
+                    throw new ConflictException($"Activity code '{newCode}' already exists in this project");
+                act.Code = newCode;
+                changed.Add("Code");
+            }
+        }
+        if (req.Name is not null)
+        {
+            if (string.IsNullOrWhiteSpace(req.Name))
+                throw new ValidationException(["Name cannot be empty"]);
+            act.Name = req.Name.Trim();
+            changed.Add("Name");
+        }
+        if (req.Description is not null) { act.Description = req.Description; changed.Add("Description"); }
+        if (req.Duration.HasValue)
+        {
+            if (req.Duration.Value < 0m)
+                throw new ValidationException(["Duration cannot be negative"]);
+            act.Duration = req.Duration.Value;
+            changed.Add("Duration");
+        }
+        if (req.DurationUnit.HasValue)    { act.DurationUnit = req.DurationUnit.Value;    changed.Add("DurationUnit"); }
+        if (req.ScheduledStart  is not null) { act.ScheduledStart  = req.ScheduledStart;  changed.Add("ScheduledStart"); }
+        if (req.ScheduledFinish is not null) { act.ScheduledFinish = req.ScheduledFinish; changed.Add("ScheduledFinish"); }
+        if (req.ConstraintType.HasValue)
+        {
+            act.ConstraintType = req.ConstraintType.Value;
+            // If switching to a no-date constraint (ASAP / ALAP),
+            // clear the legacy ConstraintDate so it doesn't dangle.
+            if (req.ConstraintType.Value is ConstraintType.ASAP or ConstraintType.ALAP)
+                act.ConstraintDate = null;
+            changed.Add("ConstraintType");
+        }
+        if (req.ConstraintDate is not null)
+        {
+            act.ConstraintDate = req.ConstraintDate;
+            changed.Add("ConstraintDate");
+        }
+        if (req.PercentComplete.HasValue)
+        {
+            if (req.PercentComplete.Value < 0m || req.PercentComplete.Value > 1m)
+                throw new ValidationException(["PercentComplete must be in [0, 1]"]);
+            act.PercentComplete = req.PercentComplete.Value;
+            changed.Add("PercentComplete");
+        }
+        if (req.AssigneeId.HasValue)
+        {
+            if (req.AssigneeId.Value != act.AssigneeId)
+            {
+                await EnsureAssigneeIsProjectMemberAsync(projectId, req.AssigneeId.Value, ct);
+                act.AssigneeId = req.AssigneeId;
+                changed.Add("AssigneeId");
+            }
+        }
+        if (req.Discipline is not null) { act.Discipline = req.Discipline; changed.Add("Discipline"); }
+
+        if (changed.Count == 0)
+            throw new ValidationException(["No updatable fields provided"]);
+
+        await audit.WriteAsync(actorId, "activity.updated", "Activity",
+            act.Id.ToString(), projectId,
+            detail: new { changedFields = changed }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return act;
+    }
+
+    public async Task<Activity> DeactivateActivityAsync(
+        Guid projectId, Guid activityId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var act = await db.Activities
+            .FirstOrDefaultAsync(a => a.Id == activityId && a.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Activity");
+
+        if (!act.IsActive)
+            throw new ConflictException("Activity is already deactivated");
+
+        var hasDeps = await db.Dependencies.AnyAsync(
+            d => d.ProjectId == projectId
+              && (d.PredecessorId == activityId || d.SuccessorId == activityId), ct);
+        if (hasDeps)
+            throw new ConflictException(
+                "Activity has active dependencies; remove the dependencies before deactivating");
+
+        act.IsActive = false;
+        await audit.WriteAsync(actorId, "activity.deactivated", "Activity",
+            act.Id.ToString(), projectId,
+            detail: new { code = act.Code }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return act;
+    }
+
+    public async Task<Activity> GetActivityAsync(
+        Guid projectId, Guid activityId, CancellationToken ct = default)
+        => await db.Activities
+            .FirstOrDefaultAsync(a => a.Id == activityId && a.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Activity");
+
+    public async Task<List<Activity>> ListActivitiesAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        return await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive)
+            .OrderBy(a => a.Code)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Gantt data endpoint (T-S4-11, PAFM-SD F.5 sixth bullet —
+    /// "Gantt and network views"; network view deferred to v1.1 /
+    /// B-033 per CR-005). Returns the per-activity bars + per-link
+    /// arrows in a UI-friendly shape. Start / Finish prefer the
+    /// CPM-computed EarlyStart / EarlyFinish; fall back to
+    /// ScheduledStart / ScheduledFinish if the solver hasn't run.
+    /// ProjectStart / ProjectFinish are min / max across the
+    /// activity-set Start / Finish.
+    /// </summary>
+    public async Task<GanttDto> GetGanttAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var activities = await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive)
+            .OrderBy(a => a.Code)
+            .ToListAsync(ct);
+        var dependencies = await db.Dependencies
+            .Where(d => d.ProjectId == projectId)
+            .OrderBy(d => d.PredecessorId).ThenBy(d => d.SuccessorId)
+            .ToListAsync(ct);
+
+        var actDtos = activities.Select(a => new GanttActivityDto(
+            a.Id, a.Code, a.Name,
+            a.EarlyStart  ?? a.ScheduledStart,
+            a.EarlyFinish ?? a.ScheduledFinish,
+            a.Duration, a.PercentComplete,
+            a.IsCritical, a.AssigneeId, a.Discipline)).ToList();
+
+        var depDtos = dependencies.Select(d => new GanttDependencyDto(
+            d.Id, d.PredecessorId, d.SuccessorId, d.Type, d.Lag)).ToList();
+
+        var starts   = actDtos.Where(x => x.Start.HasValue).Select(x => x.Start!.Value).ToList();
+        var finishes = actDtos.Where(x => x.Finish.HasValue).Select(x => x.Finish!.Value).ToList();
+        DateTime? projectStart  = starts.Count   == 0 ? null : starts.Min();
+        DateTime? projectFinish = finishes.Count == 0 ? null : finishes.Max();
+
+        return new GanttDto(projectStart, projectFinish, actDtos, depDtos);
+    }
+
+    // ── Recompute (T-S4-05) ─────────────────────────────────────────
+    /// <summary>
+    /// Run the CPM solver against the project's active activities +
+    /// dependencies; persist ES / EF / LS / LF / TotalFloat /
+    /// FreeFloat / IsCritical to each Activity. Data date defaults
+    /// to Project.StartDate; explicit override accepted via the
+    /// `dataDate` parameter. Transactional — the solve + persist
+    /// pair is wrapped, so a partial schedule never lands.
+    /// Audit: `schedule.recomputed` with the solver summary.
+    /// </summary>
+    public async Task<ScheduleRecomputeResultDto> RecomputeAsync(
+        Guid projectId, DateTime? dataDate, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var project = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        var ps = dataDate ?? project.StartDate
+            ?? throw new ValidationException(["dataDate or Project.StartDate must be set"]);
+
+        var activities = await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive)
+            .ToListAsync(ct);
+        var dependencies = await db.Dependencies
+            .Where(d => d.ProjectId == projectId)
+            .ToListAsync(ct);
+
+        var cpmActivities = activities.Select(a =>
+            new Cpm.CpmActivity(a.Id, a.Duration, a.ConstraintType, a.ConstraintDate)).ToList();
+        var cpmDeps = dependencies.Select(d =>
+            new Cpm.CpmDependency(d.PredecessorId, d.SuccessorId, d.Type, d.Lag)).ToList();
+
+        var result = Cpm.Solve(ps, cpmActivities, cpmDeps);
+        var byId = activities.ToDictionary(a => a.Id);
+        foreach (var r in result.Activities)
+        {
+            var act = byId[r.Id];
+            act.EarlyStart  = r.EarlyStart;
+            act.EarlyFinish = r.EarlyFinish;
+            act.LateStart   = r.LateStart;
+            act.LateFinish  = r.LateFinish;
+            act.TotalFloat  = r.TotalFloat;
+            act.FreeFloat   = r.FreeFloat;
+            act.IsCritical  = r.IsCritical;
+        }
+
+        var critCount = result.Activities.Count(r => r.IsCritical);
+        await audit.WriteAsync(actorId, "schedule.recomputed", "Schedule",
+            projectId.ToString(), projectId,
+            detail: new
+            {
+                projectStart    = result.ProjectStart,
+                projectFinish   = result.ProjectFinish,
+                activities      = activities.Count,
+                criticalCount   = critCount,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return new ScheduleRecomputeResultDto(
+            result.ProjectStart, result.ProjectFinish, activities.Count, critCount);
+    }
+
+    // ── Validation helpers ──────────────────────────────────────────
+    private static void ValidateActivityCommon(
+        string code, string name, decimal duration, decimal percentComplete,
+        ConstraintType constraintType, DateTime? constraintDate)
+    {
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(code)) errors.Add("Code is required");
+        if (string.IsNullOrWhiteSpace(name)) errors.Add("Name is required");
+        if (duration < 0m) errors.Add("Duration cannot be negative");
+        if (percentComplete < 0m || percentComplete > 1m)
+            errors.Add("PercentComplete must be in [0, 1]");
+        if (constraintType is ConstraintType.SNET or ConstraintType.SNLT
+                            or ConstraintType.FNET or ConstraintType.FNLT
+                            or ConstraintType.MSO  or ConstraintType.MFO
+            && !constraintDate.HasValue)
+            errors.Add($"ConstraintDate is required for {constraintType}");
+        if (errors.Count > 0) throw new ValidationException(errors);
+    }
+
+    private async Task EnsureAssigneeIsProjectMemberAsync(Guid projectId, Guid assigneeId, CancellationToken ct)
+    {
+        var isMember = await db.ProjectMembers.AnyAsync(
+            m => m.ProjectId == projectId && m.UserId == assigneeId, ct);
+        if (!isMember)
+            throw new ValidationException(["Assignee must be a member of the project"]);
+    }
+
+    // ── MS Project XML import (T-S4-09) ─────────────────────────────
+
+    /// <summary>
+    /// Import an MSP XML file into the project's schedule. Same shape
+    /// as T-S1-03 CBS import: import-into-empty only — refuses if the
+    /// project already has any active activities. The Core/MsProjectXml
+    /// parser handles the XML; this method maps parsed UIDs → CIMS
+    /// Guids, inserts the rows in a single transaction, and emits a
+    /// `schedule.imported` audit event with the counts in the detail.
+    /// CPM is NOT auto-recomputed — the caller decides when to call
+    /// /schedule/recompute (often after manual review of the import).
+    /// </summary>
+    public async Task<MsProjectImportResultDto> ImportFromMsProjectAsync(
+        Guid projectId, Stream xmlStream, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var hasExisting = await db.Activities
+            .AnyAsync(a => a.ProjectId == projectId && a.IsActive, ct);
+        if (hasExisting)
+            throw new ConflictException(
+                "Project already has activities; MS Project XML import is into-empty only");
+
+        CimsApp.Core.MsProjectXml.ImportResult parsed;
+        try { parsed = CimsApp.Core.MsProjectXml.Parse(xmlStream); }
+        catch (FormatException ex)
+            { throw new ValidationException([$"MS Project XML parse error: {ex.Message}"]); }
+
+        var warnings = new List<string>();
+
+        // First pass: insert Activities, build UID → Guid map.
+        var uidToId = new Dictionary<string, Guid>(parsed.Activities.Count);
+        var usedCodes = new HashSet<string>();
+        foreach (var p in parsed.Activities)
+        {
+            // MSP UID is the most stable identifier — use as Code so
+            // round-trip identity is preserved if export ships in v1.1.
+            // De-dupe within the import in the unlikely case MSP ships
+            // a duplicate UID by appending a discriminator.
+            var code = $"MSP-{p.Uid}";
+            while (!usedCodes.Add(code))
+            {
+                code = $"MSP-{p.Uid}-{Guid.NewGuid():N}".Substring(0, 50);
+            }
+
+            var activity = new Activity
+            {
+                ProjectId       = projectId,
+                Code            = code.Length > 50 ? code[..50] : code,
+                Name            = p.Name.Length > 300 ? p.Name[..300] : p.Name,
+                Duration        = p.DurationDays,
+                DurationUnit    = DurationUnit.Day,
+                ScheduledStart  = p.Start,
+                ScheduledFinish = p.Finish,
+                ConstraintType  = ConstraintType.ASAP,
+                PercentComplete = Math.Clamp(p.PercentComplete, 0m, 1m),
+            };
+            db.Activities.Add(activity);
+            uidToId[p.Uid] = activity.Id;
+        }
+
+        // Second pass: insert Dependencies. Skip and warn on links
+        // pointing at unknown UIDs (the XML may reference external
+        // tasks that didn't ship in this Tasks block).
+        var depCount = 0;
+        var seenPairs = new HashSet<(Guid, Guid)>();
+        foreach (var d in parsed.Dependencies)
+        {
+            if (!uidToId.TryGetValue(d.PredecessorUid, out var predId))
+            {
+                warnings.Add($"Skipped dependency: predecessor UID '{d.PredecessorUid}' not found in import");
+                continue;
+            }
+            if (!uidToId.TryGetValue(d.SuccessorUid, out var succId))
+            {
+                warnings.Add($"Skipped dependency: successor UID '{d.SuccessorUid}' not found in import");
+                continue;
+            }
+            if (predId == succId)
+            {
+                warnings.Add($"Skipped self-loop on UID '{d.PredecessorUid}'");
+                continue;
+            }
+            if (!seenPairs.Add((predId, succId)))
+            {
+                warnings.Add($"Skipped duplicate dependency {d.PredecessorUid} -> {d.SuccessorUid}");
+                continue;
+            }
+            db.Dependencies.Add(new Dependency
+            {
+                ProjectId     = projectId,
+                PredecessorId = predId,
+                SuccessorId   = succId,
+                Type          = d.Type,
+                Lag           = Math.Clamp(d.LagDays, -365m, 365m),
+            });
+            depCount++;
+        }
+
+        await audit.WriteAsync(actorId, "schedule.imported", "Schedule",
+            projectId.ToString(), projectId,
+            detail: new
+            {
+                source              = "MsProjectXml",
+                projectName         = parsed.ProjectName,
+                activitiesImported  = parsed.Activities.Count,
+                dependenciesImported = depCount,
+                warningsCount       = warnings.Count,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+
+        return new MsProjectImportResultDto(
+            parsed.ProjectName, parsed.ProjectStart,
+            parsed.Activities.Count, depCount, warnings);
+    }
+
+    // ── Baselines (T-S4-06) ─────────────────────────────────────────
+
+    /// <summary>
+    /// Snapshot every active activity in the project into a frozen
+    /// <see cref="ScheduleBaseline"/>. Captures the activity's
+    /// post-CPM EarlyStart / EarlyFinish / Duration / IsCritical at
+    /// baseline time. Multiple baselines per project are allowed —
+    /// the typical PMBOK workflow is "Original baseline" + several
+    /// "Approved revision N" snapshots through the project life.
+    /// Empty-activity-set baselines are accepted (an honest "we have
+    /// nothing planned yet" anchor); the comparison endpoint handles
+    /// the empty case cleanly.
+    /// </summary>
+    public async Task<ScheduleBaseline> CreateBaselineAsync(
+        Guid projectId, CreateBaselineRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Label))
+            throw new ValidationException(["Label is required"]);
+
+        var project = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var activities = await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive)
+            .ToListAsync(ct);
+
+        var efs = activities.Where(a => a.EarlyFinish.HasValue)
+            .Select(a => a.EarlyFinish!.Value).ToList();
+        var baseline = new ScheduleBaseline
+        {
+            ProjectId               = projectId,
+            Label                   = req.Label.Trim(),
+            CapturedById            = actorId,
+            ActivitiesCount         = activities.Count,
+            ProjectFinishAtBaseline = efs.Count == 0 ? null : efs.Max(),
+        };
+        db.ScheduleBaselines.Add(baseline);
+
+        foreach (var a in activities)
+        {
+            db.ScheduleBaselineActivities.Add(new ScheduleBaselineActivity
+            {
+                ScheduleBaselineId = baseline.Id,
+                ProjectId          = projectId,
+                ActivityId         = a.Id,
+                Code               = a.Code,
+                Name               = a.Name,
+                Duration           = a.Duration,
+                EarlyStart         = a.EarlyStart,
+                EarlyFinish        = a.EarlyFinish,
+                IsCritical         = a.IsCritical,
+            });
+        }
+
+        await audit.WriteAsync(actorId, "schedule_baseline.captured", "ScheduleBaseline",
+            baseline.Id.ToString(), projectId,
+            detail: new
+            {
+                label                   = baseline.Label,
+                activitiesCount         = baseline.ActivitiesCount,
+                projectFinishAtBaseline = baseline.ProjectFinishAtBaseline,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return baseline;
+    }
+
+    public async Task<List<BaselineSummaryDto>> ListBaselinesAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        return await db.ScheduleBaselines
+            .Where(b => b.ProjectId == projectId)
+            .OrderByDescending(b => b.CapturedAt)
+            .Select(b => new BaselineSummaryDto(
+                b.Id, b.Label, b.CapturedAt, b.CapturedById,
+                b.ActivitiesCount, b.ProjectFinishAtBaseline))
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Compare a captured baseline against the project's current
+    /// schedule. Per-activity output covers three cases:
+    /// (1) activity in both → variance fields populated;
+    /// (2) activity new since baseline → IsNewSinceBaseline = true,
+    ///     baseline* fields null;
+    /// (3) activity removed since baseline → IsRemovedSinceBaseline =
+    ///     true, current* fields null.
+    /// Variance = current minus baseline (positive = slipped later
+    /// or expanded).
+    /// </summary>
+    public async Task<BaselineComparisonDto> GetBaselineComparisonAsync(
+        Guid projectId, Guid baselineId, CancellationToken ct = default)
+    {
+        var baseline = await db.ScheduleBaselines
+            .FirstOrDefaultAsync(b => b.Id == baselineId && b.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("ScheduleBaseline");
+
+        var baselineRows = await db.ScheduleBaselineActivities
+            .Where(b => b.ScheduleBaselineId == baselineId)
+            .ToListAsync(ct);
+        var currentRows = await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive)
+            .ToListAsync(ct);
+
+        var byBaseline = baselineRows.ToDictionary(b => b.ActivityId);
+        var byCurrent  = currentRows.ToDictionary(a => a.Id);
+        var allIds = byBaseline.Keys.Union(byCurrent.Keys).ToList();
+
+        var rows = new List<BaselineActivityComparisonDto>(allIds.Count);
+        foreach (var id in allIds)
+        {
+            byBaseline.TryGetValue(id, out var b);
+            byCurrent.TryGetValue(id, out var c);
+
+            var isNew     = b is null && c is not null;
+            var isRemoved = b is not null && c is null;
+
+            decimal? startVar  = (b?.EarlyStart  is { } bs && c?.EarlyStart  is { } cs) ? DiffDays(cs, bs) : null;
+            decimal? finishVar = (b?.EarlyFinish is { } bf && c?.EarlyFinish is { } cf) ? DiffDays(cf, bf) : null;
+            decimal? durVar    = (b is not null && c is not null) ? c!.Duration - b!.Duration : null;
+
+            rows.Add(new BaselineActivityComparisonDto(
+                ActivityId: id,
+                Code: c?.Code ?? b!.Code,
+                Name: c?.Name ?? b!.Name,
+                BaselineEarlyStart:  b?.EarlyStart,
+                BaselineEarlyFinish: b?.EarlyFinish,
+                BaselineDuration:    b?.Duration,
+                BaselineWasCritical: b?.IsCritical ?? false,
+                CurrentEarlyStart:   c?.EarlyStart,
+                CurrentEarlyFinish:  c?.EarlyFinish,
+                CurrentDuration:     c?.Duration,
+                CurrentIsCritical:   c?.IsCritical ?? false,
+                StartVarianceDays:   startVar,
+                FinishVarianceDays:  finishVar,
+                DurationVarianceDays: durVar,
+                IsNewSinceBaseline:     isNew,
+                IsRemovedSinceBaseline: isRemoved));
+        }
+
+        var currentEfs = currentRows
+            .Where(a => a.EarlyFinish.HasValue)
+            .Select(a => a.EarlyFinish!.Value).ToList();
+        DateTime? currentFinishOrNull = currentEfs.Count == 0 ? null : currentEfs.Max();
+        decimal? finishVarProject = (baseline.ProjectFinishAtBaseline is { } pb && currentFinishOrNull is { } pc)
+            ? DiffDays(pc, pb)
+            : null;
+
+        return new BaselineComparisonDto(
+            BaselineId:                 baseline.Id,
+            Label:                      baseline.Label,
+            CapturedAt:                 baseline.CapturedAt,
+            ProjectFinishAtBaseline:    baseline.ProjectFinishAtBaseline,
+            CurrentProjectFinish:       currentFinishOrNull,
+            ProjectFinishVarianceDays:  finishVarProject,
+            AddedActivitiesCount:       rows.Count(r => r.IsNewSinceBaseline),
+            RemovedActivitiesCount:     rows.Count(r => r.IsRemovedSinceBaseline),
+            Activities:                 rows);
+    }
+
+    private static decimal DiffDays(DateTime current, DateTime baseline) =>
+        (decimal)(current - baseline).Ticks / TimeSpan.TicksPerDay;
+}
+
+/// <summary>
+/// LpsService — Last Planner System boards (T-S4-07, PAFM-SD F.5
+/// third bullet). Three sub-domains:
+/// (1) LookaheadEntry CRUD — the 6-week-out commit window.
+/// (2) WeeklyWorkPlan CRUD — the per-week commitment header.
+/// (3) WeeklyTaskCommitment CRUD — the per-Activity commit + flag.
+///
+/// PPC (Percent Plan Complete) is computed on read inside
+/// <see cref="GetWeeklyWorkPlanAsync"/> — never persisted, so it
+/// always reflects current commitment state.
+/// </summary>
+public class LpsService(CimsDbContext db, AuditService audit)
+{
+    // ── Lookahead ───────────────────────────────────────────────────
+
+    public async Task<LookaheadEntry> AddLookaheadAsync(
+        Guid projectId, CreateLookaheadEntryRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var activityExists = await db.Activities.AnyAsync(
+            a => a.Id == req.ActivityId && a.ProjectId == projectId && a.IsActive, ct);
+        if (!activityExists) throw new NotFoundException("Activity");
+
+        var weekMonday = NormalizeToMonday(req.WeekStarting);
+
+        var entry = new LookaheadEntry
+        {
+            ProjectId          = projectId,
+            ActivityId         = req.ActivityId,
+            WeekStarting       = weekMonday,
+            ConstraintsRemoved = req.ConstraintsRemoved,
+            Notes              = req.Notes,
+            CreatedById        = actorId,
+        };
+        db.LookaheadEntries.Add(entry);
+
+        await audit.WriteAsync(actorId, "lookahead.added", "LookaheadEntry",
+            entry.Id.ToString(), projectId,
+            detail: new
+            {
+                activityId         = req.ActivityId,
+                weekStarting       = weekMonday,
+                constraintsRemoved = req.ConstraintsRemoved,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return entry;
+    }
+
+    public async Task<LookaheadEntry> UpdateLookaheadAsync(
+        Guid projectId, Guid lookaheadId, UpdateLookaheadEntryRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var entry = await db.LookaheadEntries
+            .FirstOrDefaultAsync(le => le.Id == lookaheadId && le.ProjectId == projectId && le.IsActive, ct)
+            ?? throw new NotFoundException("LookaheadEntry");
+
+        var changed = new List<string>();
+        if (req.ConstraintsRemoved.HasValue && req.ConstraintsRemoved.Value != entry.ConstraintsRemoved)
+        {
+            entry.ConstraintsRemoved = req.ConstraintsRemoved.Value;
+            changed.Add("ConstraintsRemoved");
+        }
+        if (req.Notes is not null) { entry.Notes = req.Notes; changed.Add("Notes"); }
+
+        if (changed.Count == 0)
+            throw new ValidationException(["No updatable fields provided"]);
+
+        await audit.WriteAsync(actorId, "lookahead.updated", "LookaheadEntry",
+            entry.Id.ToString(), projectId,
+            detail: new { changedFields = changed }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return entry;
+    }
+
+    public async Task RemoveLookaheadAsync(
+        Guid projectId, Guid lookaheadId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var entry = await db.LookaheadEntries
+            .FirstOrDefaultAsync(le => le.Id == lookaheadId && le.ProjectId == projectId && le.IsActive, ct)
+            ?? throw new NotFoundException("LookaheadEntry");
+
+        entry.IsActive = false;
+        await audit.WriteAsync(actorId, "lookahead.removed", "LookaheadEntry",
+            entry.Id.ToString(), projectId,
+            detail: new { activityId = entry.ActivityId, weekStarting = entry.WeekStarting },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<List<LookaheadEntry>> ListLookaheadAsync(
+        Guid projectId, DateTime? weekStarting, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        var q = db.LookaheadEntries
+            .Where(le => le.ProjectId == projectId && le.IsActive);
+        if (weekStarting.HasValue)
+        {
+            var monday = NormalizeToMonday(weekStarting.Value);
+            q = q.Where(le => le.WeekStarting == monday);
+        }
+        return await q.OrderBy(le => le.WeekStarting).ThenBy(le => le.CreatedAt)
+            .ToListAsync(ct);
+    }
+
+    // ── Weekly Work Plan ────────────────────────────────────────────
+
+    public async Task<WeeklyWorkPlan> CreateWeeklyWorkPlanAsync(
+        Guid projectId, CreateWeeklyWorkPlanRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var weekMonday = NormalizeToMonday(req.WeekStarting);
+
+        var duplicate = await db.WeeklyWorkPlans.AnyAsync(
+            w => w.ProjectId == projectId && w.WeekStarting == weekMonday, ct);
+        if (duplicate)
+            throw new ConflictException(
+                $"A weekly work plan for week starting {weekMonday:yyyy-MM-dd} already exists in this project");
+
+        var wwp = new WeeklyWorkPlan
+        {
+            ProjectId    = projectId,
+            WeekStarting = weekMonday,
+            Notes        = req.Notes,
+            CreatedById  = actorId,
+        };
+        db.WeeklyWorkPlans.Add(wwp);
+
+        await audit.WriteAsync(actorId, "weekly_plan.created", "WeeklyWorkPlan",
+            wwp.Id.ToString(), projectId,
+            detail: new { weekStarting = weekMonday }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return wwp;
+    }
+
+    public async Task<List<WeeklyWorkPlan>> ListWeeklyWorkPlansAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        return await db.WeeklyWorkPlans
+            .Where(w => w.ProjectId == projectId)
+            .OrderByDescending(w => w.WeekStarting)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Read a weekly work plan with its commitments and the computed
+    /// PPC. PPC = 100 × completed_count / committed_count when
+    /// committed_count > 0; null otherwise.
+    /// </summary>
+    public async Task<WeeklyWorkPlanDto> GetWeeklyWorkPlanAsync(
+        Guid projectId, Guid wwpId, CancellationToken ct = default)
+    {
+        var wwp = await db.WeeklyWorkPlans
+            .FirstOrDefaultAsync(w => w.Id == wwpId && w.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("WeeklyWorkPlan");
+
+        var commitments = await db.WeeklyTaskCommitments
+            .Where(c => c.WeeklyWorkPlanId == wwpId)
+            .Join(db.Activities, c => c.ActivityId, a => a.Id,
+                (c, a) => new { c, a })
+            .OrderBy(x => x.a.Code)
+            .ToListAsync(ct);
+
+        var rows = commitments.Select(x => new WeeklyTaskCommitmentDto(
+            x.c.Id, x.c.WeeklyWorkPlanId, x.c.ActivityId,
+            x.a.Code, x.a.Name,
+            x.c.Committed, x.c.Completed, x.c.Reason, x.c.Notes,
+            x.c.UpdatedAt)).ToList();
+
+        var committedCount = rows.Count(r => r.Committed);
+        var completedCount = rows.Count(r => r.Completed);
+        decimal? ppc = committedCount > 0
+            ? Math.Round(100m * completedCount / committedCount, 2)
+            : null;
+
+        return new WeeklyWorkPlanDto(
+            wwp.Id, wwp.ProjectId, wwp.WeekStarting, wwp.Notes,
+            wwp.CreatedAt, wwp.CreatedById,
+            committedCount, completedCount, ppc,
+            rows);
+    }
+
+    // ── Weekly task commitments ─────────────────────────────────────
+
+    public async Task<WeeklyTaskCommitment> AddCommitmentAsync(
+        Guid projectId, Guid wwpId, AddCommitmentRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var wwp = await db.WeeklyWorkPlans
+            .FirstOrDefaultAsync(w => w.Id == wwpId && w.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("WeeklyWorkPlan");
+
+        var activityOk = await db.Activities.AnyAsync(
+            a => a.Id == req.ActivityId && a.ProjectId == projectId && a.IsActive, ct);
+        if (!activityOk) throw new NotFoundException("Activity");
+
+        var duplicate = await db.WeeklyTaskCommitments.AnyAsync(
+            c => c.WeeklyWorkPlanId == wwpId && c.ActivityId == req.ActivityId, ct);
+        if (duplicate)
+            throw new ConflictException("Activity is already committed in this weekly plan");
+
+        var commit = new WeeklyTaskCommitment
+        {
+            WeeklyWorkPlanId = wwpId,
+            ProjectId        = projectId,
+            ActivityId       = req.ActivityId,
+            Committed        = true,
+            Completed        = false,
+            Notes            = req.Notes,
+        };
+        db.WeeklyTaskCommitments.Add(commit);
+
+        await audit.WriteAsync(actorId, "weekly_commitment.added", "WeeklyTaskCommitment",
+            commit.Id.ToString(), projectId,
+            detail: new
+            {
+                weeklyWorkPlanId = wwpId,
+                activityId       = req.ActivityId,
+                weekStarting     = wwp.WeekStarting,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return commit;
+    }
+
+    public async Task<WeeklyTaskCommitment> UpdateCommitmentAsync(
+        Guid projectId, Guid wwpId, Guid commitmentId,
+        UpdateCommitmentRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var commit = await db.WeeklyTaskCommitments
+            .FirstOrDefaultAsync(c => c.Id == commitmentId
+                                   && c.WeeklyWorkPlanId == wwpId
+                                   && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("WeeklyTaskCommitment");
+
+        // The whole point of LPS is to surface the reason when a
+        // commitment fails. Reject Completed = false without a Reason.
+        if (commit.Committed && !req.Completed && !req.Reason.HasValue)
+            throw new ValidationException(
+                ["Reason is required when Completed = false on a committed task"]);
+
+        commit.Completed = req.Completed;
+        commit.Reason    = req.Completed ? null : req.Reason;
+        if (req.Notes is not null) commit.Notes = req.Notes;
+
+        await audit.WriteAsync(actorId, "weekly_commitment.updated", "WeeklyTaskCommitment",
+            commit.Id.ToString(), projectId,
+            detail: new
+            {
+                completed = req.Completed,
+                reason    = req.Reason?.ToString(),
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return commit;
+    }
+
+    public async Task RemoveCommitmentAsync(
+        Guid projectId, Guid wwpId, Guid commitmentId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var commit = await db.WeeklyTaskCommitments
+            .FirstOrDefaultAsync(c => c.Id == commitmentId
+                                   && c.WeeklyWorkPlanId == wwpId
+                                   && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("WeeklyTaskCommitment");
+
+        db.WeeklyTaskCommitments.Remove(commit);
+        await audit.WriteAsync(actorId, "weekly_commitment.removed", "WeeklyTaskCommitment",
+            commit.Id.ToString(), projectId,
+            detail: new
+            {
+                weeklyWorkPlanId = wwpId,
+                activityId       = commit.ActivityId,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Normalise an arbitrary date to the Monday of its ISO week.
+    /// LPS boards are aligned to Monday-starting weeks; allowing any
+    /// day-of-week input keeps the API permissive (the front-end can
+    /// just send "today" without knowing it's Monday).
+    /// </summary>
+    private static DateTime NormalizeToMonday(DateTime d)
+    {
+        var date = d.Date;
+        var diff = ((int)date.DayOfWeek - (int)DayOfWeek.Monday + 7) % 7;
+        return date.AddDays(-diff);
+    }
+}
 public class CdeService(CimsDbContext db, AuditService audit)
 {
     public async Task<List<CdeContainer>> ListContainersAsync(Guid projectId) =>

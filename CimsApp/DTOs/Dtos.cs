@@ -161,6 +161,154 @@ public record UpdateCommunicationItemRequest(
     CommunicationChannel? Channel,
     Guid? OwnerId,
     string? Notes);
+// T-S4-03 dependency add. Predecessor + Successor must both belong to
+// the same project (service-enforced); cycle rejected with
+// ConflictException. Lag in days, decimal, can be negative for lead.
+public record AddDependencyRequest(
+    Guid PredecessorId,
+    Guid SuccessorId,
+    DependencyType Type,
+    decimal Lag);
+// T-S4-05 activity create. Code unique within project. Duration >= 0
+// (zero is a milestone). PercentComplete in [0, 1]. ConstraintDate
+// required when ConstraintType is one of the date-pinned variants
+// (SNET / SNLT / FNET / FNLT / MSO / MFO). AssigneeId, Discipline
+// optional.
+public record CreateActivityRequest(
+    string Code,
+    string Name,
+    string? Description,
+    decimal Duration,
+    DurationUnit DurationUnit,
+    DateTime? ScheduledStart,
+    DateTime? ScheduledFinish,
+    ConstraintType ConstraintType,
+    DateTime? ConstraintDate,
+    decimal PercentComplete,
+    Guid? AssigneeId,
+    string? Discipline);
+// All fields nullable for partial update. Code change re-validates
+// uniqueness; AssigneeId change re-validates membership.
+public record UpdateActivityRequest(
+    string? Code,
+    string? Name,
+    string? Description,
+    decimal? Duration,
+    DurationUnit? DurationUnit,
+    DateTime? ScheduledStart,
+    DateTime? ScheduledFinish,
+    ConstraintType? ConstraintType,
+    DateTime? ConstraintDate,
+    decimal? PercentComplete,
+    Guid? AssigneeId,
+    string? Discipline);
+// T-S4-05 recompute. Optional dataDate override; service falls back
+// to Project.StartDate if not supplied. Service rejects if neither
+// is set.
+public record RecomputeScheduleRequest(DateTime? DataDate);
+// T-S4-05 schedule snapshot returned by GET /schedule and computed
+// view endpoints. The Activities list mirrors Cpm.CpmActivityResult
+// per row, joined to the Activity Code/Name/AssigneeId for UI use.
+public record ScheduleActivityDto(
+    Guid Id, string Code, string Name, string? Description,
+    decimal Duration, DurationUnit DurationUnit,
+    DateTime? EarlyStart, DateTime? EarlyFinish,
+    DateTime? LateStart, DateTime? LateFinish,
+    decimal? TotalFloat, decimal? FreeFloat, bool IsCritical,
+    DateTime? ScheduledStart, DateTime? ScheduledFinish,
+    DateTime? ActualStart, DateTime? ActualFinish,
+    ConstraintType ConstraintType, DateTime? ConstraintDate,
+    decimal PercentComplete, Guid? AssigneeId, string? Discipline,
+    bool IsActive);
+public record ScheduleRecomputeResultDto(
+    DateTime ProjectStart, DateTime ProjectFinish, int ActivitiesCount, int CriticalActivitiesCount);
+// T-S4-06 baseline capture. Label required ("Original baseline",
+// "Revision 2", etc.). Snapshot pulls every active activity.
+public record CreateBaselineRequest(string Label);
+// Header listing of baselines on a project (T-S4-06).
+public record BaselineSummaryDto(
+    Guid Id, string Label, DateTime CapturedAt, Guid CapturedById,
+    int ActivitiesCount, DateTime? ProjectFinishAtBaseline);
+// One activity-level row in the comparison output. Variances are
+// in days, current minus baseline (positive = slipped later /
+// expanded). Either side can be null:
+// - IsNewSinceBaseline = true → activity exists currently but was
+//   not in the baseline; baseline* fields null.
+// - IsRemovedSinceBaseline = true → activity was in the baseline
+//   but is now deactivated; current* fields null.
+public record BaselineActivityComparisonDto(
+    Guid ActivityId, string Code, string Name,
+    DateTime? BaselineEarlyStart, DateTime? BaselineEarlyFinish,
+    decimal? BaselineDuration, bool BaselineWasCritical,
+    DateTime? CurrentEarlyStart, DateTime? CurrentEarlyFinish,
+    decimal? CurrentDuration, bool CurrentIsCritical,
+    decimal? StartVarianceDays, decimal? FinishVarianceDays,
+    decimal? DurationVarianceDays,
+    bool IsNewSinceBaseline, bool IsRemovedSinceBaseline);
+public record BaselineComparisonDto(
+    Guid BaselineId, string Label, DateTime CapturedAt,
+    DateTime? ProjectFinishAtBaseline, DateTime? CurrentProjectFinish,
+    decimal? ProjectFinishVarianceDays,
+    int AddedActivitiesCount, int RemovedActivitiesCount,
+    List<BaselineActivityComparisonDto> Activities);
+// T-S4-07 LPS lookahead entry. WeekStarting is normalised by the
+// service to the Monday of the supplied date. ConstraintsRemoved
+// defaults false at create time; the PM toggles it during the
+// weekly LPS meeting.
+public record CreateLookaheadEntryRequest(
+    Guid ActivityId, DateTime WeekStarting,
+    bool ConstraintsRemoved, string? Notes);
+public record UpdateLookaheadEntryRequest(
+    bool? ConstraintsRemoved, string? Notes);
+// T-S4-07 weekly work plan. WeekStarting normalised to Monday.
+// Unique within project.
+public record CreateWeeklyWorkPlanRequest(DateTime WeekStarting, string? Notes);
+// T-S4-07 commit-to-task. ActivityId must belong to the same project
+// as the WeeklyWorkPlan; service enforces same-project + active.
+public record AddCommitmentRequest(Guid ActivityId, string? Notes);
+// At week-end the IM/PM marks each commitment Completed = true OR
+// supplies a Reason. Completed = false WITHOUT a Reason is rejected
+// (the whole point of LPS is to surface reasons-for-non-completion).
+public record UpdateCommitmentRequest(
+    bool Completed, LpsReasonForNonCompletion? Reason, string? Notes);
+// Weekly Work Plan view with computed PPC. PPC = 100 ×
+// completed_count / committed_count when committed > 0; null
+// otherwise (no commitments yet recorded).
+public record WeeklyWorkPlanDto(
+    Guid Id, Guid ProjectId, DateTime WeekStarting, string? Notes,
+    DateTime CreatedAt, Guid CreatedById,
+    int CommittedCount, int CompletedCount, decimal? PercentPlanComplete,
+    List<WeeklyTaskCommitmentDto> Commitments);
+public record WeeklyTaskCommitmentDto(
+    Guid Id, Guid WeeklyWorkPlanId, Guid ActivityId,
+    string ActivityCode, string ActivityName,
+    bool Committed, bool Completed,
+    LpsReasonForNonCompletion? Reason, string? Notes,
+    DateTime UpdatedAt);
+// T-S4-09 MSP XML import summary. Counts what was inserted; the
+// caller can call /schedule/recompute to populate CPM fields.
+public record MsProjectImportResultDto(
+    string? ProjectName, DateTime? ProjectStart,
+    int ActivitiesImported, int DependenciesImported,
+    List<string> Warnings);
+// T-S4-11 Gantt data endpoint. UI-friendly read view: per-activity
+// bars + per-dependency arrows. Start / Finish prefer CPM-computed
+// EarlyStart / EarlyFinish; fall back to ScheduledStart / Finish if
+// the CPM solver hasn't been run yet (or both null if neither set).
+// Network-view (PERT diagram) endpoint deferred to B-033 v1.1 per
+// CR-005.
+public record GanttActivityDto(
+    Guid Id, string Code, string Name,
+    DateTime? Start, DateTime? Finish,
+    decimal Duration, decimal PercentComplete,
+    bool IsCritical, Guid? AssigneeId, string? Discipline);
+public record GanttDependencyDto(
+    Guid Id, Guid PredecessorId, Guid SuccessorId,
+    DependencyType Type, decimal Lag);
+public record GanttDto(
+    DateTime? ProjectStart, DateTime? ProjectFinish,
+    List<GanttActivityDto> Activities,
+    List<GanttDependencyDto> Dependencies);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

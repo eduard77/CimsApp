@@ -36,3 +36,46 @@ public enum EngagementType { Meeting, Call, Email, Letter, Workshop, Other }
 // matrix (T-S3-07).
 public enum CommunicationFrequency { Daily, Weekly, Fortnightly, Monthly, Quarterly, AdHoc }
 public enum CommunicationChannel { Email, Meeting, Portal, Letter, Phone, Other }
+
+// S4 Schedule & Programme module (PAFM-SD F.5).
+// Activity duration unit. v1.0 ships Day only; Hour is reserved for
+// v1.1 when calendar / non-working-day rules can be modelled.
+public enum DurationUnit { Day, Hour }
+// MS-Project-style activity scheduling constraint. ASAP (As Soon As
+// Possible) is the default — no hard date constraint, just the
+// dependency-driven start. The seven other types pin start / finish
+// to a date in the named direction. SNET = Start No Earlier Than;
+// SNLT = Start No Later Than; FNET = Finish No Earlier Than;
+// FNLT = Finish No Later Than; MSO = Must Start On; MFO = Must
+// Finish On. ALAP (As Late As Possible) is the backward-pass twin
+// of ASAP. CPM solver respects the constraint when computing
+// Early/Late dates.
+public enum ConstraintType { ASAP, ALAP, SNET, SNLT, FNET, FNLT, MSO, MFO }
+// Inter-activity dependency type (T-S4-03). Standard PMBOK / MS
+// Project four shapes:
+// - FS (Finish-to-Start): predecessor finishes, then successor starts.
+//   Default in 90% of construction schedules.
+// - SS (Start-to-Start): successor can start once predecessor starts.
+// - FF (Finish-to-Finish): successor can finish once predecessor finishes.
+// - SF (Start-to-Finish): successor can finish once predecessor starts.
+//   Rare; valid CPM topology nonetheless.
+// Lag (in days, decimal) is added to the trigger event; negative lag
+// is "lead" and pulls the successor in.
+public enum DependencyType { FS, SS, FF, SF }
+// LPS reason-for-non-completion (T-S4-07). Standard Last Planner
+// System root-cause categories for activities that were Committed
+// but not Completed in a Weekly Work Plan. v1.1 candidate: per-tenant
+// custom reason categories — UK construction projects often want a
+// finer breakdown (e.g. "Welfare facilities unavailable" or
+// "Permit-to-work delay").
+public enum LpsReasonForNonCompletion
+{
+    ResourceUnavailability,
+    MaterialDelay,
+    WeatherImpact,
+    DesignChange,
+    PrerequisiteIncomplete,
+    ScopeChange,
+    AccessIssue,
+    Other,
+}

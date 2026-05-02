@@ -50,6 +50,13 @@ public class CimsDbContext(
     public DbSet<Stakeholder>        Stakeholders        => Set<Stakeholder>();
     public DbSet<EngagementLog>      EngagementLogs      => Set<EngagementLog>();
     public DbSet<CommunicationItem>  CommunicationItems  => Set<CommunicationItem>();
+    public DbSet<Activity>           Activities          => Set<Activity>();
+    public DbSet<Dependency>         Dependencies        => Set<Dependency>();
+    public DbSet<ScheduleBaseline>   ScheduleBaselines   => Set<ScheduleBaseline>();
+    public DbSet<ScheduleBaselineActivity> ScheduleBaselineActivities => Set<ScheduleBaselineActivity>();
+    public DbSet<LookaheadEntry>      LookaheadEntries     => Set<LookaheadEntry>();
+    public DbSet<WeeklyWorkPlan>      WeeklyWorkPlans      => Set<WeeklyWorkPlan>();
+    public DbSet<WeeklyTaskCommitment> WeeklyTaskCommitments => Set<WeeklyTaskCommitment>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -405,6 +412,95 @@ public class CimsDbContext(
              .HasForeignKey(c => c.OwnerId).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<Activity>(e =>
+        {
+            // (ProjectId, Code) is the natural unique-within-project
+            // identifier; the CPM solver and the Gantt renderer hit
+            // (ProjectId, IsActive) for the live activity list.
+            e.HasIndex(a => new { a.ProjectId, a.Code }).IsUnique();
+            e.HasIndex(a => new { a.ProjectId, a.IsActive });
+            e.HasOne(a => a.Project).WithMany()
+             .HasForeignKey(a => a.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(a => a.Assignee).WithMany()
+             .HasForeignKey(a => a.AssigneeId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<Dependency>(e =>
+        {
+            // CPM forward pass walks (ProjectId, SuccessorId);
+            // backward pass walks (ProjectId, PredecessorId).
+            e.HasIndex(d => new { d.ProjectId, d.SuccessorId });
+            e.HasIndex(d => new { d.ProjectId, d.PredecessorId });
+            // Disallow duplicate (Predecessor, Successor) pairs.
+            // The Type / Lag are properties of *the* link; multi-link
+            // pairs are vanishingly rare in real schedules and would
+            // muddle the CPM solver semantics.
+            e.HasIndex(d => new { d.PredecessorId, d.SuccessorId }).IsUnique();
+            e.HasOne(d => d.Project).WithMany()
+             .HasForeignKey(d => d.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(d => d.Predecessor).WithMany(a => a.SuccessorLinks)
+             .HasForeignKey(d => d.PredecessorId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(d => d.Successor).WithMany(a => a.PredecessorLinks)
+             .HasForeignKey(d => d.SuccessorId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<ScheduleBaseline>(e =>
+        {
+            e.HasIndex(b => new { b.ProjectId, b.CapturedAt });
+            e.HasOne(b => b.Project).WithMany()
+             .HasForeignKey(b => b.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(b => b.CapturedBy).WithMany()
+             .HasForeignKey(b => b.CapturedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<ScheduleBaselineActivity>(e =>
+        {
+            // Comparison endpoint joins per-baseline rows back to
+            // current Activity rows; index on (ScheduleBaselineId,
+            // ActivityId) makes that lookup O(log n).
+            e.HasIndex(b => new { b.ScheduleBaselineId, b.ActivityId });
+            e.HasOne(b => b.ScheduleBaseline).WithMany(s => s.Activities)
+             .HasForeignKey(b => b.ScheduleBaselineId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(b => b.Activity).WithMany()
+             .HasForeignKey(b => b.ActivityId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<LookaheadEntry>(e =>
+        {
+            // Lookahead board renders by (ProjectId, WeekStarting);
+            // per-activity drill-down hits (ActivityId, WeekStarting).
+            e.HasIndex(le => new { le.ProjectId, le.WeekStarting, le.IsActive });
+            e.HasIndex(le => new { le.ActivityId, le.WeekStarting });
+            e.HasOne(le => le.Project).WithMany()
+             .HasForeignKey(le => le.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(le => le.Activity).WithMany()
+             .HasForeignKey(le => le.ActivityId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(le => le.CreatedBy).WithMany()
+             .HasForeignKey(le => le.CreatedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<WeeklyWorkPlan>(e =>
+        {
+            // One WWP per (project, week) — unique constraint.
+            e.HasIndex(w => new { w.ProjectId, w.WeekStarting }).IsUnique();
+            e.HasOne(w => w.Project).WithMany()
+             .HasForeignKey(w => w.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(w => w.CreatedBy).WithMany()
+             .HasForeignKey(w => w.CreatedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<WeeklyTaskCommitment>(e =>
+        {
+            // Disallow duplicate (WWP, Activity) commitments — each
+            // WWP can commit to a given activity at most once.
+            e.HasIndex(c => new { c.WeeklyWorkPlanId, c.ActivityId }).IsUnique();
+            e.HasIndex(c => new { c.ProjectId, c.WeeklyWorkPlanId });
+            e.HasOne(c => c.WeeklyWorkPlan).WithMany(w => w.Commitments)
+             .HasForeignKey(c => c.WeeklyWorkPlanId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.Activity).WithMany()
+             .HasForeignKey(c => c.ActivityId).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -446,6 +542,13 @@ public class CimsDbContext(
         m.Entity<Stakeholder>().HasQueryFilter(s => s.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<EngagementLog>().HasQueryFilter(g => g.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<CommunicationItem>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Activity>().HasQueryFilter(a => a.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Dependency>().HasQueryFilter(d => d.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<ScheduleBaseline>().HasQueryFilter(b => b.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<ScheduleBaselineActivity>().HasQueryFilter(b => b.ScheduleBaseline.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<LookaheadEntry>().HasQueryFilter(le => le.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<WeeklyWorkPlan>().HasQueryFilter(w => w.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<WeeklyTaskCommitment>().HasQueryFilter(c => c.WeeklyWorkPlan.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -471,6 +574,8 @@ public class CimsDbContext(
             else if (e.Entity is Risk risk) risk.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is Stakeholder s) s.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is CommunicationItem ci) ci.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is Activity act) act.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is WeeklyTaskCommitment wtc) wtc.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

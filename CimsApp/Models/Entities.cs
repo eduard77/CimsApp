@@ -1001,3 +1001,279 @@ public class CommunicationItem
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// One scheduled activity in a project's CPM schedule (T-S4-02,
+/// PAFM-SD F.5 first bullet). Tenant-scoped through
+/// Project.AppointingPartyId. CPM-computed fields (Early/Late
+/// Start/Finish, Total/Free Float, IsCritical) are nullable until
+/// the first ScheduleService.RecomputeAsync run; the service
+/// populates them by calling Core/Cpm.cs and persisting the result.
+/// Soft-deleted via IsActive to preserve dependency-graph history.
+/// </summary>
+public class Activity
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Caller-supplied unique-within-project code, e.g.
+    /// "A1010", "MIL-100". Service enforces uniqueness on
+    /// (ProjectId, Code).</summary>
+    [Required, MaxLength(50)] public string Code { get; set; } = "";
+
+    [Required, MaxLength(300)] public string Name { get; set; } = "";
+    public string? Description { get; set; }
+
+    /// <summary>Planned duration in DurationUnit. Decimal so half-day
+    /// activities are expressible without an Hour unit. v1.0 only
+    /// supports Day; Hour reserved for v1.1.</summary>
+    [Column(TypeName = "decimal(9,2)")]
+    public decimal Duration { get; set; }
+    public DurationUnit DurationUnit { get; set; } = DurationUnit.Day;
+
+    // ── CPM-computed fields (populated by Core/Cpm.cs run) ─────────
+    public DateTime? EarlyStart  { get; set; }
+    public DateTime? EarlyFinish { get; set; }
+    public DateTime? LateStart   { get; set; }
+    public DateTime? LateFinish  { get; set; }
+    [Column(TypeName = "decimal(9,2)")]
+    public decimal? TotalFloat   { get; set; }
+    [Column(TypeName = "decimal(9,2)")]
+    public decimal? FreeFloat    { get; set; }
+    public bool IsCritical { get; set; }
+
+    // ── Scheduled (committed plan) and Actual (recorded) dates ─────
+    public DateTime? ScheduledStart  { get; set; }
+    public DateTime? ScheduledFinish { get; set; }
+    public DateTime? ActualStart     { get; set; }
+    public DateTime? ActualFinish    { get; set; }
+
+    // ── Constraint propagation (MS-Project-style) ───────────────────
+    public ConstraintType ConstraintType { get; set; } = ConstraintType.ASAP;
+    public DateTime? ConstraintDate { get; set; }
+
+    /// <summary>Progress fraction in [0, 1]. Drives EV (post-S1)
+    /// and reporting. Service validates range.</summary>
+    [Column(TypeName = "decimal(5,4)")]
+    public decimal PercentComplete { get; set; }
+
+    /// <summary>Optional caller-supplied owner / responsible.
+    /// Service validates project membership.</summary>
+    public Guid? AssigneeId { get; set; }
+    public User? Assignee { get; set; }
+
+    [MaxLength(100)] public string? Discipline { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<Dependency> PredecessorLinks { get; set; } = [];
+    public ICollection<Dependency> SuccessorLinks   { get; set; } = [];
+}
+
+/// <summary>
+/// Inter-activity scheduling dependency (T-S4-03). Predecessor and
+/// Successor are both Activity rows in the *same* project; service
+/// enforces same-project at write time. Lag is in days (decimal,
+/// can be negative for lead). Tenant-scoped via Project.
+/// </summary>
+public class Dependency
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Denormalised for the tenant query filter — same
+    /// pattern as RiskDrawdown.ProjectId. Always equals
+    /// Predecessor.ProjectId == Successor.ProjectId; service
+    /// enforces.</summary>
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid PredecessorId { get; set; }
+    public Activity Predecessor { get; set; } = null!;
+
+    public Guid SuccessorId { get; set; }
+    public Activity Successor { get; set; } = null!;
+
+    public DependencyType Type { get; set; } = DependencyType.FS;
+
+    /// <summary>Lag in days. Negative = lead. Service validates a
+    /// reasonable range (-365..365) to catch typos.</summary>
+    [Column(TypeName = "decimal(9,2)")]
+    public decimal Lag { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// A frozen snapshot of a project's schedule at a point in time
+/// (T-S4-06, PAFM-SD F.5 second bullet — "Baselines captured and
+/// compared against actual"). Multiple baselines per project are
+/// allowed (Original, Revision 1, etc.). The header carries summary
+/// metadata; per-activity rows live in
+/// <see cref="ScheduleBaselineActivity"/>. Tenant-scoped through
+/// Project.AppointingPartyId. Baselines are immutable after capture
+/// — there's no Update / Delete; superseded baselines stay visible
+/// for audit / reporting.
+/// </summary>
+public class ScheduleBaseline
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    [Required, MaxLength(200)] public string Label { get; set; } = "";
+
+    public DateTime CapturedAt { get; set; } = DateTime.UtcNow;
+    public Guid CapturedById { get; set; }
+    public User CapturedBy { get; set; } = null!;
+
+    /// <summary>Denormalised summary at capture time so list endpoints
+    /// don't need to aggregate across the per-activity rows.</summary>
+    public int ActivitiesCount { get; set; }
+
+    /// <summary>Project finish (max EarlyFinish across activities) at
+    /// the moment the baseline was captured. Null if any activity
+    /// hadn't been CPM-recomputed (EarlyFinish missing).</summary>
+    public DateTime? ProjectFinishAtBaseline { get; set; }
+
+    public ICollection<ScheduleBaselineActivity> Activities { get; set; } = [];
+}
+
+/// <summary>
+/// One frozen activity row inside a <see cref="ScheduleBaseline"/>.
+/// Code / Name are denormalised so the baseline preserves the
+/// activity's identity even if the Activity row's Code is later
+/// renamed. Comparison endpoint subtracts current Activity.Early*
+/// from these fields to compute start / finish / duration variances.
+/// Tenant-scoped via the parent ScheduleBaseline + denormalised
+/// ProjectId for query filter consistency.
+/// </summary>
+public class ScheduleBaselineActivity
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ScheduleBaselineId { get; set; }
+    public ScheduleBaseline ScheduleBaseline { get; set; } = null!;
+
+    /// <summary>Denormalised — equals ScheduleBaseline.ProjectId.
+    /// Drives the tenant query filter without requiring a join.</summary>
+    public Guid ProjectId { get; set; }
+
+    public Guid ActivityId { get; set; }
+    public Activity Activity { get; set; } = null!;
+
+    [Required, MaxLength(50)]  public string Code { get; set; } = "";
+    [Required, MaxLength(300)] public string Name { get; set; } = "";
+
+    [Column(TypeName = "decimal(9,2)")]
+    public decimal Duration { get; set; }
+
+    public DateTime? EarlyStart  { get; set; }
+    public DateTime? EarlyFinish { get; set; }
+    public bool IsCritical { get; set; }
+}
+
+/// <summary>
+/// One Lookahead-window entry (T-S4-07, PAFM-SD F.5 third bullet —
+/// "Last Planner System boards"). The 6-week-out lookahead is the
+/// LPS pull-planning view: each entry pairs an Activity with the
+/// week it should become "ready to start" (constraints removed).
+/// Tenant-scoped through Project.AppointingPartyId. Soft-deleted via
+/// IsActive — lookaheads are transient planning artefacts and the
+/// PM/IM workflow drops + re-adds entries as the constraints picture
+/// evolves week to week.
+/// </summary>
+public class LookaheadEntry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid ActivityId { get; set; }
+    public Activity Activity { get; set; } = null!;
+
+    /// <summary>The Monday of the lookahead-week this entry tracks.
+    /// Service truncates incoming values to date-only at the
+    /// week-start (the controller can be lenient on the input).</summary>
+    public DateTime WeekStarting { get; set; }
+
+    /// <summary>"Ready to start" flag — when every prerequisite,
+    /// resource, drawing, and approval is in place. Toggled by the
+    /// PM during the weekly LPS meeting.</summary>
+    public bool ConstraintsRemoved { get; set; }
+
+    public string? Notes { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public Guid CreatedById { get; set; }
+    public User CreatedBy { get; set; } = null!;
+}
+
+/// <summary>
+/// One Weekly Work Plan (T-S4-07, PAFM-SD F.5 third bullet). Header
+/// per project per week. Owns a collection of
+/// <see cref="WeeklyTaskCommitment"/> rows — one per Activity the PM
+/// commits to that week. PPC (Percent Plan Complete) is computed on
+/// read as completed_count / committed_count × 100 — never persisted,
+/// so PPC always reflects current commitment state.
+/// </summary>
+public class WeeklyWorkPlan
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Monday of the week. Unique within project.</summary>
+    public DateTime WeekStarting { get; set; }
+
+    public string? Notes { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public Guid CreatedById { get; set; }
+    public User CreatedBy { get; set; } = null!;
+
+    public ICollection<WeeklyTaskCommitment> Commitments { get; set; } = [];
+}
+
+/// <summary>
+/// One Activity-level commitment inside a <see cref="WeeklyWorkPlan"/>
+/// (T-S4-07). The PM commits to completing the Activity in the week;
+/// at week-end the IM/PM marks Completed = true or supplies a
+/// <see cref="LpsReasonForNonCompletion"/> for the failure. Tenant-
+/// scoped via the parent WeeklyWorkPlan + denormalised ProjectId.
+/// </summary>
+public class WeeklyTaskCommitment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid WeeklyWorkPlanId { get; set; }
+    public WeeklyWorkPlan WeeklyWorkPlan { get; set; } = null!;
+
+    /// <summary>Denormalised — equals WeeklyWorkPlan.ProjectId.
+    /// Drives the tenant query filter without a join.</summary>
+    public Guid ProjectId { get; set; }
+
+    public Guid ActivityId { get; set; }
+    public Activity Activity { get; set; } = null!;
+
+    public bool Committed { get; set; } = true;
+    public bool Completed { get; set; }
+
+    /// <summary>Required when Committed = true and Completed = false
+    /// at any read time. Service enforces on the mark-completed
+    /// transition: caller cannot leave Completed = false without a
+    /// Reason once the WeeklyWorkPlan's week has ended.</summary>
+    public LpsReasonForNonCompletion? Reason { get; set; }
+
+    public string? Notes { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
