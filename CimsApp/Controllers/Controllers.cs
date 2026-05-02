@@ -1567,6 +1567,60 @@ public class CompensationEventsController(CompensationEventsService svc, CimsDbC
     }
 }
 
+// ── Dashboards (T-S7-02) ──────────────────────────────────────────────────────
+// PAFM-SD F.8 first bullet — six per-role dashboards.
+[Route("api/v1/projects/{projectId:guid}/dashboards")]
+public class DashboardsController(DashboardsService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet("pm")]
+    public async Task<IActionResult> Pm(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetPmDashboardAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    [HttpGet("cm")]
+    public async Task<IActionResult> Cm(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetCmDashboardAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    [HttpGet("sm")]
+    public async Task<IActionResult> Sm(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetSmDashboardAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    [HttpGet("im")]
+    public async Task<IActionResult> Im(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetImDashboardAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    [HttpGet("hse")]
+    public async Task<IActionResult> Hse(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetHseDashboardAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    [HttpGet("client")]
+    public async Task<IActionResult> Client(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetClientDashboardAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

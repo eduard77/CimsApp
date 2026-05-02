@@ -4923,6 +4923,243 @@ public class CompensationEventsService(CimsDbContext db, AuditService audit)
     }
 }
 
+/// <summary>
+/// DashboardsService — per-role aggregation views (T-S7-02,
+/// PAFM-SD F.8 first bullet — "Role-specific dashboards (PM, CM,
+/// SM, IM, HSE, Client)"). Read-only; no mutations and no audit
+/// twin. Each per-role method returns a uniform
+/// <see cref="DashboardDto"/> with a list of
+/// <see cref="DashboardCardDto"/> rows. The HSE dashboard is
+/// sparse in v1.0 because the HSE module is S12 — explicit
+/// B-059 backlog entry covers the deferral.
+///
+/// Performance note: each dashboard runs ~5-8 small COUNT /
+/// AGG queries per request. Top-3 risk #2 in the kickoff: if
+/// pilot profiling shows real latency, the v1.1 candidate is a
+/// single-batched query per dashboard.
+/// </summary>
+public class DashboardsService(CimsDbContext db)
+{
+    public async Task<DashboardDto> GetPmDashboardAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var p = await LoadProjectAsync(projectId, ct);
+
+        var openRfis = await db.Rfis.CountAsync(
+            r => r.ProjectId == projectId
+              && r.Status != RfiStatus.Closed && r.Status != RfiStatus.Cancelled, ct);
+        var openActions = await db.ActionItems.CountAsync(
+            a => a.ProjectId == projectId
+              && (a.Status == ActionStatus.Open || a.Status == ActionStatus.InProgress), ct);
+        var openChangeRequests = await db.ChangeRequests.CountAsync(
+            c => c.ProjectId == projectId
+              && c.State != ChangeRequestState.Rejected
+              && c.State != ChangeRequestState.Closed, ct);
+        var openEarlyWarnings = await db.EarlyWarnings.CountAsync(
+            w => w.ProjectId == projectId && w.State != EarlyWarningState.Closed, ct);
+        var openCompensationEvents = await db.CompensationEvents.CountAsync(
+            c => c.ProjectId == projectId
+              && c.State != CompensationEventState.Rejected
+              && c.State != CompensationEventState.Implemented, ct);
+        var openRisks = await db.Risks.CountAsync(
+            r => r.Project.Id == projectId && r.Status != RiskStatus.Closed, ct);
+
+        return new DashboardDto("PM", p.Id, p.Name, p.Code, new List<DashboardCardDto>
+        {
+            new("Open RFIs",                 openRfis.ToString(),                DashboardCardType.Count, null),
+            new("Open Actions",              openActions.ToString(),             DashboardCardType.Count, null),
+            new("Open Change Requests",      openChangeRequests.ToString(),      DashboardCardType.Count, null),
+            new("Open Early Warnings",       openEarlyWarnings.ToString(),       DashboardCardType.Count, null),
+            new("Open Compensation Events",  openCompensationEvents.ToString(),  DashboardCardType.Count, null),
+            new("Open Risks",                openRisks.ToString(),               DashboardCardType.Count, null),
+        });
+    }
+
+    public async Task<DashboardDto> GetCmDashboardAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var p = await LoadProjectAsync(projectId, ct);
+
+        var totalBudget = await db.CostBreakdownItems
+            .Where(c => c.ProjectId == projectId && c.Budget.HasValue)
+            .SumAsync(c => c.Budget!.Value, ct);
+        var totalCommitted = await db.Commitments
+            .Where(c => c.ProjectId == projectId)
+            .SumAsync(c => (decimal?)c.Amount, ct) ?? 0m;
+        var totalActuals = await db.ActualCosts
+            .Where(a => a.ProjectId == projectId)
+            .SumAsync(a => (decimal?)a.Amount, ct) ?? 0m;
+        var raisedVariations = await db.Variations.CountAsync(
+            v => v.ProjectId == projectId && v.State == VariationState.Raised, ct);
+        var approvedVariations = await db.Variations.CountAsync(
+            v => v.ProjectId == projectId && v.State == VariationState.Approved, ct);
+        var latestPaymentCert = await db.PaymentCertificates
+            .Where(c => c.ProjectId == projectId)
+            .OrderByDescending(c => c.CreatedAt)
+            .Select(c => new { c.CertificateNumber, c.State })
+            .FirstOrDefaultAsync(ct);
+
+        var cards = new List<DashboardCardDto>
+        {
+            new("Total CBS Budget",     FormatCurrency(totalBudget,    p.Currency), DashboardCardType.Currency, null),
+            new("Total Committed",      FormatCurrency(totalCommitted, p.Currency), DashboardCardType.Currency, null),
+            new("Total Actuals",        FormatCurrency(totalActuals,   p.Currency), DashboardCardType.Currency, null),
+            new("Raised Variations",    raisedVariations.ToString(),                DashboardCardType.Count, null),
+            new("Approved Variations",  approvedVariations.ToString(),              DashboardCardType.Count, null),
+            new("Latest Payment Cert",
+                latestPaymentCert?.CertificateNumber ?? "—",
+                DashboardCardType.Text,
+                latestPaymentCert is null ? "No certificate yet" : $"State: {latestPaymentCert.State}"),
+        };
+        return new DashboardDto("CM", p.Id, p.Name, p.Code, cards);
+    }
+
+    public async Task<DashboardDto> GetSmDashboardAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var p = await LoadProjectAsync(projectId, ct);
+
+        var activeLookaheads = await db.LookaheadEntries.CountAsync(
+            le => le.ProjectId == projectId && le.IsActive, ct);
+        var latestWwp = await db.WeeklyWorkPlans
+            .Where(w => w.ProjectId == projectId)
+            .OrderByDescending(w => w.WeekStarting)
+            .Select(w => new { w.Id, w.WeekStarting })
+            .FirstOrDefaultAsync(ct);
+
+        // PPC computed-on-read for the latest WWP, mirroring
+        // LpsService.GetWeeklyWorkPlanAsync's compute path.
+        decimal? latestPpc = null;
+        if (latestWwp is not null)
+        {
+            var commits = await db.WeeklyTaskCommitments
+                .Where(c => c.WeeklyWorkPlanId == latestWwp.Id)
+                .Select(c => new { c.Committed, c.Completed })
+                .ToListAsync(ct);
+            var committedCount = commits.Count(c => c.Committed);
+            var completedCount = commits.Count(c => c.Completed);
+            if (committedCount > 0)
+                latestPpc = Math.Round(100m * completedCount / committedCount, 2);
+        }
+
+        var openActions = await db.ActionItems.CountAsync(
+            a => a.ProjectId == projectId
+              && (a.Status == ActionStatus.Open || a.Status == ActionStatus.InProgress), ct);
+        var openEarlyWarnings = await db.EarlyWarnings.CountAsync(
+            w => w.ProjectId == projectId && w.State != EarlyWarningState.Closed, ct);
+
+        return new DashboardDto("SM", p.Id, p.Name, p.Code, new List<DashboardCardDto>
+        {
+            new("Active Lookaheads",    activeLookaheads.ToString(), DashboardCardType.Count, null),
+            new("Latest WWP",
+                latestWwp?.WeekStarting.ToString("yyyy-MM-dd") ?? "—",
+                DashboardCardType.Date,
+                latestWwp is null ? "No weekly plan yet" : null),
+            new("Latest WWP PPC",
+                latestPpc?.ToString("0.##") ?? "—",
+                DashboardCardType.Percentage,
+                latestPpc is null ? "No commitments recorded" : null),
+            new("Open Actions",          openActions.ToString(),       DashboardCardType.Count, null),
+            new("Open Early Warnings",   openEarlyWarnings.ToString(), DashboardCardType.Count, null),
+        });
+    }
+
+    public async Task<DashboardDto> GetImDashboardAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var p = await LoadProjectAsync(projectId, ct);
+
+        var docCounts = await db.Documents
+            .Where(d => d.ProjectId == projectId)
+            .GroupBy(d => d.CurrentState)
+            .Select(g => new { State = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+        var byState = docCounts.ToDictionary(g => g.State, g => g.Count);
+
+        var openRfis = await db.Rfis.CountAsync(
+            r => r.ProjectId == projectId
+              && r.Status != RfiStatus.Closed && r.Status != RfiStatus.Cancelled, ct);
+        var crsAwaitingAssessment = await db.ChangeRequests.CountAsync(
+            c => c.ProjectId == projectId && c.State == ChangeRequestState.Raised, ct);
+
+        return new DashboardDto("IM", p.Id, p.Name, p.Code, new List<DashboardCardDto>
+        {
+            new("Docs - Work in Progress", (byState.GetValueOrDefault(CdeState.WorkInProgress)).ToString(), DashboardCardType.Count, null),
+            new("Docs - Shared",           (byState.GetValueOrDefault(CdeState.Shared)).ToString(),         DashboardCardType.Count, null),
+            new("Docs - Published",        (byState.GetValueOrDefault(CdeState.Published)).ToString(),      DashboardCardType.Count, null),
+            new("Docs - Archived",         (byState.GetValueOrDefault(CdeState.Archived)).ToString(),       DashboardCardType.Count, null),
+            new("Open RFIs",               openRfis.ToString(),                                              DashboardCardType.Count, null),
+            new("CRs Awaiting Assessment", crsAwaitingAssessment.ToString(),                                 DashboardCardType.Count, null),
+        });
+    }
+
+    public async Task<DashboardDto> GetHseDashboardAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var p = await LoadProjectAsync(projectId, ct);
+
+        // HSE module integration is S12 (Genera Systems QA, HS&E
+        // Integration). v1.0 dashboard is sparse — surfaces the
+        // deferral explicitly so the UI can render a placeholder
+        // with a "Coming in S12 (B-059)" message.
+        return new DashboardDto("HSE", p.Id, p.Name, p.Code, new List<DashboardCardDto>
+        {
+            new("HSE Module",
+                "Coming in S12",
+                DashboardCardType.Text,
+                "Per PAFM-SD roadmap; see backlog entry B-059 for HSE-specific dashboard cards"),
+        });
+    }
+
+    public async Task<DashboardDto> GetClientDashboardAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var p = await LoadProjectAsync(projectId, ct);
+
+        var raisedVariations = await db.Variations.CountAsync(
+            v => v.ProjectId == projectId && v.State == VariationState.Raised, ct);
+        var approvedVariations = await db.Variations.CountAsync(
+            v => v.ProjectId == projectId && v.State == VariationState.Approved, ct);
+
+        // Project finish date best-estimate: max EarlyFinish across
+        // active activities (post-CPM-recompute). Falls back to
+        // Project.EndDate if no schedule exists, else null.
+        var efs = await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive && a.EarlyFinish.HasValue)
+            .Select(a => a.EarlyFinish!.Value)
+            .ToListAsync(ct);
+        DateTime? estimatedFinish = efs.Count == 0 ? p.EndDate : efs.Max();
+
+        var latestBaseline = await db.ScheduleBaselines
+            .Where(b => b.ProjectId == projectId)
+            .OrderByDescending(b => b.CapturedAt)
+            .Select(b => new { b.Label, b.CapturedAt })
+            .FirstOrDefaultAsync(ct);
+
+        return new DashboardDto("Client", p.Id, p.Name, p.Code, new List<DashboardCardDto>
+        {
+            new("Project Status",         p.Status.ToString(),                            DashboardCardType.Text, null),
+            new("Estimated Finish",
+                estimatedFinish?.ToString("yyyy-MM-dd") ?? "—",
+                DashboardCardType.Date,
+                estimatedFinish is null ? "No schedule yet" : null),
+            new("Raised Variations",      raisedVariations.ToString(),                    DashboardCardType.Count, null),
+            new("Approved Variations",    approvedVariations.ToString(),                  DashboardCardType.Count, null),
+            new("Latest Baseline",
+                latestBaseline?.Label ?? "—",
+                DashboardCardType.Text,
+                latestBaseline is null ? "No baseline captured" : $"Captured {latestBaseline.CapturedAt:yyyy-MM-dd}"),
+        });
+    }
+
+    private async Task<Project> LoadProjectAsync(Guid projectId, CancellationToken ct)
+        => await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+    private static string FormatCurrency(decimal value, string currency)
+        => $"{currency} {value:N2}";
+}
+
 public class CdeService(CimsDbContext db, AuditService audit)
 {
     public async Task<List<CdeContainer>> ListContainersAsync(Guid projectId) =>

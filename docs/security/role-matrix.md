@@ -203,6 +203,22 @@ tenders / contracts / EWs / CEs are project-scoped collections.
 | POST   | `/api/v1/projects/{projectId}/procurement/contracts/{contractId}/compensation-events/{ceId}/accept` | authenticated | `ProjectManager+` | T-S6-08. Body `DecideCompensationEventRequest(decisionNote)`. State Quoted → Accepted. Audit: `compensation_event.accepted`. |
 | POST   | `/api/v1/projects/{projectId}/procurement/contracts/{contractId}/compensation-events/{ceId}/reject` | authenticated | `ProjectManager+` | T-S6-08. Body `DecideCompensationEventRequest(decisionNote)`. State Notified|Quoted → Rejected. Notified→Rejected covers NEC4 clause 61.4 ("PM notifies it is not a CE"). Rejected is terminal. Audit: `compensation_event.rejected`. |
 | POST   | `/api/v1/projects/{projectId}/procurement/contracts/{contractId}/compensation-events/{ceId}/implement` | authenticated | `ProjectManager+` | T-S6-08. Body `ImplementCompensationEventRequest(note?)`. State Accepted → Implemented. Implemented is terminal. **v1.0 limitations:** PM 4-week notification deadline → B-048; contractor 3-week quotation deadline + deemed-acceptance → B-049; risk-allowance pricing rules → B-050. Audit: `compensation_event.implemented`. |
+
+## Reporting & Dashboards
+
+PAFM-SD F.8. Per-role dashboards (T-S7-02), MPR data aggregator
+(T-S7-03 — PDF deferred to v1.1 / B-055), KPI cards (T-S7-04),
+custom report builder (T-S7-05). All read endpoints; only the
+custom-report-definition write paths produce mutations + audit.
+
+| Method | Route | Global role | Project role | Comment |
+|---|---|---|---|---|
+| GET  | `/api/v1/projects/{projectId}/dashboards/pm` | authenticated | membership | T-S7-02. PM dashboard cards: open RFIs, open Actions, open ChangeRequests, open EarlyWarnings, open CompensationEvents, open Risks. |
+| GET  | `/api/v1/projects/{projectId}/dashboards/cm` | authenticated | membership | T-S7-02. CM (Commercial Manager) dashboard cards: total CBS budget, total committed, total actuals, raised + approved variations, latest payment certificate. |
+| GET  | `/api/v1/projects/{projectId}/dashboards/sm` | authenticated | membership | T-S7-02. SM (Site Manager) dashboard cards: active lookaheads, latest WWP + computed PPC, open Actions, open Early Warnings. |
+| GET  | `/api/v1/projects/{projectId}/dashboards/im` | authenticated | membership | T-S7-02. IM (Information Manager) dashboard cards: documents by CdeState (4 cards), open RFIs, ChangeRequests awaiting assessment. |
+| GET  | `/api/v1/projects/{projectId}/dashboards/hse` | authenticated | membership | T-S7-02. HSE dashboard sparse in v1.0 — single placeholder card pointing at S12 (HSE module integration) + B-059 backlog entry. |
+| GET  | `/api/v1/projects/{projectId}/dashboards/client` | authenticated | membership | T-S7-02. Client dashboard cards: project status, estimated finish (max EarlyFinish across active activities), raised + approved variations, latest baseline. |
 | GET    | `/api/v1/projects/{projectId}/procurement/tender-packages/{packageId}/tenders` | authenticated | membership | T-S6-04. Lists tenders submitted against the package, ordered by BidAmount asc. |
 | GET    | `/api/v1/projects/{projectId}/procurement/tender-packages/{packageId}/tenders/{tenderId}` | authenticated | membership | T-S6-04. Cross-tenant 404 via the query filter. |
 | POST   | `/api/v1/projects/{projectId}/procurement/tender-packages/{packageId}/tenders` | authenticated | `TaskTeamMember+` | T-S6-04. Body `SubmitTenderRequest(bidderName, bidderOrganisation?, contactEmail?, bidAmount)`. **TenderPackage must be in Issued state** — submissions against Draft / Closed packages rejected with `ConflictException`. SubmittedAt = UtcNow. BidAmount > 0. Audit: `tender.submitted`. |

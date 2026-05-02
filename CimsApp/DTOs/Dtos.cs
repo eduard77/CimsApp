@@ -447,6 +447,23 @@ public record QuoteCompensationEventRequest(
 public record DecideCompensationEventRequest(string DecisionNote);
 // Implement: optional note.
 public record ImplementCompensationEventRequest(string? Note);
+// T-S7-02 Dashboards. Six per-role aggregation views (PM / CM /
+// SM / IM / HSE / Client). All return the same DTO shape — a
+// list of DashboardCardDto rows, each tagged with a semantic type
+// so the UI can format Counts, Percentages, Currency, Dates, and
+// free-text values appropriately.
+public enum DashboardCardType { Count, Percentage, Currency, Date, Text }
+public record DashboardCardDto(
+    string Name,
+    string Value,
+    DashboardCardType Type,
+    string? Subtitle);
+public record DashboardDto(
+    string Role,
+    Guid ProjectId,
+    string ProjectName,
+    string ProjectCode,
+    List<DashboardCardDto> Cards);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.
