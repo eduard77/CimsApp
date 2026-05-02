@@ -1621,6 +1621,25 @@ public class DashboardsController(DashboardsService svc, CimsDbContext db) : Cim
     }
 }
 
+// ── Reporting / MPR (T-S7-03) ─────────────────────────────────────────────────
+// PAFM-SD F.8 second bullet — Monthly Project Report. v1.0 returns
+// JSON only; PDF rendering deferred to v1.1 / B-055.
+[Route("api/v1/projects/{projectId:guid}/reports")]
+public class ReportingController(ReportingService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet("mpr")]
+    public async Task<IActionResult> Mpr(
+        Guid projectId,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GenerateMonthlyProjectReportAsync(projectId, from, to, ct);
+        return Ok(new { success = true, data = dto });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

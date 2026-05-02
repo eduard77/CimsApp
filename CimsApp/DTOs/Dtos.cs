@@ -464,6 +464,66 @@ public record DashboardDto(
     string ProjectName,
     string ProjectCode,
     List<DashboardCardDto> Cards);
+// T-S7-03 Monthly Project Report (MPR). PAFM-SD F.8 second
+// bullet. v1.0 returns JSON-only — PDF rendering deferred to
+// v1.1 / B-055. Section layout is a best-effort inference from
+// PMBOK 7 / NEC4 standard reporting templates; reconcile against
+// canonical PAFM Ch 30 paste when B-055 lands.
+// PAFM Ch 30 reference: best-effort inference v1.0
+public record MprDto(
+    Guid ProjectId,
+    string ProjectName,
+    string ProjectCode,
+    DateTime PeriodStart,
+    DateTime PeriodEnd,
+    DateTime GeneratedAtUtc,
+    MprExecutiveSummary ExecutiveSummary,
+    MprProgrammeStatus Programme,
+    MprCostStatus Cost,
+    MprRiskStatus Risk,
+    MprVariationsAndChanges Changes,
+    MprIssues Issues,
+    MprStakeholderUpdates Stakeholders);
+public record MprExecutiveSummary(
+    string ProjectStatus,
+    DateTime? PlannedEndDate,
+    DateTime? EstimatedEndDate,
+    int OpenRisksCount,
+    int OpenIssuesCount);
+public record MprProgrammeStatus(
+    int TotalActivities,
+    int CompletedActivities,
+    decimal? PercentComplete,
+    DateTime? EarliestEarlyStart,
+    DateTime? LatestEarlyFinish,
+    string? LatestBaselineLabel,
+    DateTime? LatestBaselineCapturedAt);
+public record MprCostStatus(
+    string Currency,
+    decimal TotalBudget,
+    decimal TotalCommitted,
+    decimal TotalActuals,
+    decimal? PercentSpent);
+public record MprRiskStatus(
+    int OpenTotal,
+    int OpenHighSeverity,
+    int OpenMediumSeverity,
+    int OpenLowSeverity);
+public record MprVariationsAndChanges(
+    int VariationsRaisedInPeriod,
+    int VariationsApprovedInPeriod,
+    decimal VariationsApprovedValueInPeriod,
+    int ChangeRequestsRaisedInPeriod,
+    int ChangeRequestsApprovedInPeriod);
+public record MprIssues(
+    int OpenRfis,
+    int OpenActions,
+    int OpenEarlyWarnings,
+    int OpenCompensationEvents);
+public record MprStakeholderUpdates(
+    int StakeholdersTotal,
+    int EngagementLogsInPeriod,
+    int CommunicationsTotal);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

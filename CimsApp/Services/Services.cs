@@ -5160,6 +5160,183 @@ public class DashboardsService(CimsDbContext db)
         => $"{currency} {value:N2}";
 }
 
+// T-S7-03 Monthly Project Report (MPR) data aggregator.
+// PAFM-SD F.8 second bullet. v1.0 produces a JSON-only DTO;
+// PDF rendering deferred to v1.1 / B-055. Each section is a
+// best-effort inference of the canonical PAFM Ch 30 layout
+// (paste-on-request per reference_pafm_spec.md) — reconcile
+// at B-055 time. Read-only — no audit / mutation.
+public class ReportingService(CimsDbContext db)
+{
+    public async Task<MprDto> GenerateMonthlyProjectReportAsync(
+        Guid projectId,
+        DateTime? periodStart,
+        DateTime? periodEnd,
+        CancellationToken ct = default)
+    {
+        var p = await db.Projects.FirstOrDefaultAsync(x => x.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        // Default period = last full calendar month [00:00 UTC of
+        // first-of-last-month, 00:00 UTC of first-of-this-month).
+        // Caller can override via query string for ad-hoc windows.
+        var now = DateTime.UtcNow;
+        var defaultEnd = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var end = periodEnd ?? defaultEnd;
+        var start = periodStart ?? end.AddMonths(-1);
+
+        // ── Programme aggregates ────────────────────────────────
+        var activities = await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive)
+            .Select(a => new { a.PercentComplete, a.EarlyStart, a.EarlyFinish })
+            .ToListAsync(ct);
+        var totalActivities = activities.Count;
+        var completedActivities = activities.Count(a => a.PercentComplete >= 1m);
+        decimal? percentComplete = totalActivities == 0
+            ? null
+            : Math.Round(100m * activities.Sum(a => a.PercentComplete) / totalActivities, 2);
+        var earliestEarlyStart = activities
+            .Where(a => a.EarlyStart.HasValue)
+            .Select(a => (DateTime?)a.EarlyStart!.Value)
+            .DefaultIfEmpty(null).Min();
+        var latestEarlyFinish = activities
+            .Where(a => a.EarlyFinish.HasValue)
+            .Select(a => (DateTime?)a.EarlyFinish!.Value)
+            .DefaultIfEmpty(null).Max();
+        var latestBaseline = await db.ScheduleBaselines
+            .Where(b => b.ProjectId == projectId)
+            .OrderByDescending(b => b.CapturedAt)
+            .Select(b => new { b.Label, b.CapturedAt })
+            .FirstOrDefaultAsync(ct);
+
+        // ── Cost aggregates ────────────────────────────────────
+        var totalBudget = await db.CostBreakdownItems
+            .Where(c => c.ProjectId == projectId && c.Budget.HasValue)
+            .SumAsync(c => c.Budget!.Value, ct);
+        var totalCommitted = await db.Commitments
+            .Where(c => c.ProjectId == projectId)
+            .SumAsync(c => (decimal?)c.Amount, ct) ?? 0m;
+        var totalActuals = await db.ActualCosts
+            .Where(a => a.ProjectId == projectId)
+            .SumAsync(a => (decimal?)a.Amount, ct) ?? 0m;
+        decimal? percentSpent = totalBudget == 0m
+            ? null
+            : Math.Round(100m * totalActuals / totalBudget, 2);
+
+        // ── Risk severity buckets ──────────────────────────────
+        // v1.0 uses the standard PMI 5x5 split: high ≥ 15,
+        // medium 7..12, low ≤ 6. Per-tenant thresholds are S14
+        // Admin Console territory (kickoff Top-3 risk #3 of S2).
+        var openRiskScores = await db.Risks
+            .Where(r => r.ProjectId == projectId && r.Status != RiskStatus.Closed)
+            .Select(r => r.Score)
+            .ToListAsync(ct);
+        var openHigh   = openRiskScores.Count(s => s >= 15);
+        var openMed    = openRiskScores.Count(s => s >= 7 && s <= 12);
+        var openLow    = openRiskScores.Count(s => s <= 6);
+        var openRisks  = openRiskScores.Count;
+
+        // ── Variations & changes (period-windowed) ─────────────
+        var varsRaised = await db.Variations.CountAsync(
+            v => v.ProjectId == projectId
+              && v.CreatedAt >= start && v.CreatedAt < end, ct);
+        var varsApprovedInPeriod = await db.Variations
+            .Where(v => v.ProjectId == projectId
+                     && v.State == VariationState.Approved
+                     && v.DecidedAt.HasValue
+                     && v.DecidedAt >= start && v.DecidedAt < end)
+            .Select(v => v.EstimatedCostImpact)
+            .ToListAsync(ct);
+        var varsApprovedCount = varsApprovedInPeriod.Count;
+        var varsApprovedValue = varsApprovedInPeriod.Sum(x => x ?? 0m);
+        var crsRaised = await db.ChangeRequests.CountAsync(
+            c => c.ProjectId == projectId
+              && c.CreatedAt >= start && c.CreatedAt < end, ct);
+        var crsApproved = await db.ChangeRequests.CountAsync(
+            c => c.ProjectId == projectId
+              && c.State == ChangeRequestState.Approved
+              && c.UpdatedAt >= start && c.UpdatedAt < end, ct);
+
+        // ── Open issues ────────────────────────────────────────
+        var openRfis = await db.Rfis.CountAsync(
+            r => r.ProjectId == projectId
+              && r.Status != RfiStatus.Closed && r.Status != RfiStatus.Cancelled, ct);
+        var openActions = await db.ActionItems.CountAsync(
+            a => a.ProjectId == projectId
+              && (a.Status == ActionStatus.Open || a.Status == ActionStatus.InProgress), ct);
+        var openEarlyWarnings = await db.EarlyWarnings.CountAsync(
+            w => w.ProjectId == projectId && w.State != EarlyWarningState.Closed, ct);
+        var openCompensationEvents = await db.CompensationEvents.CountAsync(
+            c => c.ProjectId == projectId
+              && c.State != CompensationEventState.Rejected
+              && c.State != CompensationEventState.Implemented, ct);
+        var openIssuesTotal = openRfis + openActions
+                            + openEarlyWarnings + openCompensationEvents;
+
+        // ── Stakeholders ───────────────────────────────────────
+        var stakeholdersTotal = await db.Stakeholders.CountAsync(
+            s => s.ProjectId == projectId && s.IsActive, ct);
+        var engagementsInPeriod = await db.EngagementLogs.CountAsync(
+            e => e.ProjectId == projectId
+              && e.OccurredAt >= start && e.OccurredAt < end, ct);
+        var communicationsTotal = await db.CommunicationItems.CountAsync(
+            c => c.ProjectId == projectId && c.IsActive, ct);
+
+        // Estimated finish: max EarlyFinish across active activities,
+        // mirroring the Client dashboard's logic. Falls back to
+        // Project.EndDate if no schedule exists.
+        var estimatedFinish = latestEarlyFinish ?? p.EndDate;
+
+        return new MprDto(
+            ProjectId:        p.Id,
+            ProjectName:      p.Name,
+            ProjectCode:      p.Code,
+            PeriodStart:      start,
+            PeriodEnd:        end,
+            GeneratedAtUtc:   now,
+            ExecutiveSummary: new MprExecutiveSummary(
+                ProjectStatus:    p.Status.ToString(),
+                PlannedEndDate:   p.EndDate,
+                EstimatedEndDate: estimatedFinish,
+                OpenRisksCount:   openRisks,
+                OpenIssuesCount:  openIssuesTotal),
+            Programme: new MprProgrammeStatus(
+                TotalActivities:            totalActivities,
+                CompletedActivities:        completedActivities,
+                PercentComplete:            percentComplete,
+                EarliestEarlyStart:         earliestEarlyStart,
+                LatestEarlyFinish:          latestEarlyFinish,
+                LatestBaselineLabel:        latestBaseline?.Label,
+                LatestBaselineCapturedAt:   latestBaseline?.CapturedAt),
+            Cost: new MprCostStatus(
+                Currency:        p.Currency,
+                TotalBudget:     totalBudget,
+                TotalCommitted:  totalCommitted,
+                TotalActuals:    totalActuals,
+                PercentSpent:    percentSpent),
+            Risk: new MprRiskStatus(
+                OpenTotal:           openRisks,
+                OpenHighSeverity:    openHigh,
+                OpenMediumSeverity:  openMed,
+                OpenLowSeverity:     openLow),
+            Changes: new MprVariationsAndChanges(
+                VariationsRaisedInPeriod:        varsRaised,
+                VariationsApprovedInPeriod:      varsApprovedCount,
+                VariationsApprovedValueInPeriod: varsApprovedValue,
+                ChangeRequestsRaisedInPeriod:    crsRaised,
+                ChangeRequestsApprovedInPeriod:  crsApproved),
+            Issues: new MprIssues(
+                OpenRfis:                openRfis,
+                OpenActions:             openActions,
+                OpenEarlyWarnings:       openEarlyWarnings,
+                OpenCompensationEvents:  openCompensationEvents),
+            Stakeholders: new MprStakeholderUpdates(
+                StakeholdersTotal:       stakeholdersTotal,
+                EngagementLogsInPeriod:  engagementsInPeriod,
+                CommunicationsTotal:     communicationsTotal));
+    }
+}
+
 public class CdeService(CimsDbContext db, AuditService audit)
 {
     public async Task<List<CdeContainer>> ListContainersAsync(Guid projectId) =>

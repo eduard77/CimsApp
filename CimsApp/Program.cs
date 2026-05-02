@@ -167,6 +167,7 @@ builder.Services.AddScoped<EvaluationService>();
 builder.Services.AddScoped<EarlyWarningsService>();
 builder.Services.AddScoped<CompensationEventsService>();
 builder.Services.AddScoped<DashboardsService>();
+builder.Services.AddScoped<ReportingService>();
 builder.Services.AddScoped<CdeService>();
 builder.Services.AddScoped<DocumentsService>();
 builder.Services.AddScoped<RfiService>();
