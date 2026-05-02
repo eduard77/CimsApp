@@ -4576,6 +4576,134 @@ public class EvaluationService(CimsDbContext db, AuditService audit)
     }
 }
 
+/// <summary>
+/// EarlyWarningsService — NEC4 clause-15 early-warning notices
+/// per Contract (T-S6-07, PAFM-SD F.7 fifth bullet). Linear
+/// 3-state workflow Raised → UnderReview → Closed; the inline
+/// service-layer guard does the state-machine work since it's
+/// only three states (no separate Core/<X>.cs file warranted).
+/// </summary>
+public class EarlyWarningsService(CimsDbContext db, AuditService audit)
+{
+    /// <summary>
+    /// Raise a new early-warning notice against an Active Contract.
+    /// Title required. Initial state Raised. Audit:
+    /// early_warning.raised.
+    /// </summary>
+    public async Task<EarlyWarning> RaiseAsync(
+        Guid projectId, Guid contractId, RaiseEarlyWarningRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(["Title is required"]);
+
+        var contract = await db.Contracts
+            .FirstOrDefaultAsync(c => c.Id == contractId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Contract");
+        if (contract.State != ContractState.Active)
+            throw new ConflictException(
+                $"Contract is in state {contract.State}; early warnings can only be raised against Active contracts");
+
+        var w = new EarlyWarning
+        {
+            ProjectId   = projectId,
+            ContractId  = contractId,
+            Title       = req.Title.Trim(),
+            Description = req.Description,
+            State       = EarlyWarningState.Raised,
+            RaisedById  = actorId,
+            RaisedAt    = DateTime.UtcNow,
+        };
+        db.EarlyWarnings.Add(w);
+
+        await audit.WriteAsync(actorId, "early_warning.raised", "EarlyWarning",
+            w.Id.ToString(), projectId,
+            detail: new
+            {
+                contractId,
+                contractNumber = contract.Number,
+                title = w.Title,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return w;
+    }
+
+    /// <summary>
+    /// Review transition: Raised → UnderReview. ResponseNote
+    /// required — the reviewer's analysis is the whole point of
+    /// the review step.
+    /// </summary>
+    public async Task<EarlyWarning> ReviewAsync(
+        Guid projectId, Guid earlyWarningId, ReviewEarlyWarningRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.ResponseNote))
+            throw new ValidationException(["ResponseNote is required"]);
+
+        var w = await LoadAsync(projectId, earlyWarningId, ct);
+        if (w.State != EarlyWarningState.Raised)
+            throw new ConflictException(
+                $"EarlyWarning is in state {w.State}; only Raised early warnings can be reviewed");
+
+        w.State        = EarlyWarningState.UnderReview;
+        w.ReviewedById = actorId;
+        w.ReviewedAt   = DateTime.UtcNow;
+        w.ResponseNote = req.ResponseNote.Trim();
+
+        await audit.WriteAsync(actorId, "early_warning.reviewed", "EarlyWarning",
+            w.Id.ToString(), projectId,
+            detail: new { title = w.Title }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return w;
+    }
+
+    /// <summary>
+    /// Close transition: UnderReview → Closed. Optional note.
+    /// Closed is terminal.
+    /// </summary>
+    public async Task<EarlyWarning> CloseAsync(
+        Guid projectId, Guid earlyWarningId, CloseEarlyWarningRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var w = await LoadAsync(projectId, earlyWarningId, ct);
+        if (w.State != EarlyWarningState.UnderReview)
+            throw new ConflictException(
+                $"EarlyWarning is in state {w.State}; only UnderReview early warnings can be closed");
+
+        w.State       = EarlyWarningState.Closed;
+        w.ClosedById  = actorId;
+        w.ClosedAt    = DateTime.UtcNow;
+        w.ClosureNote = req.ClosureNote;
+
+        await audit.WriteAsync(actorId, "early_warning.closed", "EarlyWarning",
+            w.Id.ToString(), projectId,
+            detail: new { title = w.Title }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return w;
+    }
+
+    public async Task<List<EarlyWarning>> ListAsync(
+        Guid projectId, Guid contractId, EarlyWarningState? state, CancellationToken ct = default)
+    {
+        _ = await db.Contracts
+            .FirstOrDefaultAsync(c => c.Id == contractId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Contract");
+        var q = db.EarlyWarnings.Where(w => w.ContractId == contractId);
+        if (state.HasValue) q = q.Where(w => w.State == state.Value);
+        return await q.OrderByDescending(w => w.RaisedAt).ToListAsync(ct);
+    }
+
+    public Task<EarlyWarning> GetAsync(
+        Guid projectId, Guid earlyWarningId, CancellationToken ct = default)
+        => LoadAsync(projectId, earlyWarningId, ct);
+
+    private async Task<EarlyWarning> LoadAsync(
+        Guid projectId, Guid earlyWarningId, CancellationToken ct)
+        => await db.EarlyWarnings
+            .FirstOrDefaultAsync(w => w.Id == earlyWarningId && w.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("EarlyWarning");
+}
+
 public class CdeService(CimsDbContext db, AuditService audit)
 {
     public async Task<List<CdeContainer>> ListContainersAsync(Guid projectId) =>

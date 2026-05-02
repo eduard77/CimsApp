@@ -1644,5 +1644,53 @@ public class Contract
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<EarlyWarning> EarlyWarnings { get; set; } = [];
+}
+
+/// <summary>
+/// Per-contract early-warning notice (T-S6-07, PAFM-SD F.7 fifth
+/// bullet — NEC4 clause 15 "Early Warning Notice"). The contractor
+/// or PM raises an EW when an event becomes likely that could
+/// increase cost / delay completion / impair performance. Linear
+/// 3-state workflow Raised → UnderReview → Closed. Tenant-scoped
+/// indirectly through Contract.Project.
+/// </summary>
+public class EarlyWarning
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Denormalised — equals Contract.ProjectId. Drives
+    /// the tenant query filter without a join.</summary>
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid ContractId { get; set; }
+    public Contract Contract { get; set; } = null!;
+
+    [Required, MaxLength(300)] public string Title { get; set; } = "";
+    public string? Description { get; set; }
+
+    public EarlyWarningState State { get; set; } = EarlyWarningState.Raised;
+
+    public Guid RaisedById { get; set; }
+    public User RaisedBy { get; set; } = null!;
+    public DateTime RaisedAt { get; set; } = DateTime.UtcNow;
+
+    public Guid? ReviewedById { get; set; }
+    public User? ReviewedBy { get; set; }
+    public DateTime? ReviewedAt { get; set; }
+    /// <summary>Required when transitioning to UnderReview — the
+    /// reviewer's analysis is the whole point of the review step.</summary>
+    public string? ResponseNote { get; set; }
+
+    public Guid? ClosedById { get; set; }
+    public User? ClosedBy { get; set; }
+    public DateTime? ClosedAt { get; set; }
+    /// <summary>Optional rationale at close-out.</summary>
+    public string? ClosureNote { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 

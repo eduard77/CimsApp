@@ -424,6 +424,14 @@ public record AwardTenderPackageRequest(
     ContractForm? ContractForm,
     DateTime? ContractStartDate,
     DateTime? ContractEndDate);
+// T-S6-07 EarlyWarning DTOs.
+public record RaiseEarlyWarningRequest(
+    string Title,
+    string? Description);
+// Review: ResponseNote required (the analysis IS the review).
+public record ReviewEarlyWarningRequest(string ResponseNote);
+// Close: optional ClosureNote.
+public record CloseEarlyWarningRequest(string? ClosureNote);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

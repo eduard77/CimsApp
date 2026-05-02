@@ -1421,6 +1421,70 @@ public class EvaluationController(EvaluationService svc, CimsDbContext db) : Cim
     }
 }
 
+// PAFM-SD F.7 fifth bullet — early warnings (NEC4 clause 15).
+[Route("api/v1/projects/{projectId:guid}/procurement/contracts/{contractId:guid}/early-warnings")]
+public class EarlyWarningsController(EarlyWarningsService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(
+        Guid projectId, Guid contractId,
+        [FromQuery] string? state = null, CancellationToken ct = default)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        EarlyWarningState? s = Enum.TryParse<EarlyWarningState>(state, true, out var p) ? p : null;
+        var rows = await svc.ListAsync(projectId, contractId, s, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpGet("{earlyWarningId:guid}")]
+    public async Task<IActionResult> Get(
+        Guid projectId, Guid contractId, Guid earlyWarningId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var w = await svc.GetAsync(projectId, earlyWarningId, ct);
+        return Ok(new { success = true, data = w });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Raise(
+        Guid projectId, Guid contractId,
+        RaiseEarlyWarningRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var w = await svc.RaiseAsync(projectId, contractId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = w });
+    }
+
+    [HttpPost("{earlyWarningId:guid}/review")]
+    public async Task<IActionResult> Review(
+        Guid projectId, Guid contractId, Guid earlyWarningId,
+        ReviewEarlyWarningRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.InformationManager))
+            throw new ForbiddenException();
+        var w = await svc.ReviewAsync(projectId, earlyWarningId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = w });
+    }
+
+    [HttpPost("{earlyWarningId:guid}/close")]
+    public async Task<IActionResult> Close(
+        Guid projectId, Guid contractId, Guid earlyWarningId,
+        CloseEarlyWarningRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var w = await svc.CloseAsync(projectId, earlyWarningId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = w });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

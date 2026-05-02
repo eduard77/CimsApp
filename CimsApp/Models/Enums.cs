@@ -149,3 +149,7 @@ public enum EvaluationCriterionType { Price, Quality }
 // driven by NEC4 / JCT contract clauses; deferred until pilot
 // usage surfaces the need.
 public enum ContractState { Active, Closed }
+// EarlyWarning workflow — F.7 fifth bullet (NEC clause 15).
+// Linear 3-state: Raised → UnderReview → Closed. Inline state
+// guard in the service — too small to warrant a Core/<X>.cs file.
+public enum EarlyWarningState { Raised, UnderReview, Closed }
