@@ -71,6 +71,9 @@ public class CimsDbContext(
     public DbSet<TidpEntry>           TidpEntries          => Set<TidpEntry>();
     public DbSet<GatewayPackage>      GatewayPackages      => Set<GatewayPackage>();
     public DbSet<MandatoryOccurrenceReport> MandatoryOccurrenceReports => Set<MandatoryOccurrenceReport>();
+    public DbSet<ImprovementRegisterEntry> ImprovementRegisterEntries => Set<ImprovementRegisterEntry>();
+    public DbSet<LessonLearned>       LessonsLearned       => Set<LessonLearned>();
+    public DbSet<OpportunityToImprove> OpportunitiesToImprove => Set<OpportunityToImprove>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -639,6 +642,39 @@ public class CimsDbContext(
              .HasForeignKey(w => w.ClosedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<ImprovementRegisterEntry>(e =>
+        {
+            e.HasIndex(x => new { x.ProjectId, x.Number }).IsUnique();
+            e.HasIndex(x => new { x.ProjectId, x.State });
+            e.HasOne(x => x.Project).WithMany()
+             .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.Owner).WithMany()
+             .HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.CreatedBy).WithMany()
+             .HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<LessonLearned>(e =>
+        {
+            e.HasIndex(x => new { x.OrganisationId, x.Category });
+            e.HasOne(x => x.Organisation).WithMany()
+             .HasForeignKey(x => x.OrganisationId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.SourceProject).WithMany()
+             .HasForeignKey(x => x.SourceProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.RecordedBy).WithMany()
+             .HasForeignKey(x => x.RecordedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<OpportunityToImprove>(e =>
+        {
+            e.HasIndex(x => new { x.ProjectId, x.Number }).IsUnique();
+            e.HasIndex(x => new { x.ProjectId, x.IsActioned });
+            e.HasOne(x => x.Project).WithMany()
+             .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.RaisedBy).WithMany()
+             .HasForeignKey(x => x.RaisedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         m.Entity<GatewayPackage>(e =>
         {
             // (ProjectId, Type, Number) unique-when-active gives
@@ -788,6 +824,11 @@ public class CimsDbContext(
         m.Entity<TidpEntry>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<GatewayPackage>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<MandatoryOccurrenceReport>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        // S12 Kaizen / Lessons Learned. 2 of 3 are project-scoped;
+        // LessonLearned is org-scoped (cross-project library).
+        m.Entity<ImprovementRegisterEntry>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<LessonLearned>().HasQueryFilter(x => x.OrganisationId == _tenant.OrganisationId);
+        m.Entity<OpportunityToImprove>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -829,6 +870,9 @@ public class CimsDbContext(
             else if (e.Entity is TidpEntry tidp) tidp.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is GatewayPackage gp) gp.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is MandatoryOccurrenceReport mor) mor.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is ImprovementRegisterEntry imp) imp.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is LessonLearned ll) ll.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is OpportunityToImprove oti) oti.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

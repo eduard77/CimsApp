@@ -652,6 +652,42 @@ public record GoldenThreadDocumentDto(
     Guid Id, string DocumentNumber, string Title,
     CdeState CurrentState,
     DateTime AddedToGoldenThreadAt, Guid AddedToGoldenThreadById);
+// T-S12-02 Improvement Register DTOs.
+public record ImprovementEntryDto(
+    Guid Id, Guid ProjectId, string Number,
+    string Title, string Description,
+    PdcaState State, int CycleNumber,
+    string? PlanNotes, string? DoNotes, string? CheckNotes, string? ActNotes,
+    Guid OwnerId, Guid CreatedById,
+    DateTime CreatedAt, DateTime UpdatedAt);
+public record CreateImprovementRequest(
+    string Title, string Description, Guid OwnerId);
+public record TransitionImprovementRequest(string? StageNotes);
+// T-S12-03 Lesson Learned DTOs.
+public record LessonLearnedDto(
+    Guid Id, Guid OrganisationId,
+    string Title, string Description,
+    string? Category, Guid? SourceProjectId, string TagsCsv,
+    Guid RecordedById,
+    DateTime CreatedAt, DateTime UpdatedAt);
+public record CreateLessonLearnedRequest(
+    string Title, string Description,
+    string? Category, Guid? SourceProjectId, string? TagsCsv);
+public record UpdateLessonLearnedRequest(
+    string? Title, string? Description,
+    string? Category, string? TagsCsv);
+// T-S12-04 OpportunityToImprove DTOs.
+public record OpportunityToImproveDto(
+    Guid Id, Guid ProjectId, string Number,
+    string Title, string Description,
+    string? SourceEntityType, Guid? SourceEntityId,
+    Guid RaisedById,
+    bool IsActioned, DateTime? ActionedAt, Guid? ActionedById, string? ActionNote,
+    DateTime CreatedAt, DateTime UpdatedAt);
+public record CreateOpportunityToImproveRequest(
+    string Title, string Description,
+    string? SourceEntityType, Guid? SourceEntityId);
+public record ActionOpportunityToImproveRequest(string? Note);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

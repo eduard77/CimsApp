@@ -5759,6 +5759,323 @@ public class TidpService(CimsDbContext db, AuditService audit)
             x.CreatedAt, x.UpdatedAt);
 }
 
+// T-S12-02 Improvement Register service. PAFM-SD F.12 first
+// bullet (PDCA continuous improvement). Project-scoped.
+// 5-state state machine via Core/PdcaWorkflow with cycle-back
+// (Act → Plan increments CycleNumber).
+public class ImprovementRegisterService(CimsDbContext db, AuditService audit)
+{
+    public async Task<List<ImprovementEntryDto>> ListAsync(Guid projectId, CancellationToken ct = default)
+    {
+        var rows = await db.ImprovementRegisterEntries
+            .Where(x => x.ProjectId == projectId && x.IsActive)
+            .OrderByDescending(x => x.UpdatedAt).ToListAsync(ct);
+        return rows.Select(ToDto).ToList();
+    }
+
+    public async Task<ImprovementEntryDto> GetAsync(Guid projectId, Guid id, CancellationToken ct = default)
+    {
+        var x = await db.ImprovementRegisterEntries
+            .FirstOrDefaultAsync(e => e.Id == id && e.ProjectId == projectId && e.IsActive, ct)
+            ?? throw new NotFoundException("ImprovementRegisterEntry");
+        return ToDto(x);
+    }
+
+    public async Task<ImprovementEntryDto> CreateAsync(
+        Guid projectId, CreateImprovementRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(new List<string> { "Title is required" });
+        if (string.IsNullOrWhiteSpace(req.Description))
+            throw new ValidationException(new List<string> { "Description is required" });
+        if (!await db.Users.AnyAsync(u => u.Id == req.OwnerId, ct))
+            throw new NotFoundException("Owner");
+
+        var existingCount = await db.ImprovementRegisterEntries
+            .Where(e => e.ProjectId == projectId).CountAsync(ct);
+        var number = $"IMP-{(existingCount + 1):D4}";
+
+        var x = new ImprovementRegisterEntry
+        {
+            ProjectId = projectId, Number = number,
+            Title = req.Title.Trim(), Description = req.Description,
+            OwnerId = req.OwnerId, CreatedById = actorId,
+            State = PdcaState.Plan, CycleNumber = 1,
+        };
+        db.ImprovementRegisterEntries.Add(x);
+        await audit.WriteAsync(actorId, "improvement.created",
+            "ImprovementRegisterEntry", x.Id.ToString(),
+            projectId: projectId,
+            detail: new { x.Number, x.Title, x.OwnerId },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task<ImprovementEntryDto> TransitionAsync(
+        Guid projectId, Guid id, PdcaState toState,
+        string? stageNotes,
+        Guid actorId, UserRole role, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.ImprovementRegisterEntries
+            .FirstOrDefaultAsync(e => e.Id == id && e.ProjectId == projectId && e.IsActive, ct)
+            ?? throw new NotFoundException("ImprovementRegisterEntry");
+        if (!PdcaWorkflow.IsValidTransition(x.State, toState))
+            throw new ConflictException($"Invalid PDCA transition: {x.State} → {toState}.");
+        if (!PdcaWorkflow.CanTransition(x.State, toState, role))
+            throw new ForbiddenException($"Role {role} cannot transition PDCA {x.State} → {toState}.");
+
+        var from = x.State;
+        // Capture per-stage notes on the OUTGOING stage transition,
+        // i.e. the notes describe what happened during the stage you
+        // are leaving.
+        if (!string.IsNullOrWhiteSpace(stageNotes))
+        {
+            switch (from)
+            {
+                case PdcaState.Plan:  x.PlanNotes  = stageNotes; break;
+                case PdcaState.Do:    x.DoNotes    = stageNotes; break;
+                case PdcaState.Check: x.CheckNotes = stageNotes; break;
+                case PdcaState.Act:   x.ActNotes   = stageNotes; break;
+            }
+        }
+        // Cycle-back: Act → Plan increments CycleNumber. Per-cycle
+        // history (snapshot prior cycle's notes) → v1.1 / B-081.
+        if (from == PdcaState.Act && toState == PdcaState.Plan)
+        {
+            x.CycleNumber++;
+            x.PlanNotes = null; x.DoNotes = null;
+            x.CheckNotes = null; x.ActNotes = null;
+        }
+        x.State = toState;
+        await audit.WriteAsync(actorId, $"improvement.{toState.ToString().ToLowerInvariant()}",
+            "ImprovementRegisterEntry", x.Id.ToString(),
+            projectId: projectId,
+            detail: new { x.Number, from = from.ToString(), to = toState.ToString(), x.CycleNumber },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    private static ImprovementEntryDto ToDto(ImprovementRegisterEntry x) =>
+        new(x.Id, x.ProjectId, x.Number, x.Title, x.Description,
+            x.State, x.CycleNumber,
+            x.PlanNotes, x.DoNotes, x.CheckNotes, x.ActNotes,
+            x.OwnerId, x.CreatedById, x.CreatedAt, x.UpdatedAt);
+}
+
+// T-S12-03 Lessons Learned service. PAFM-SD F.12 second
+// bullet. Org-scoped (cross-project library); tenant resolved
+// via ITenantContext. Tagging / search → v1.1 / B-082.
+public class LessonsLearnedService(CimsDbContext db, AuditService audit, CimsApp.Services.Tenancy.ITenantContext tenant)
+{
+    private Guid OrgId =>
+        tenant.OrganisationId ?? throw new ForbiddenException("No tenant context");
+
+    public async Task<List<LessonLearnedDto>> ListAsync(string? category, string? tag, CancellationToken ct = default)
+    {
+        var q = db.LessonsLearned.Where(x => x.OrganisationId == OrgId && x.IsActive);
+        if (!string.IsNullOrWhiteSpace(category))
+            q = q.Where(x => x.Category == category);
+        if (!string.IsNullOrWhiteSpace(tag))
+            q = q.Where(x => x.TagsCsv.Contains(tag));
+        var rows = await q.OrderByDescending(x => x.CreatedAt).ToListAsync(ct);
+        return rows.Select(ToDto).ToList();
+    }
+
+    public async Task<LessonLearnedDto> GetAsync(Guid id, CancellationToken ct = default)
+    {
+        var x = await db.LessonsLearned
+            .FirstOrDefaultAsync(l => l.Id == id && l.OrganisationId == OrgId && l.IsActive, ct)
+            ?? throw new NotFoundException("LessonLearned");
+        return ToDto(x);
+    }
+
+    public async Task<LessonLearnedDto> CreateAsync(
+        CreateLessonLearnedRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(new List<string> { "Title is required" });
+        if (string.IsNullOrWhiteSpace(req.Description))
+            throw new ValidationException(new List<string> { "Description is required" });
+
+        if (req.SourceProjectId is { } pid
+            && !await db.Projects.AnyAsync(p => p.Id == pid, ct))
+            throw new NotFoundException("SourceProject");
+
+        var x = new LessonLearned
+        {
+            OrganisationId = OrgId,
+            Title = req.Title.Trim(), Description = req.Description,
+            Category = req.Category,
+            SourceProjectId = req.SourceProjectId,
+            TagsCsv = req.TagsCsv ?? "",
+            RecordedById = actorId,
+        };
+        db.LessonsLearned.Add(x);
+        await audit.WriteAsync(actorId, "lesson_learned.recorded",
+            "LessonLearned", x.Id.ToString(),
+            detail: new { x.Title, x.Category, x.SourceProjectId },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task<LessonLearnedDto> UpdateAsync(
+        Guid id, UpdateLessonLearnedRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.LessonsLearned
+            .FirstOrDefaultAsync(l => l.Id == id && l.OrganisationId == OrgId && l.IsActive, ct)
+            ?? throw new NotFoundException("LessonLearned");
+        var changed = new List<string>();
+        if (req.Title is not null && req.Title != x.Title)
+        {
+            if (string.IsNullOrWhiteSpace(req.Title))
+                throw new ValidationException(new List<string> { "Title cannot be empty" });
+            x.Title = req.Title.Trim(); changed.Add(nameof(x.Title));
+        }
+        if (req.Description is not null && req.Description != x.Description)
+        { x.Description = req.Description; changed.Add(nameof(x.Description)); }
+        if (req.Category is not null && req.Category != x.Category)
+        { x.Category = req.Category; changed.Add(nameof(x.Category)); }
+        if (req.TagsCsv is not null && req.TagsCsv != x.TagsCsv)
+        { x.TagsCsv = req.TagsCsv; changed.Add(nameof(x.TagsCsv)); }
+        if (changed.Count == 0) throw new ConflictException("No changes specified.");
+
+        await audit.WriteAsync(actorId, "lesson_learned.updated",
+            "LessonLearned", x.Id.ToString(),
+            detail: new { changedFields = changed },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task DeleteAsync(
+        Guid id, Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.LessonsLearned
+            .FirstOrDefaultAsync(l => l.Id == id && l.OrganisationId == OrgId && l.IsActive, ct)
+            ?? throw new NotFoundException("LessonLearned");
+        x.IsActive = false;
+        await audit.WriteAsync(actorId, "lesson_learned.deleted",
+            "LessonLearned", x.Id.ToString(),
+            detail: new { x.Title }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static LessonLearnedDto ToDto(LessonLearned x) =>
+        new(x.Id, x.OrganisationId, x.Title, x.Description,
+            x.Category, x.SourceProjectId, x.TagsCsv,
+            x.RecordedById, x.CreatedAt, x.UpdatedAt);
+}
+
+// T-S12-04 Opportunity-to-Improve service. PAFM-SD F.12 third
+// bullet. Project-scoped. SourceEntityType + SourceEntityId is
+// a JSON metadata pointer; service normalises SourceEntityType
+// to PascalCase to mitigate the kickoff Top-3 risk #1 (free-
+// text type drift).
+public class OpportunityToImproveService(CimsDbContext db, AuditService audit)
+{
+    public async Task<List<OpportunityToImproveDto>> ListAsync(
+        Guid projectId, bool? actioned = null, CancellationToken ct = default)
+    {
+        var q = db.OpportunitiesToImprove
+            .Where(x => x.ProjectId == projectId && x.IsActive);
+        if (actioned.HasValue) q = q.Where(x => x.IsActioned == actioned.Value);
+        var rows = await q.OrderByDescending(x => x.CreatedAt).ToListAsync(ct);
+        return rows.Select(ToDto).ToList();
+    }
+
+    public async Task<OpportunityToImproveDto> GetAsync(Guid projectId, Guid id, CancellationToken ct = default)
+    {
+        var x = await db.OpportunitiesToImprove
+            .FirstOrDefaultAsync(o => o.Id == id && o.ProjectId == projectId && o.IsActive, ct)
+            ?? throw new NotFoundException("OpportunityToImprove");
+        return ToDto(x);
+    }
+
+    public async Task<OpportunityToImproveDto> CreateAsync(
+        Guid projectId, CreateOpportunityToImproveRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(new List<string> { "Title is required" });
+        if (string.IsNullOrWhiteSpace(req.Description))
+            throw new ValidationException(new List<string> { "Description is required" });
+        if ((req.SourceEntityType is null) != (req.SourceEntityId is null))
+            throw new ValidationException(new List<string>
+            { "SourceEntityType and SourceEntityId must both be provided or both omitted" });
+
+        var existingCount = await db.OpportunitiesToImprove
+            .Where(o => o.ProjectId == projectId).CountAsync(ct);
+        var number = $"OFI-{(existingCount + 1):D4}";
+
+        var x = new OpportunityToImprove
+        {
+            ProjectId = projectId, Number = number,
+            Title = req.Title.Trim(), Description = req.Description,
+            SourceEntityType = NormaliseSourceType(req.SourceEntityType),
+            SourceEntityId = req.SourceEntityId,
+            RaisedById = actorId,
+        };
+        db.OpportunitiesToImprove.Add(x);
+        await audit.WriteAsync(actorId, "opportunity.raised",
+            "OpportunityToImprove", x.Id.ToString(),
+            projectId: projectId,
+            detail: new { x.Number, x.SourceEntityType, x.SourceEntityId },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task<OpportunityToImproveDto> ActionAsync(
+        Guid projectId, Guid id, ActionOpportunityToImproveRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.OpportunitiesToImprove
+            .FirstOrDefaultAsync(o => o.Id == id && o.ProjectId == projectId && o.IsActive, ct)
+            ?? throw new NotFoundException("OpportunityToImprove");
+        if (x.IsActioned)
+            throw new ConflictException("Opportunity is already actioned.");
+
+        x.IsActioned = true;
+        x.ActionedAt = DateTime.UtcNow;
+        x.ActionedById = actorId;
+        x.ActionNote = req.Note;
+        await audit.WriteAsync(actorId, "opportunity.actioned",
+            "OpportunityToImprove", x.Id.ToString(),
+            projectId: projectId,
+            detail: new { x.Number, req.Note },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    private static string? NormaliseSourceType(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var t = raw.Trim();
+        return char.ToUpperInvariant(t[0]) + t.Substring(1);
+    }
+
+    private static OpportunityToImproveDto ToDto(OpportunityToImprove x) =>
+        new(x.Id, x.ProjectId, x.Number, x.Title, x.Description,
+            x.SourceEntityType, x.SourceEntityId,
+            x.RaisedById,
+            x.IsActioned, x.ActionedAt, x.ActionedById, x.ActionNote,
+            x.CreatedAt, x.UpdatedAt);
+}
+
 // T-S10-03 GatewayPackage service. PAFM-SD F.10 second bullet
 // (BSA 2022 Gateway 1/2/3 packages). 3-state state-machine via
 // Core/GatewayPackageWorkflow. Project-scoped sequential

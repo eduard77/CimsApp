@@ -282,6 +282,34 @@ legal sign-off is a pre-pilot review step (PAFM-CIMS-001 PDF
 | GET    | `/api/v1/projects/{projectId}/golden-thread` | authenticated | membership | T-S10-06. Lists active GT-marked Documents, ordered by AddedToGoldenThreadAt desc. Audit-log query layer for compliance reports → v1.1 / B-074. |
 | POST   | `/api/v1/projects/{projectId}/golden-thread/documents/{documentId}` | authenticated | `ProjectManager+` | T-S10-06. Body `AddDocumentToGoldenThreadRequest(note?)`. Marks Document as in Golden Thread; one-way for v1.0 (un-mark workflow → v1.1 / B-075). Subsequent state-transitions on the Document are blocked at the service layer. Audit: `document.added_to_golden_thread`. // BSA 2022 ref: Schedule 5. |
 
+## Kaizen / Lessons Learned
+
+PAFM-SD F.12. Improvement register with PDCA workflow,
+cross-project lessons library, opportunity-to-improve.
+First non-statutory module since S6. Mixed scoping:
+2 project-scoped (Improvement, Opportunity), 1 org-scoped
+(LessonLearned cross-project library).
+
+| Method | Route | Global role | Project role | Comment |
+|---|---|---|---|---|
+| GET    | `/api/v1/projects/{projectId}/improvements` | authenticated | membership | T-S12-02. Lists active improvements ordered by UpdatedAt desc. |
+| GET    | `/api/v1/projects/{projectId}/improvements/{id}` | authenticated | membership | T-S12-02. |
+| POST   | `/api/v1/projects/{projectId}/improvements` | authenticated | `TaskTeamMember+` | T-S12-02. Body `CreateImprovementRequest(title, description, ownerId)`. Auto-generates IMP-NNNN. Initial state Plan, CycleNumber 1. Audit: `improvement.created`. |
+| POST   | `/api/v1/projects/{projectId}/improvements/{id}/transition/do` | authenticated | `TaskTeamMember+` | T-S12-02. State Plan → Do. Body `TransitionImprovementRequest(stageNotes?)` — captures notes on the OUTGOING stage. Workflow guard via `Core/PdcaWorkflow`. Audit: `improvement.do`. |
+| POST   | `/api/v1/projects/{projectId}/improvements/{id}/transition/check` | authenticated | `TaskTeamMember+` | T-S12-02. State Do → Check. Audit: `improvement.check`. |
+| POST   | `/api/v1/projects/{projectId}/improvements/{id}/transition/act` | authenticated | `TaskTeamMember+` | T-S12-02. State Check → Act. Audit: `improvement.act`. |
+| POST   | `/api/v1/projects/{projectId}/improvements/{id}/transition/cycle-back-to-plan` | authenticated | `TaskTeamMember+` | T-S12-02. State Act → Plan. **Increments CycleNumber + clears all per-stage notes for the new cycle.** Per-cycle history → v1.1 / B-081. Audit: `improvement.plan`. |
+| POST   | `/api/v1/projects/{projectId}/improvements/{id}/transition/close` | authenticated | `ProjectManager+` | T-S12-02. State {Plan, Do, Check, Act} → Closed. Closed is terminal. Audit: `improvement.closed`. |
+| GET    | `/api/v1/lessons-learned?category=&tag=` | authenticated | — | T-S12-03. Lists active lessons for caller's org (cross-project). Optional filters by category + tag substring. Full-text search → v1.1 / B-082. |
+| GET    | `/api/v1/lessons-learned/{id}` | authenticated | — | T-S12-03. |
+| POST   | `/api/v1/lessons-learned` | authenticated | — | T-S12-03. Body `CreateLessonLearnedRequest(title, description, category?, sourceProjectId?, tagsCsv?)`. Any authenticated tenant user can record a lesson. Audit: `lesson_learned.recorded`. |
+| PUT    | `/api/v1/lessons-learned/{id}` | authenticated | — | T-S12-03. Partial update; no-op rejected. Audit: `lesson_learned.updated`. |
+| DELETE | `/api/v1/lessons-learned/{id}` | `OrgAdmin`, `SuperAdmin` | — | T-S12-03. Soft delete; lesson curation requires admin. Audit: `lesson_learned.deleted`. |
+| GET    | `/api/v1/projects/{projectId}/opportunities-to-improve?actioned=` | authenticated | membership | T-S12-04. Lists active opportunities; optional actioned filter. |
+| GET    | `/api/v1/projects/{projectId}/opportunities-to-improve/{id}` | authenticated | membership | T-S12-04. |
+| POST   | `/api/v1/projects/{projectId}/opportunities-to-improve` | authenticated | membership | T-S12-04. Body `CreateOpportunityToImproveRequest(title, description, sourceEntityType?, sourceEntityId?)`. Both Source* fields travel as a pair. Service normalises SourceEntityType to PascalCase. Auto-generates OFI-NNNN. Polymorphic FK → v1.1 / B-083. Audit: `opportunity.raised`. |
+| POST   | `/api/v1/projects/{projectId}/opportunities-to-improve/{id}/action` | authenticated | `TaskTeamMember+` | T-S12-04. Body `ActionOpportunityToImproveRequest(note?)`. One-way; sets IsActioned + ActionedAt + ActionedById. Audit: `opportunity.actioned`. |
+
 ## Documents
 
 | Method | Route | Global role | Project role | Comment |

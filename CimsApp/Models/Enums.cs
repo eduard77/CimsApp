@@ -201,3 +201,10 @@ public enum GatewayDecision { Approved, ApprovedWithConditions, Refused }
 // // BSA 2022 ref: Building Safety Act 2022 s.87 (mandatory
 // occurrence reporting).
 public enum MorSeverity { Low, Medium, High, Critical }
+
+// S12 Kaizen / Lessons Learned module (PAFM-SD F.12).
+// 5-state PDCA workflow (Plan-Do-Check-Act + Closed). Act
+// transitions to either Plan (next iteration / cycle-back) or
+// Closed (terminal). State-machine enforcement in
+// Core/PdcaWorkflow.cs.
+public enum PdcaState { Plan, Do, Check, Act, Closed }

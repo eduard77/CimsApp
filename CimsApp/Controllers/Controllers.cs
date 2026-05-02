@@ -1661,6 +1661,104 @@ public class ReportingController(ReportingService svc, CimsDbContext db) : CimsC
     }
 }
 
+// ── Improvement Register (T-S12-02) ──────────────────────────────────────────
+// PAFM-SD F.12 first bullet — PDCA continuous improvement.
+[Route("api/v1/projects/{projectId:guid}/improvements")]
+public class ImprovementRegisterController(ImprovementRegisterService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
+    { await GetProjectRoleAsync(db, projectId); return Ok(new { success = true, data = await svc.ListAsync(projectId, ct) }); }
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> Get(Guid projectId, Guid id, CancellationToken ct)
+    { await GetProjectRoleAsync(db, projectId); return Ok(new { success = true, data = await svc.GetAsync(projectId, id, ct) }); }
+
+    [HttpPost]
+    public async Task<IActionResult> Create(Guid projectId, CreateImprovementRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember)) throw new ForbiddenException();
+        return Created("", new { success = true, data = await svc.CreateAsync(projectId, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+    }
+
+    [HttpPost("{id:guid}/transition/do")]
+    public async Task<IActionResult> ToDo(Guid projectId, Guid id, TransitionImprovementRequest req, CancellationToken ct)
+    { var role = await GetProjectRoleAsync(db, projectId); return Ok(new { success = true, data = await svc.TransitionAsync(projectId, id, PdcaState.Do, req.StageNotes, CurrentUserId, role, ClientIp, ClientAgent, ct) }); }
+
+    [HttpPost("{id:guid}/transition/check")]
+    public async Task<IActionResult> ToCheck(Guid projectId, Guid id, TransitionImprovementRequest req, CancellationToken ct)
+    { var role = await GetProjectRoleAsync(db, projectId); return Ok(new { success = true, data = await svc.TransitionAsync(projectId, id, PdcaState.Check, req.StageNotes, CurrentUserId, role, ClientIp, ClientAgent, ct) }); }
+
+    [HttpPost("{id:guid}/transition/act")]
+    public async Task<IActionResult> ToAct(Guid projectId, Guid id, TransitionImprovementRequest req, CancellationToken ct)
+    { var role = await GetProjectRoleAsync(db, projectId); return Ok(new { success = true, data = await svc.TransitionAsync(projectId, id, PdcaState.Act, req.StageNotes, CurrentUserId, role, ClientIp, ClientAgent, ct) }); }
+
+    [HttpPost("{id:guid}/transition/cycle-back-to-plan")]
+    public async Task<IActionResult> CycleBackToPlan(Guid projectId, Guid id, TransitionImprovementRequest req, CancellationToken ct)
+    { var role = await GetProjectRoleAsync(db, projectId); return Ok(new { success = true, data = await svc.TransitionAsync(projectId, id, PdcaState.Plan, req.StageNotes, CurrentUserId, role, ClientIp, ClientAgent, ct) }); }
+
+    [HttpPost("{id:guid}/transition/close")]
+    public async Task<IActionResult> Close(Guid projectId, Guid id, TransitionImprovementRequest req, CancellationToken ct)
+    { var role = await GetProjectRoleAsync(db, projectId); return Ok(new { success = true, data = await svc.TransitionAsync(projectId, id, PdcaState.Closed, req.StageNotes, CurrentUserId, role, ClientIp, ClientAgent, ct) }); }
+}
+
+// ── Lessons Learned Library (T-S12-03) ───────────────────────────────────────
+// PAFM-SD F.12 second bullet — org-scoped cross-project library.
+[Route("api/v1/lessons-learned")]
+public class LessonsLearnedController(LessonsLearnedService svc) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List([FromQuery] string? category, [FromQuery] string? tag, CancellationToken ct) =>
+        Ok(new { success = true, data = await svc.ListAsync(category, tag, ct) });
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> Get(Guid id, CancellationToken ct) =>
+        Ok(new { success = true, data = await svc.GetAsync(id, ct) });
+
+    [HttpPost]
+    public async Task<IActionResult> Create(CreateLessonLearnedRequest req, CancellationToken ct) =>
+        Created("", new { success = true, data = await svc.CreateAsync(req, CurrentUserId, ClientIp, ClientAgent, ct) });
+
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid id, UpdateLessonLearnedRequest req, CancellationToken ct) =>
+        Ok(new { success = true, data = await svc.UpdateAsync(id, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+
+    [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    { await svc.DeleteAsync(id, CurrentUserId, ClientIp, ClientAgent, ct); return NoContent(); }
+}
+
+// ── Opportunity to Improve (T-S12-04) ────────────────────────────────────────
+// PAFM-SD F.12 third bullet — linked from any module.
+[Route("api/v1/projects/{projectId:guid}/opportunities-to-improve")]
+public class OpportunityToImproveController(OpportunityToImproveService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(Guid projectId, [FromQuery] bool? actioned, CancellationToken ct)
+    { await GetProjectRoleAsync(db, projectId); return Ok(new { success = true, data = await svc.ListAsync(projectId, actioned, ct) }); }
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> Get(Guid projectId, Guid id, CancellationToken ct)
+    { await GetProjectRoleAsync(db, projectId); return Ok(new { success = true, data = await svc.GetAsync(projectId, id, ct) }); }
+
+    [HttpPost]
+    public async Task<IActionResult> Create(Guid projectId, CreateOpportunityToImproveRequest req, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Created("", new { success = true, data = await svc.CreateAsync(projectId, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+    }
+
+    [HttpPost("{id:guid}/action")]
+    public async Task<IActionResult> Action(Guid projectId, Guid id, ActionOpportunityToImproveRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember)) throw new ForbiddenException();
+        return Ok(new { success = true, data = await svc.ActionAsync(projectId, id, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+    }
+}
+
 // ── BSA 2022 Gateway packages (T-S10-03) ─────────────────────────────────────
 // PAFM-SD F.10 second bullet — Gateway 1/2/3 statutory submissions.
 [Route("api/v1/projects/{projectId:guid}/gateway-packages")]
