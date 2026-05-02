@@ -61,6 +61,8 @@ public class CimsDbContext(
     public DbSet<ProcurementStrategy> ProcurementStrategies => Set<ProcurementStrategy>();
     public DbSet<TenderPackage>       TenderPackages       => Set<TenderPackage>();
     public DbSet<Tender>              Tenders              => Set<Tender>();
+    public DbSet<EvaluationCriterion> EvaluationCriteria   => Set<EvaluationCriterion>();
+    public DbSet<EvaluationScore>     EvaluationScores     => Set<EvaluationScore>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -569,6 +571,30 @@ public class CimsDbContext(
              .HasForeignKey(t => t.CreatedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<EvaluationCriterion>(e =>
+        {
+            e.HasIndex(c => c.TenderPackageId);
+            e.HasOne(c => c.Project).WithMany()
+             .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.TenderPackage).WithMany()
+             .HasForeignKey(c => c.TenderPackageId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<EvaluationScore>(e =>
+        {
+            // One score per (Tender, Criterion) pair — re-scoring
+            // updates in place. Unique index guards against double-write.
+            e.HasIndex(s => new { s.TenderId, s.CriterionId }).IsUnique();
+            e.HasOne(s => s.Project).WithMany()
+             .HasForeignKey(s => s.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(s => s.Tender).WithMany(t => t.Scores)
+             .HasForeignKey(s => s.TenderId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(s => s.Criterion).WithMany()
+             .HasForeignKey(s => s.CriterionId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(s => s.ScoredBy).WithMany()
+             .HasForeignKey(s => s.ScoredById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -621,6 +647,8 @@ public class CimsDbContext(
         m.Entity<ProcurementStrategy>().HasQueryFilter(s => s.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<TenderPackage>().HasQueryFilter(t => t.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<Tender>().HasQueryFilter(t => t.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<EvaluationCriterion>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<EvaluationScore>().HasQueryFilter(s => s.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -652,6 +680,8 @@ public class CimsDbContext(
             else if (e.Entity is ProcurementStrategy ps) ps.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is TenderPackage tp) tp.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is Tender ten) ten.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is EvaluationCriterion ec) ec.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is EvaluationScore es) es.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

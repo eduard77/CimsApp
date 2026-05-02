@@ -4176,6 +4176,260 @@ public class TendersService(CimsDbContext db, AuditService audit)
             ?? throw new NotFoundException("Tender");
 }
 
+/// <summary>
+/// EvaluationService — criteria CRUD + per-tender score recording
+/// + matrix calculation (T-S6-05, PAFM-SD F.7 third bullet).
+/// Criteria can only be added / removed when the parent
+/// TenderPackage is in Draft state — once Issued the criteria are
+/// frozen so bidders see stable evaluation rules. Scores can be
+/// recorded once the package is Issued and tenders are Submitted.
+/// Weight-sum invariant (Σ ≈ 1.0) is checked at matrix-calc time
+/// rather than at criterion-write time, allowing weight edits
+/// during Draft set-up.
+/// </summary>
+public class EvaluationService(CimsDbContext db, AuditService audit)
+{
+    // ── Criteria ────────────────────────────────────────────────────
+
+    public async Task<EvaluationCriterion> AddCriterionAsync(
+        Guid projectId, Guid tenderPackageId, AddEvaluationCriterionRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Name))
+            throw new ValidationException(["Name is required"]);
+        if (req.Weight < 0m || req.Weight > 1m)
+            throw new ValidationException(["Weight must be in [0, 1]"]);
+
+        var pkg = await db.TenderPackages
+            .FirstOrDefaultAsync(p => p.Id == tenderPackageId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("TenderPackage");
+        if (pkg.State != TenderPackageState.Draft)
+            throw new ConflictException(
+                $"TenderPackage is in state {pkg.State}; criteria can only be added to Draft packages");
+
+        var c = new EvaluationCriterion
+        {
+            ProjectId       = projectId,
+            TenderPackageId = tenderPackageId,
+            Name            = req.Name.Trim(),
+            Type            = req.Type,
+            Weight          = req.Weight,
+        };
+        db.EvaluationCriteria.Add(c);
+        await audit.WriteAsync(actorId, "evaluation_criterion.added", "EvaluationCriterion",
+            c.Id.ToString(), projectId,
+            detail: new { tenderPackageId, name = c.Name, type = c.Type.ToString(), weight = c.Weight },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return c;
+    }
+
+    public async Task<EvaluationCriterion> UpdateCriterionAsync(
+        Guid projectId, Guid tenderPackageId, Guid criterionId,
+        UpdateEvaluationCriterionRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var c = await db.EvaluationCriteria
+            .FirstOrDefaultAsync(x => x.Id == criterionId
+                                    && x.TenderPackageId == tenderPackageId
+                                    && x.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("EvaluationCriterion");
+
+        var pkg = await db.TenderPackages
+            .FirstAsync(p => p.Id == tenderPackageId && p.ProjectId == projectId, ct);
+        if (pkg.State != TenderPackageState.Draft)
+            throw new ConflictException(
+                $"TenderPackage is in state {pkg.State}; criteria can only be edited in Draft");
+
+        var changed = new List<string>();
+        if (req.Name is not null)
+        {
+            if (string.IsNullOrWhiteSpace(req.Name))
+                throw new ValidationException(["Name cannot be empty"]);
+            c.Name = req.Name.Trim();
+            changed.Add("Name");
+        }
+        if (req.Type.HasValue) { c.Type = req.Type.Value; changed.Add("Type"); }
+        if (req.Weight.HasValue)
+        {
+            if (req.Weight.Value < 0m || req.Weight.Value > 1m)
+                throw new ValidationException(["Weight must be in [0, 1]"]);
+            c.Weight = req.Weight.Value;
+            changed.Add("Weight");
+        }
+        if (changed.Count == 0)
+            throw new ValidationException(["No updatable fields provided"]);
+
+        await audit.WriteAsync(actorId, "evaluation_criterion.updated", "EvaluationCriterion",
+            c.Id.ToString(), projectId,
+            detail: new { changedFields = changed }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return c;
+    }
+
+    public async Task RemoveCriterionAsync(
+        Guid projectId, Guid tenderPackageId, Guid criterionId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var c = await db.EvaluationCriteria
+            .FirstOrDefaultAsync(x => x.Id == criterionId
+                                    && x.TenderPackageId == tenderPackageId
+                                    && x.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("EvaluationCriterion");
+
+        var pkg = await db.TenderPackages
+            .FirstAsync(p => p.Id == tenderPackageId && p.ProjectId == projectId, ct);
+        if (pkg.State != TenderPackageState.Draft)
+            throw new ConflictException(
+                $"TenderPackage is in state {pkg.State}; criteria can only be removed in Draft");
+
+        db.EvaluationCriteria.Remove(c);
+        await audit.WriteAsync(actorId, "evaluation_criterion.removed", "EvaluationCriterion",
+            c.Id.ToString(), projectId,
+            detail: new { tenderPackageId, name = c.Name }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<List<EvaluationCriterion>> ListCriteriaAsync(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct = default)
+    {
+        _ = await db.TenderPackages
+            .FirstOrDefaultAsync(p => p.Id == tenderPackageId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("TenderPackage");
+        return await db.EvaluationCriteria
+            .Where(c => c.TenderPackageId == tenderPackageId)
+            .OrderBy(c => c.Type).ThenBy(c => c.Name)
+            .ToListAsync(ct);
+    }
+
+    // ── Scores ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Set or update the score for a (Tender, Criterion) pair.
+    /// Validates: score in [0, 100]; tender in Submitted or
+    /// Evaluated state (not Awarded / Rejected / Withdrawn);
+    /// criterion belongs to the tender's package; package is
+    /// Issued (scoring happens during the evaluation window after
+    /// issue and before award).
+    /// Re-scoring updates in place; a separate audit row is
+    /// emitted each time so the trail is complete.
+    /// </summary>
+    public async Task<EvaluationScore> SetScoreAsync(
+        Guid projectId, Guid tenderId, Guid criterionId, SetEvaluationScoreRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (req.Score < 0m || req.Score > 100m)
+            throw new ValidationException(["Score must be in [0, 100]"]);
+
+        var tender = await db.Tenders
+            .FirstOrDefaultAsync(t => t.Id == tenderId && t.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Tender");
+        if (tender.State is TenderState.Withdrawn or TenderState.Awarded or TenderState.Rejected)
+            throw new ConflictException(
+                $"Tender is in state {tender.State}; scoring is closed");
+
+        var criterion = await db.EvaluationCriteria
+            .FirstOrDefaultAsync(c => c.Id == criterionId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("EvaluationCriterion");
+        if (criterion.TenderPackageId != tender.TenderPackageId)
+            throw new ValidationException(["Criterion belongs to a different TenderPackage than the Tender"]);
+
+        var pkg = await db.TenderPackages
+            .FirstAsync(p => p.Id == tender.TenderPackageId, ct);
+        if (pkg.State != TenderPackageState.Issued)
+            throw new ConflictException(
+                $"TenderPackage is in state {pkg.State}; scoring is only allowed when Issued");
+
+        var existing = await db.EvaluationScores
+            .FirstOrDefaultAsync(s => s.TenderId == tenderId && s.CriterionId == criterionId, ct);
+        var isCreate = existing is null;
+        var s = existing ?? new EvaluationScore
+        {
+            ProjectId   = projectId,
+            TenderId    = tenderId,
+            CriterionId = criterionId,
+        };
+        s.Score      = req.Score;
+        s.Notes      = req.Notes;
+        s.ScoredById = actorId;
+        s.ScoredAt   = DateTime.UtcNow;
+        if (isCreate) db.EvaluationScores.Add(s);
+
+        await audit.WriteAsync(actorId, "evaluation_score.set", "EvaluationScore",
+            s.Id.ToString(), projectId,
+            detail: new
+            {
+                tenderId, criterionId,
+                score = req.Score,
+                isUpdate = !isCreate,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return s;
+    }
+
+    // ── Matrix ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Build the evaluation matrix for a TenderPackage. Returns
+    /// per-tender weighted overall scores plus the per-criterion
+    /// breakdown. TotalWeight + IsValid are reported alongside —
+    /// the caller can render "weights sum to 0.85; please fix"
+    /// when IsValid is false. Withdrawn tenders are excluded
+    /// (they're out of scope for evaluation).
+    /// </summary>
+    public async Task<EvaluationMatrixDto> GetMatrixAsync(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct = default)
+    {
+        _ = await db.TenderPackages
+            .FirstOrDefaultAsync(p => p.Id == tenderPackageId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("TenderPackage");
+
+        var criteria = await db.EvaluationCriteria
+            .Where(c => c.TenderPackageId == tenderPackageId)
+            .OrderBy(c => c.Type).ThenBy(c => c.Name)
+            .ToListAsync(ct);
+        var tenders = await db.Tenders
+            .Where(t => t.TenderPackageId == tenderPackageId
+                     && t.State != TenderState.Withdrawn)
+            .OrderBy(t => t.BidAmount)
+            .ToListAsync(ct);
+        var scores = await db.EvaluationScores
+            .Where(s => criteria.Select(c => c.Id).Contains(s.CriterionId))
+            .ToListAsync(ct);
+
+        // Pure-function aggregator.
+        var coreInput = criteria.Select(c =>
+            new CimsApp.Core.EvaluationMatrix.CriterionInput(c.Id, c.Weight)).ToList();
+        var coreScores = scores.Select(s =>
+            new CimsApp.Core.EvaluationMatrix.ScoreInput(s.TenderId, s.CriterionId, s.Score)).ToList();
+        var matrixResult = CimsApp.Core.EvaluationMatrix.Compute(
+            tenders.Select(t => t.Id).ToList(), coreInput, coreScores);
+
+        // Compose the DTO. Score lookup for the per-cell breakdown.
+        var scoresByPair = scores
+            .ToDictionary(s => (s.TenderId, s.CriterionId), s => s);
+        var resultsByTender = matrixResult.Tenders
+            .ToDictionary(r => r.TenderId, r => r.OverallScore);
+
+        var rows = tenders.Select(t => new EvaluationMatrixRowDto(
+            t.Id, t.BidderName, t.BidAmount, t.State,
+            resultsByTender.TryGetValue(t.Id, out var os) ? os : null,
+            criteria.Select(c =>
+            {
+                scoresByPair.TryGetValue((t.Id, c.Id), out var s);
+                return new EvaluationMatrixCellDto(
+                    c.Id, c.Name, c.Type, c.Weight,
+                    s?.Score, s?.Notes);
+            }).ToList())).ToList();
+
+        return new EvaluationMatrixDto(
+            tenderPackageId,
+            matrixResult.TotalWeight,
+            matrixResult.IsValid,
+            rows);
+    }
+}
+
 public class CdeService(CimsDbContext db, AuditService audit)
 {
     public async Task<List<CdeContainer>> ListContainersAsync(Guid projectId) =>

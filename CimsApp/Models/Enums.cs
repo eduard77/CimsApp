@@ -138,3 +138,8 @@ public enum TenderPackageState { Draft, Issued, Closed }
 // the bidder-pulls-out branch (only allowed before evaluation /
 // award). Awarded / Rejected / Withdrawn are all terminal.
 public enum TenderState { Submitted, Evaluated, Awarded, Rejected, Withdrawn }
+// EvaluationCriterion type — F.7 third bullet ("price and quality
+// weighted"). v1.0 buckets every criterion as Price or Quality;
+// finer typology (e.g. social value, sustainability) lands as
+// per-tenant configurable categories in v1.1 (B-NNN, deferred).
+public enum EvaluationCriterionType { Price, Quality }

@@ -383,6 +383,35 @@ public record SubmitTenderRequest(
 // (Submitted state only). Note required so the audit trail
 // captures the rationale.
 public record WithdrawTenderRequest(string Note);
+// T-S6-05 EvaluationCriterion + Score DTOs.
+public record AddEvaluationCriterionRequest(
+    string Name,
+    EvaluationCriterionType Type,
+    decimal Weight);
+public record UpdateEvaluationCriterionRequest(
+    string? Name,
+    EvaluationCriterionType? Type,
+    decimal? Weight);
+// Score in [0, 100]; Notes optional rationale.
+public record SetEvaluationScoreRequest(
+    decimal Score,
+    string? Notes);
+// Per-(criterion) cell in the evaluation matrix view.
+public record EvaluationMatrixCellDto(
+    Guid CriterionId, string CriterionName, EvaluationCriterionType Type,
+    decimal Weight, decimal? Score, string? Notes);
+// Per-tender row in the evaluation matrix view.
+public record EvaluationMatrixRowDto(
+    Guid TenderId, string BidderName, decimal BidAmount, TenderState State,
+    decimal? OverallScore,
+    List<EvaluationMatrixCellDto> Cells);
+// The whole matrix. TotalWeight should be 1.0 (epsilon 0.0001);
+// IsValid = false flags weight-sum drift to the UI.
+public record EvaluationMatrixDto(
+    Guid TenderPackageId,
+    decimal TotalWeight,
+    bool IsValid,
+    List<EvaluationMatrixRowDto> Tenders);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

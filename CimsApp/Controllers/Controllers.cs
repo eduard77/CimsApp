@@ -1336,6 +1336,80 @@ public class TendersController(TendersService svc, CimsDbContext db) : CimsContr
     }
 }
 
+// PAFM-SD F.7 third bullet — evaluation matrix (criteria + scores).
+[Route("api/v1/projects/{projectId:guid}/procurement/tender-packages/{tenderPackageId:guid}")]
+public class EvaluationController(EvaluationService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet("evaluation-criteria")]
+    public async Task<IActionResult> ListCriteria(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListCriteriaAsync(projectId, tenderPackageId, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpPost("evaluation-criteria")]
+    public async Task<IActionResult> AddCriterion(
+        Guid projectId, Guid tenderPackageId,
+        AddEvaluationCriterionRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var c = await svc.AddCriterionAsync(projectId, tenderPackageId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = c });
+    }
+
+    [HttpPut("evaluation-criteria/{criterionId:guid}")]
+    public async Task<IActionResult> UpdateCriterion(
+        Guid projectId, Guid tenderPackageId, Guid criterionId,
+        UpdateEvaluationCriterionRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var c = await svc.UpdateCriterionAsync(projectId, tenderPackageId, criterionId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = c });
+    }
+
+    [HttpDelete("evaluation-criteria/{criterionId:guid}")]
+    public async Task<IActionResult> RemoveCriterion(
+        Guid projectId, Guid tenderPackageId, Guid criterionId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.RemoveCriterionAsync(projectId, tenderPackageId, criterionId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true });
+    }
+
+    [HttpPut("tenders/{tenderId:guid}/scores/{criterionId:guid}")]
+    public async Task<IActionResult> SetScore(
+        Guid projectId, Guid tenderPackageId, Guid tenderId, Guid criterionId,
+        SetEvaluationScoreRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.InformationManager))
+            throw new ForbiddenException();
+        var s = await svc.SetScoreAsync(projectId, tenderId, criterionId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = s });
+    }
+
+    [HttpGet("evaluation-matrix")]
+    public async Task<IActionResult> GetMatrix(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetMatrixAsync(projectId, tenderPackageId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

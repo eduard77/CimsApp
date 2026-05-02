@@ -1508,5 +1508,76 @@ public class Tender
     public Guid CreatedById { get; set; }
     public User CreatedBy { get; set; } = null!;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<EvaluationScore> Scores { get; set; } = [];
+}
+
+/// <summary>
+/// One evaluation criterion attached to a <see cref="TenderPackage"/>
+/// (T-S6-05, PAFM-SD F.7 third bullet — "price and quality
+/// weighted"). Per-package weights must sum to 1.0 (epsilon
+/// 0.0001) for the matrix to be valid; the service-layer
+/// validation runs at GetMatrixAsync time so individual weight
+/// edits during Draft don't reject prematurely. Add / Remove
+/// criteria allowed only when the parent TenderPackage is in
+/// Draft state — once Issued the criteria are frozen.
+/// </summary>
+public class EvaluationCriterion
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Denormalised — equals TenderPackage.ProjectId.
+    /// Drives the tenant query filter without a join.</summary>
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid TenderPackageId { get; set; }
+    public TenderPackage TenderPackage { get; set; } = null!;
+
+    [Required, MaxLength(200)] public string Name { get; set; } = "";
+
+    public EvaluationCriterionType Type { get; set; }
+
+    /// <summary>Weight in [0, 1]. The matrix is valid iff Σ
+    /// weights ≈ 1.0 across the package. Stored as decimal(5, 4)
+    /// so weight changes round-trip without floating-point drift.</summary>
+    [Column(TypeName = "decimal(5,4)")]
+    public decimal Weight { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// One score recorded for a specific (Tender, EvaluationCriterion)
+/// pair (T-S6-05). Score in [0, 100]. Optional Notes carries the
+/// evaluator's rationale. Tenant-scoped via the parent Tender.
+/// Service enforces uniqueness on (TenderId, CriterionId) — one
+/// score per pair; re-scoring updates the row in-place.
+/// </summary>
+public class EvaluationScore
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Denormalised — equals Tender.ProjectId.</summary>
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid TenderId { get; set; }
+    public Tender Tender { get; set; } = null!;
+
+    public Guid CriterionId { get; set; }
+    public EvaluationCriterion Criterion { get; set; } = null!;
+
+    [Column(TypeName = "decimal(6,2)")]
+    public decimal Score { get; set; }
+
+    public string? Notes { get; set; }
+
+    public Guid ScoredById { get; set; }
+    public User ScoredBy { get; set; } = null!;
+    public DateTime ScoredAt { get; set; } = DateTime.UtcNow;
+
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
