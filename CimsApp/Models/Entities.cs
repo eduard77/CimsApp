@@ -199,6 +199,19 @@ public class Document
     }
     public Guid CreatorId { get; set; }
     public User Creator { get; set; } = null!;
+
+    /// <summary>T-S10-06. Golden Thread membership flag per BSA
+    /// 2022. When true, the Document is part of the building's
+    /// statutory Golden Thread of information. v1.0 enforces soft
+    /// immutability via service-layer guards in DocumentsService:
+    /// edit / state-transition / soft-delete are blocked on
+    /// GT-marked Documents. Mark-into-GT is one-way for v1.0;
+    /// un-mark workflow → v1.1 / B-075. // BSA 2022 ref: Schedule
+    /// 5 (golden thread of information).</summary>
+    public bool IsInGoldenThread { get; set; }
+    public DateTime? AddedToGoldenThreadAt { get; set; }
+    public Guid? AddedToGoldenThreadById { get; set; }
+
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
@@ -1895,6 +1908,110 @@ public class TidpEntry
     public string? SignOffNote { get; set; }
 
     public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Building Safety Act 2022 Gateway submission package
+/// (T-S10-03, PAFM-SD F.10 second bullet). HRB projects must
+/// pass three statutory gateways: Gateway 1 (planning),
+/// Gateway 2 (pre-construction), Gateway 3 (pre-occupation).
+/// 3-state workflow Drafting → Submitted → Decided
+/// (Approved | ApprovedWithConditions | Refused). State-machine
+/// enforcement in <see cref="CimsApp.Core.GatewayPackageWorkflow"/>.
+/// Project-scoped sequential GW1-NNNN / GW2-NNNN / GW3-NNNN.
+/// // BSA 2022 ref: Part 3 (HRB construction); ss.74-77 (Gateway
+/// 2 building control approval); ss.78-79 (Gateway 3 completion
+/// certificate); planning gateway via TCPA 1990 / BSA 2022
+/// amendments.
+/// </summary>
+public class GatewayPackage
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Project-scoped sequential number, e.g. "GW1-0001",
+    /// "GW2-0001", "GW3-0001". Service auto-generates on Create;
+    /// unique within (ProjectId, Type).</summary>
+    [Required, MaxLength(20)] public string Number { get; set; } = "";
+
+    public GatewayType Type { get; set; }
+
+    [Required, MaxLength(300)] public string Title { get; set; } = "";
+    public string? Description { get; set; }
+
+    public GatewayPackageState State { get; set; } = GatewayPackageState.Drafting;
+
+    public Guid CreatedById { get; set; }
+    public User CreatedBy { get; set; } = null!;
+
+    public Guid? SubmittedById { get; set; }
+    public User? SubmittedBy { get; set; }
+    public DateTime? SubmittedAt { get; set; }
+
+    public Guid? DecidedById { get; set; }
+    public User? DecidedBy { get; set; }
+    public DateTime? DecidedAt { get; set; }
+    /// <summary>Decision outcome at Gateway review. Required when
+    /// the State transitions to Decided; null in earlier states.</summary>
+    public GatewayDecision? Decision { get; set; }
+    /// <summary>Decision rationale captured at decide; required
+    /// when transitioning to Decided.</summary>
+    public string? DecisionNote { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Mandatory Occurrence Report (T-S10-04, PAFM-SD F.10 third
+/// bullet). BSA 2022 s.87 requires HRB occurrences (anything
+/// that risks the safety of people in or about the building) to
+/// be reported to the Building Safety Regulator. v1.0 captures
+/// the report data + a manual "reported to BSR" flag pair;
+/// programmatic BSR API push → v1.1 / B-070 when an API exists.
+/// Project-scoped sequential MOR-NNNN. No state machine — single
+/// workflow: create + (optionally) mark-as-reported.
+/// // BSA 2022 ref: s.87 (mandatory occurrence reporting);
+/// Building Safety (Mandatory Occurrence Reporting etc.)
+/// (England) Regulations 2023.
+/// </summary>
+public class MandatoryOccurrenceReport
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Project-scoped sequential number, e.g. "MOR-0001".
+    /// Service auto-generates on Create.</summary>
+    [Required, MaxLength(20)] public string Number { get; set; } = "";
+
+    [Required, MaxLength(500)] public string Title { get; set; } = "";
+    [Required] public string Description { get; set; } = "";
+
+    public MorSeverity Severity { get; set; }
+
+    /// <summary>UTC date / time the occurrence happened. Distinct
+    /// from CreatedAt (row-write time).</summary>
+    public DateTime OccurredAt { get; set; }
+
+    public Guid ReporterId { get; set; }
+    public User Reporter { get; set; } = null!;
+
+    /// <summary>Whether the report has been pushed to the Building
+    /// Safety Regulator. Manual flag in v1.0 (no public BSR API at
+    /// implementation time); programmatic push → v1.1 / B-070.</summary>
+    public bool ReportedToBsr { get; set; }
+    public DateTime? ReportedToBsrAt { get; set; }
+    /// <summary>Optional BSR-side reference once reported (case
+    /// number, ticket ID, etc.). Free text in v1.0.</summary>
+    [MaxLength(100)] public string? BsrReference { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

@@ -179,3 +179,25 @@ public enum CustomReportEntityType
     Variation,
     ChangeRequest,
 }
+
+// S10 BSA 2022 / Golden Thread (PAFM-SD F.10).
+// Gateway type — Building Safety Act 2022 introduces three
+// statutory gateways for HRB projects: Gateway 1 (planning),
+// Gateway 2 (pre-construction), Gateway 3 (pre-occupation).
+// // BSA 2022 ref: Part 3 (HRB construction).
+public enum GatewayType { Gateway1, Gateway2, Gateway3 }
+
+// 3-state GatewayPackage workflow — F.10 second bullet.
+// Drafting → Submitted → Decided. Decided is terminal.
+// State-machine enforcement in Core/GatewayPackageWorkflow.cs.
+public enum GatewayPackageState { Drafting, Submitted, Decided }
+
+// Building Safety Regulator decision outcome at Gateway
+// review. Required when transitioning to Decided.
+// // BSA 2022 ref: Part 3, decision categories.
+public enum GatewayDecision { Approved, ApprovedWithConditions, Refused }
+
+// Mandatory Occurrence Reporting severity tag (T-S10-04).
+// // BSA 2022 ref: Building Safety Act 2022 s.87 (mandatory
+// occurrence reporting).
+public enum MorSeverity { Low, Medium, High, Critical }
