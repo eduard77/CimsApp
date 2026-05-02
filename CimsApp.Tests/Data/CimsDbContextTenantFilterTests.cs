@@ -59,6 +59,7 @@ public class CimsDbContextTenantFilterTests
         // S6 procurement-domain additions (T-S6-02 onwards).
         typeof(ProcurementStrategy),
         typeof(TenderPackage),
+        typeof(Tender),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =
