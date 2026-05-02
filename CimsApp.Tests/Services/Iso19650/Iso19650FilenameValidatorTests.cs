@@ -124,15 +124,33 @@ public class Iso19650FilenameValidatorTests
     }
 
     [Fact]
-    public void Suitability_check_fails_on_A_code_in_v1()
+    public void Suitability_check_accepts_A_code_after_T_S9_02_reconciliation()
     {
-        // A3 is valid ISO 19650 but out of scope for v1.
+        // T-S9-02: post-reconciliation, A-codes (A1..A5/AB) are valid per
+        // ISO 19650-2 Annex A. Pre-S9 the parked reference data only listed
+        // S1..S7; S9 swapped to Core/Iso19650Codes which carries the full
+        // standard set. A3 in particular is "Authorised for construction"
+        // and a real-world workflow value. This test asserts the new
+        // accepting behaviour.
         var result = _sut.Validate(FailingFilename);
 
         var suitability =
             result.Checks.Single(c => c.Id == Iso19650CheckId.Suitability);
-        Assert.False(suitability.Passed);
+        Assert.True(suitability.Passed,
+            "A-codes should be accepted after T-S9-02 reconciliation.");
         Assert.Contains("A3", suitability.Message);
+    }
+
+    [Fact]
+    public void Suitability_check_fails_on_truly_invalid_code()
+    {
+        // ZZ is not in the ISO 19650-2 Annex A suitability whitelist.
+        var result = _sut.Validate("RVP-SAG-02-04-DR-A-0127-ZZ-P03");
+
+        var suitability =
+            result.Checks.Single(c => c.Id == Iso19650CheckId.Suitability);
+        Assert.False(suitability.Passed);
+        Assert.Contains("ZZ", suitability.Message);
     }
 
     [Fact]

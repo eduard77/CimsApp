@@ -63,8 +63,8 @@ public sealed class Iso19650FilenameValidator
 
         // Check 2: Field validity - Type and Role from reference sets,
         // Volume and Level are 2-digit numerics.
-        var typeOk  = Iso19650ReferenceData.TypeCodes.Contains(type);
-        var roleOk  = Iso19650ReferenceData.RoleCodes.Contains(role);
+        var typeOk  = CimsApp.Core.Iso19650Codes.TypeCodeSet.Contains(type);
+        var roleOk  = CimsApp.Core.Iso19650Codes.RoleCodeSet.Contains(role);
         var volOk   = Regex.IsMatch(volume, "^\\d{2}$");
         var levelOk = Regex.IsMatch(level,  "^\\d{2}$");
         var fieldOk = typeOk && roleOk && volOk && levelOk;
@@ -90,14 +90,14 @@ public sealed class Iso19650FilenameValidator
                     : "Number must be a 4-digit zero-padded integer."));
 
         // Check 4: Suitability - must be in v1 S-code whitelist.
-        var suitOk = Iso19650ReferenceData.SuitabilityCodes.Contains(suitability);
+        var suitOk = CimsApp.Core.Iso19650Codes.SuitabilityCodeSet.Contains(suitability);
         checks.Add(new Iso19650CheckOutcome(
             Iso19650CheckId.Suitability,
             "Suitability",
             suitOk,
             suitOk
                 ? $"{suitability} accepted."
-                : $"Suitability '{suitability}' not in v1 whitelist (S1-S7). A-/B-codes deferred to Sprint 8."));
+                : $"Suitability '{suitability}' not in the ISO 19650-2 Annex A whitelist."));
 
         // Check 5: State transition. Stub - needs previous Suitability to compare.
         checks.Add(CheckStateTransition());
@@ -147,7 +147,7 @@ public sealed class Iso19650FilenameValidator
 
     private static Iso19650CheckOutcome CheckUniclassClassification(string type)
     {
-        if (Iso19650ReferenceData.TypeToUniclass.TryGetValue(type, out var uniclass))
+        if (CimsApp.Core.Iso19650Codes.TypeToUniclass.TryGetValue(type, out var uniclass))
         {
             return new Iso19650CheckOutcome(
                 Iso19650CheckId.UniclassClassification,
@@ -165,7 +165,7 @@ public sealed class Iso19650FilenameValidator
 
     private static Iso19650CheckOutcome CheckUniclassHierarchy(string type)
     {
-        if (!Iso19650ReferenceData.TypeToUniclass.TryGetValue(type, out var uniclass))
+        if (!CimsApp.Core.Iso19650Codes.TypeToUniclass.TryGetValue(type, out var uniclass))
         {
             return new Iso19650CheckOutcome(
                 Iso19650CheckId.UniclassHierarchy,
@@ -174,7 +174,7 @@ public sealed class Iso19650FilenameValidator
                 $"Cannot check hierarchy: Type '{type}' has no Uniclass code.");
         }
 
-        if (Iso19650ReferenceData.DeprecatedUniclassCodes.Contains(uniclass))
+        if (CimsApp.Core.Iso19650Codes.DeprecatedUniclassCodes.Contains(uniclass))
         {
             return new Iso19650CheckOutcome(
                 Iso19650CheckId.UniclassHierarchy,
@@ -198,8 +198,8 @@ public sealed class Iso19650FilenameValidator
 
     private static Iso19650CheckOutcome CheckCrossReferenceIntegrity(string type)
     {
-        var hasUniclass = Iso19650ReferenceData.TypeToUniclass.TryGetValue(type, out var uniclass);
-        var hasIfc = Iso19650ReferenceData.TypeToIfc.TryGetValue(type, out var ifc);
+        var hasUniclass = CimsApp.Core.Iso19650Codes.TypeToUniclass.TryGetValue(type, out var uniclass);
+        var hasIfc = CimsApp.Core.Iso19650Codes.TypeToIfc.TryGetValue(type, out var ifc);
         if (!hasUniclass || !hasIfc)
         {
             return new Iso19650CheckOutcome(
@@ -211,7 +211,7 @@ public sealed class Iso19650FilenameValidator
 
         // First 2 chars of a Uniclass code are the table prefix (EF, Ss, Ac...).
         var table = uniclass!.Length >= 2 ? uniclass[..2] : uniclass;
-        if (!Iso19650ReferenceData.UniclassTableToIfcPrefixes.TryGetValue(
+        if (!CimsApp.Core.Iso19650Codes.UniclassTableToIfcPrefixes.TryGetValue(
                 table, out var allowedPrefixes))
         {
             return new Iso19650CheckOutcome(

@@ -155,6 +155,70 @@ public static class Iso19650Codes
     // Helper to get the description for a given code
     public static string DescribeCode(List<CodeItem> list, string code)
         => list.FirstOrDefault(c => c.Code == code)?.Label ?? code;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // T-S9-02 reconciliation: HashSet accessors for fast Contains-checks +
+    // Uniclass / IFC mappings + Uniclass-table-to-IFC-prefix rules.
+    // Merged from the parked Services/Iso19650/Iso19650ReferenceData.cs which
+    // itself is now deleted; Core is the single source of truth for ISO 19650
+    // reference data. v1.1 / B-068 replaces the hard-coded Uniclass/IFC tables
+    // with an NBS-backed feed; v1.1 / B-065 adds per-tenant overrides.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Type codes as a HashSet for O(1) Contains-check.</summary>
+    public static readonly HashSet<string> TypeCodeSet =
+        DocumentTypes.Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>Role codes as a HashSet for O(1) Contains-check.</summary>
+    public static readonly HashSet<string> RoleCodeSet =
+        Roles.Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>Suitability codes as a HashSet for O(1) Contains-check.</summary>
+    public static readonly HashSet<string> SuitabilityCodeSet =
+        SuitabilityCodes.Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>Type → Uniclass code. Hard-coded illustrative mapping per
+    /// ISO 19650-2 Annex A. Full NBS-backed feed is v1.1 / B-068. Types
+    /// absent from this map fail validator check 7 (mandatory Uniclass for
+    /// object class). M3/M2 both map to the same model Uniclass since at
+    /// the Annex A level "model" is a single category.</summary>
+    public static readonly IReadOnlyDictionary<string, string> TypeToUniclass =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["DR"] = "EF_25_30_20",  // Drawing
+            ["M3"] = "Ss_25_30_20",  // 3D model
+            ["M2"] = "Ss_25_30_20",  // 2D model — same Annex A category
+            ["SP"] = "Ac_10_50_10",  // Specification
+            ["CA"] = "Ac_10_50_40",  // Calculation
+        };
+
+    /// <summary>Deprecated Uniclass codes per the pinned reference. Empty in
+    /// v1.0; v1.1 / B-068 populates from the NBS release.</summary>
+    public static readonly HashSet<string> DeprecatedUniclassCodes =
+        new(StringComparer.Ordinal);
+
+    /// <summary>Type → IFC entity. Hard-coded illustrative mapping. Consumed
+    /// by validator check 10 (cross-reference integrity); not a live IFC
+    /// schema validator.</summary>
+    public static readonly IReadOnlyDictionary<string, string> TypeToIfc =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["DR"] = "IfcAnnotation",
+            ["M3"] = "IfcBuildingElementProxy",
+            ["M2"] = "IfcBuildingElementProxy",
+            ["SP"] = "IfcDocumentReference",
+            ["CA"] = "IfcDocumentReference",
+        };
+
+    /// <summary>Uniclass table prefix → allowed IFC entity prefixes. Drives
+    /// the Type/Uniclass/IFC agreement rule in validator check 10.</summary>
+    public static readonly IReadOnlyDictionary<string, string[]> UniclassTableToIfcPrefixes =
+        new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            ["EF"] = new[] { "IfcAnnotation" },   // Elements / Functions
+            ["Ss"] = new[] { "IfcBuilding" },     // Systems
+            ["Ac"] = new[] { "IfcDocument" },     // Activities
+        };
 }
 
 public record CodeItem(string Code, string Label);
