@@ -5443,6 +5443,285 @@ public class ReportingService(CimsDbContext db)
     }
 }
 
+// T-S9-05 Master Information Delivery Plan (MIDP) service.
+// PAFM-SD F.9 second bullet. Per-project list of planned
+// information deliveries. v1.0 simple shape; full ISO 19650-2
+// §5 information-requirements model is v1.1. Audit-twin per
+// the ADR-0014 pattern.
+public class MidpService(CimsDbContext db, AuditService audit)
+{
+    public async Task<List<MidpEntryDto>> ListAsync(Guid projectId, CancellationToken ct = default)
+    {
+        var rows = await db.MidpEntries
+            .Where(x => x.ProjectId == projectId && x.IsActive)
+            .OrderBy(x => x.DueDate)
+            .ToListAsync(ct);
+        return rows.Select(ToDto).ToList();
+    }
+
+    public async Task<MidpEntryDto> GetAsync(Guid projectId, Guid id, CancellationToken ct = default)
+    {
+        var x = await db.MidpEntries
+            .FirstOrDefaultAsync(e => e.Id == id && e.ProjectId == projectId && e.IsActive, ct)
+            ?? throw new NotFoundException("MidpEntry");
+        return ToDto(x);
+    }
+
+    public async Task<MidpEntryDto> CreateAsync(
+        Guid projectId, CreateMidpEntryRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(new List<string> { "Title is required" });
+        if (req.DocTypeFilter is { } t && !CimsApp.Core.Iso19650Codes.TypeCodeSet.Contains(t))
+            throw new ValidationException(new List<string>
+            { $"DocTypeFilter '{t}' is not in the ISO 19650-2 Annex A type whitelist" });
+        if (!await db.Users.AnyAsync(u => u.Id == req.OwnerId, ct))
+            throw new NotFoundException("Owner");
+
+        var entry = new MidpEntry
+        {
+            ProjectId = projectId,
+            Title = req.Title.Trim(),
+            Description = req.Description,
+            DocTypeFilter = req.DocTypeFilter?.ToUpperInvariant(),
+            DueDate = req.DueDate,
+            OwnerId = req.OwnerId,
+        };
+        db.MidpEntries.Add(entry);
+        await audit.WriteAsync(actorId, "midp_entry.created",
+            "MidpEntry", entry.Id.ToString(),
+            projectId: projectId,
+            detail: new { entry.Title, entry.DueDate, entry.OwnerId, entry.DocTypeFilter },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(entry);
+    }
+
+    public async Task<MidpEntryDto> UpdateAsync(
+        Guid projectId, Guid id, UpdateMidpEntryRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.MidpEntries
+            .FirstOrDefaultAsync(e => e.Id == id && e.ProjectId == projectId && e.IsActive, ct)
+            ?? throw new NotFoundException("MidpEntry");
+        var changed = new List<string>();
+        if (req.Title is not null && req.Title != x.Title)
+        {
+            if (string.IsNullOrWhiteSpace(req.Title))
+                throw new ValidationException(new List<string> { "Title cannot be empty" });
+            x.Title = req.Title.Trim(); changed.Add(nameof(x.Title));
+        }
+        if (req.Description is not null && req.Description != x.Description)
+        { x.Description = req.Description; changed.Add(nameof(x.Description)); }
+        if (req.DocTypeFilter is not null && req.DocTypeFilter != x.DocTypeFilter)
+        {
+            var t = req.DocTypeFilter.ToUpperInvariant();
+            if (!CimsApp.Core.Iso19650Codes.TypeCodeSet.Contains(t))
+                throw new ValidationException(new List<string>
+                { $"DocTypeFilter '{t}' is not in the ISO 19650-2 Annex A type whitelist" });
+            x.DocTypeFilter = t; changed.Add(nameof(x.DocTypeFilter));
+        }
+        if (req.DueDate is { } d && d != x.DueDate)
+        { x.DueDate = d; changed.Add(nameof(x.DueDate)); }
+        if (req.OwnerId is { } o && o != x.OwnerId)
+        {
+            if (!await db.Users.AnyAsync(u => u.Id == o, ct))
+                throw new NotFoundException("Owner");
+            x.OwnerId = o; changed.Add(nameof(x.OwnerId));
+        }
+        if (changed.Count == 0) throw new ConflictException("No changes specified.");
+
+        await audit.WriteAsync(actorId, "midp_entry.updated",
+            "MidpEntry", x.Id.ToString(),
+            projectId: projectId, detail: new { changedFields = changed },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task<MidpEntryDto> CompleteAsync(
+        Guid projectId, Guid id, CompleteMidpEntryRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.MidpEntries
+            .FirstOrDefaultAsync(e => e.Id == id && e.ProjectId == projectId && e.IsActive, ct)
+            ?? throw new NotFoundException("MidpEntry");
+        if (x.IsCompleted) throw new ConflictException("MidpEntry is already completed.");
+
+        if (req.DocumentId is { } docId)
+        {
+            var doc = await db.Documents
+                .FirstOrDefaultAsync(d => d.Id == docId && d.ProjectId == projectId, ct)
+                ?? throw new NotFoundException("Document");
+            if (x.DocTypeFilter is { } expected && doc.DocType != expected)
+                throw new ValidationException(new List<string>
+                { $"Document.DocType '{doc.DocType}' does not match MidpEntry.DocTypeFilter '{expected}'" });
+            x.DocumentId = docId;
+        }
+        x.IsCompleted = true;
+        x.CompletedAt = DateTime.UtcNow;
+        await audit.WriteAsync(actorId, "midp_entry.completed",
+            "MidpEntry", x.Id.ToString(),
+            projectId: projectId, documentId: x.DocumentId,
+            detail: new { x.DocumentId },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task DeleteAsync(
+        Guid projectId, Guid id,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.MidpEntries
+            .FirstOrDefaultAsync(e => e.Id == id && e.ProjectId == projectId && e.IsActive, ct)
+            ?? throw new NotFoundException("MidpEntry");
+        x.IsActive = false;
+        await audit.WriteAsync(actorId, "midp_entry.deleted",
+            "MidpEntry", x.Id.ToString(),
+            projectId: projectId, detail: new { x.Title },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static MidpEntryDto ToDto(MidpEntry x) =>
+        new(x.Id, x.ProjectId, x.Title, x.Description, x.DocTypeFilter,
+            x.DueDate, x.OwnerId, x.DocumentId,
+            x.IsCompleted, x.CompletedAt,
+            x.CreatedAt, x.UpdatedAt);
+}
+
+// T-S9-06 Task Information Delivery Plan (TIDP) service.
+// PAFM-SD F.9 third bullet. Per-team slice of a parent
+// MidpEntry; v1.0 ships with TeamName as free text (B-069 for
+// structured Team entity). Sign-off transitions are one-way:
+// not-signed-off → signed-off (no un-sign-off in v1.0; that's
+// a workflow concern v1.1 / B-NNN if pilot need surfaces).
+public class TidpService(CimsDbContext db, AuditService audit)
+{
+    public async Task<List<TidpEntryDto>> ListAsync(Guid projectId, Guid? midpEntryId = null, CancellationToken ct = default)
+    {
+        var q = db.TidpEntries.Where(x => x.ProjectId == projectId && x.IsActive);
+        if (midpEntryId.HasValue) q = q.Where(x => x.MidpEntryId == midpEntryId);
+        var rows = await q.OrderBy(x => x.DueDate).ThenBy(x => x.TeamName).ToListAsync(ct);
+        return rows.Select(ToDto).ToList();
+    }
+
+    public async Task<TidpEntryDto> GetAsync(Guid projectId, Guid id, CancellationToken ct = default)
+    {
+        var x = await db.TidpEntries
+            .FirstOrDefaultAsync(e => e.Id == id && e.ProjectId == projectId && e.IsActive, ct)
+            ?? throw new NotFoundException("TidpEntry");
+        return ToDto(x);
+    }
+
+    public async Task<TidpEntryDto> CreateAsync(
+        Guid projectId, CreateTidpEntryRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.TeamName))
+            throw new ValidationException(new List<string> { "TeamName is required" });
+        var midp = await db.MidpEntries
+            .FirstOrDefaultAsync(m => m.Id == req.MidpEntryId && m.ProjectId == projectId && m.IsActive, ct)
+            ?? throw new NotFoundException("MidpEntry");
+
+        var entry = new TidpEntry
+        {
+            ProjectId = projectId,
+            MidpEntryId = req.MidpEntryId,
+            TeamName = req.TeamName.Trim(),
+            DueDate = req.DueDate,
+        };
+        db.TidpEntries.Add(entry);
+        await audit.WriteAsync(actorId, "tidp_entry.created",
+            "TidpEntry", entry.Id.ToString(),
+            projectId: projectId,
+            detail: new { entry.TeamName, entry.DueDate, entry.MidpEntryId },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(entry);
+    }
+
+    public async Task<TidpEntryDto> UpdateAsync(
+        Guid projectId, Guid id, UpdateTidpEntryRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.TidpEntries
+            .FirstOrDefaultAsync(e => e.Id == id && e.ProjectId == projectId && e.IsActive, ct)
+            ?? throw new NotFoundException("TidpEntry");
+        if (x.IsSignedOff)
+            throw new ConflictException("Cannot edit a signed-off TidpEntry.");
+        var changed = new List<string>();
+        if (req.TeamName is not null && req.TeamName != x.TeamName)
+        {
+            if (string.IsNullOrWhiteSpace(req.TeamName))
+                throw new ValidationException(new List<string> { "TeamName cannot be empty" });
+            x.TeamName = req.TeamName.Trim(); changed.Add(nameof(x.TeamName));
+        }
+        if (req.DueDate is { } d && d != x.DueDate)
+        { x.DueDate = d; changed.Add(nameof(x.DueDate)); }
+        if (changed.Count == 0) throw new ConflictException("No changes specified.");
+
+        await audit.WriteAsync(actorId, "tidp_entry.updated",
+            "TidpEntry", x.Id.ToString(),
+            projectId: projectId, detail: new { changedFields = changed },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task<TidpEntryDto> SignOffAsync(
+        Guid projectId, Guid id, SignOffTidpEntryRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.TidpEntries
+            .FirstOrDefaultAsync(e => e.Id == id && e.ProjectId == projectId && e.IsActive, ct)
+            ?? throw new NotFoundException("TidpEntry");
+        if (x.IsSignedOff)
+            throw new ConflictException("TidpEntry is already signed off.");
+
+        x.IsSignedOff   = true;
+        x.SignedOffById = actorId;
+        x.SignedOffAt   = DateTime.UtcNow;
+        x.SignOffNote   = req.Note;
+        await audit.WriteAsync(actorId, "tidp_entry.signed_off",
+            "TidpEntry", x.Id.ToString(),
+            projectId: projectId, detail: new { x.SignOffNote },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task DeleteAsync(
+        Guid projectId, Guid id,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.TidpEntries
+            .FirstOrDefaultAsync(e => e.Id == id && e.ProjectId == projectId && e.IsActive, ct)
+            ?? throw new NotFoundException("TidpEntry");
+        x.IsActive = false;
+        await audit.WriteAsync(actorId, "tidp_entry.deleted",
+            "TidpEntry", x.Id.ToString(),
+            projectId: projectId, detail: new { x.TeamName },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static TidpEntryDto ToDto(TidpEntry x) =>
+        new(x.Id, x.ProjectId, x.MidpEntryId, x.TeamName, x.DueDate,
+            x.IsSignedOff, x.SignedOffById, x.SignedOffAt, x.SignOffNote,
+            x.CreatedAt, x.UpdatedAt);
+}
+
 // T-S7-05 Custom Report Definitions service. Per-project saved
 // queries; pure-equality JSON filter against per-entity field
 // allow-list (CustomReportRunner). Audit-twin per write path
@@ -5660,7 +5939,10 @@ public class CdeService(CimsDbContext db, AuditService audit)
 }
 
 // ── Documents ─────────────────────────────────────────────────────────────────
-public class DocumentsService(CimsDbContext db, AuditService audit)
+public class DocumentsService(
+    CimsDbContext db,
+    AuditService audit,
+    CimsApp.Services.Iso19650.Iso19650FilenameValidator iso19650)
 {
     public async Task<List<Document>> ListAsync(Guid projectId, CdeState? state = null, string? search = null)
     {
@@ -5682,6 +5964,29 @@ public class DocumentsService(CimsDbContext db, AuditService audit)
     {
         var errors = DocumentNaming.Validate(req.ProjectCode, req.Originator, req.DocType, req.Number);
         if (errors.Count > 0) throw new ValidationException(errors);
+
+        // T-S9-03: ISO 19650 filename validation. Construct the 9-field
+        // canonical name with S0 + P01 defaults for Suitability and
+        // Revision (those become real values per-DocumentRevision; at
+        // Document create time the document hasn't been issued so S0 /
+        // P01 are the natural starting state). Run the validator and
+        // fail-fast on checks 1-3 (Structure / FieldValidity /
+        // Numbering). Checks 4 (Suitability) and 6 (Revision) are
+        // skipped at create time because the placeholder defaults
+        // would never reflect a real filename. Checks 7-10 (Uniclass
+        // / IFC / cross-reference) are deferred to v1.1 / B-068.
+        var canonical = DocumentNaming.Build(req.ProjectCode, req.Originator, req.Volume, req.Level, req.DocType, req.Role, req.Number)
+                      + "-S0-P01";
+        var validation = iso19650.Validate(canonical);
+        var blocking = validation.Checks
+            .Where(c => !c.Passed
+                     && (c.Id == CimsApp.Services.Iso19650.Iso19650CheckId.Structure
+                      || c.Id == CimsApp.Services.Iso19650.Iso19650CheckId.FieldValidity
+                      || c.Id == CimsApp.Services.Iso19650.Iso19650CheckId.Numbering))
+            .Select(c => $"ISO 19650 {c.Label}: {c.Message}")
+            .ToList();
+        if (blocking.Count > 0) throw new ValidationException(blocking);
+
         var docNum = DocumentNaming.Build(req.ProjectCode, req.Originator, req.Volume, req.Level, req.DocType, req.Role, req.Number);
         // DocumentNumber uniqueness is per-project (matches the
         // (ProjectId, DocumentNumber) unique index). Without the

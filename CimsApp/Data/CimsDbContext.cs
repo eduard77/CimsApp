@@ -67,6 +67,8 @@ public class CimsDbContext(
     public DbSet<EarlyWarning>        EarlyWarnings        => Set<EarlyWarning>();
     public DbSet<CompensationEvent>   CompensationEvents   => Set<CompensationEvent>();
     public DbSet<CustomReportDefinition> CustomReportDefinitions => Set<CustomReportDefinition>();
+    public DbSet<MidpEntry>           MidpEntries          => Set<MidpEntry>();
+    public DbSet<TidpEntry>           TidpEntries          => Set<TidpEntry>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -635,6 +637,32 @@ public class CimsDbContext(
              .HasForeignKey(w => w.ClosedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<MidpEntry>(e =>
+        {
+            e.HasIndex(x => new { x.ProjectId, x.DueDate });
+            e.HasOne(x => x.Project).WithMany()
+             .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.Owner).WithMany()
+             .HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.Document).WithMany()
+             .HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<TidpEntry>(e =>
+        {
+            // Listings hit (MidpEntryId, TeamName) for "show me each
+            // team's slice of this MIDP entry" and (ProjectId, DueDate)
+            // for project-wide TIDP audits.
+            e.HasIndex(x => new { x.MidpEntryId, x.TeamName });
+            e.HasIndex(x => new { x.ProjectId, x.DueDate });
+            e.HasOne(x => x.Project).WithMany()
+             .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.MidpEntry).WithMany()
+             .HasForeignKey(x => x.MidpEntryId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.SignedOffBy).WithMany()
+             .HasForeignKey(x => x.SignedOffById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         m.Entity<CustomReportDefinition>(e =>
         {
             // (ProjectId, Name) unique-when-active gives users
@@ -726,6 +754,8 @@ public class CimsDbContext(
         m.Entity<EarlyWarning>().HasQueryFilter(w => w.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<CompensationEvent>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<CustomReportDefinition>().HasQueryFilter(d => d.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<MidpEntry>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<TidpEntry>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -763,6 +793,8 @@ public class CimsDbContext(
             else if (e.Entity is EarlyWarning ew) ew.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is CompensationEvent ce) ce.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is CustomReportDefinition crd) crd.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is MidpEntry midp) midp.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is TidpEntry tidp) tidp.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

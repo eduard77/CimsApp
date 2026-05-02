@@ -1798,3 +1798,89 @@ public class CustomReportDefinition
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// One line in a project's Master Information Delivery Plan (T-S9-05,
+/// PAFM-SD F.9 second bullet — "MIDP creation"; ISO 19650-2 §5.4).
+/// One MidpEntry per planned information delivery (drawing, model,
+/// specification, report). v1.0 ships the simple delivery-list shape;
+/// the full ISO 19650-2 information-requirements model (AIR / OIR /
+/// EIR / PIR with bidirectional gate dependencies) is a v1.1 concern
+/// per the S9 kickoff scope-cut. DocTypeFilter is optional and
+/// references an `Iso19650Codes.DocumentTypes` code; DocumentId is set
+/// when the planned delivery has been satisfied by a real Document
+/// row. Tenant-scoped through Project.AppointingPartyId.
+/// </summary>
+public class MidpEntry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    [Required, MaxLength(300)] public string Title { get; set; } = "";
+    public string? Description { get; set; }
+
+    /// <summary>Optional ISO 19650-2 Annex A type-code filter (e.g. "DR",
+    /// "M3"). Service validates against `Iso19650Codes.TypeCodeSet` at
+    /// write time. Null = any type acceptable for the delivery.</summary>
+    [MaxLength(4)] public string? DocTypeFilter { get; set; }
+
+    public DateTime DueDate { get; set; }
+
+    public Guid OwnerId { get; set; }
+    public User Owner { get; set; } = null!;
+
+    /// <summary>Optional FK to the Document that satisfied this planned
+    /// delivery. Null = not yet delivered. Service-layer guard ensures
+    /// the document is in the same project.</summary>
+    public Guid? DocumentId { get; set; }
+    public Document? Document { get; set; }
+
+    public bool IsCompleted { get; set; }
+    public DateTime? CompletedAt { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// One line in a team's Task Information Delivery Plan (T-S9-06,
+/// PAFM-SD F.9 third bullet — "TIDP per team"; ISO 19650-2 §5.4.1).
+/// FK to MidpEntry — TIDP is the team's slice of the master plan,
+/// not a parallel delivery list. v1.0 stores the team as a free-text
+/// `TeamName` string; a structured Team entity (members + lead +
+/// deliverable counts) is v1.1 / B-069. Sign-off captures the per-team
+/// acceptance: which user, when, and the rationale. Tenant-scoped
+/// through Project.AppointingPartyId.
+/// </summary>
+public class TidpEntry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid MidpEntryId { get; set; }
+    public MidpEntry MidpEntry { get; set; } = null!;
+
+    /// <summary>Free-text team identifier in v1.0 (e.g. "Architecture",
+    /// "MEP Coordination"). Structured Team rows → B-069.</summary>
+    [Required, MaxLength(100)] public string TeamName { get; set; } = "";
+
+    /// <summary>Team-level due date — may be earlier than the parent
+    /// MidpEntry's due date when the team needs lead time before
+    /// the master plan's deadline.</summary>
+    public DateTime DueDate { get; set; }
+
+    public bool IsSignedOff { get; set; }
+    public Guid? SignedOffById { get; set; }
+    public User? SignedOffBy { get; set; }
+    public DateTime? SignedOffAt { get; set; }
+    public string? SignOffNote { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+

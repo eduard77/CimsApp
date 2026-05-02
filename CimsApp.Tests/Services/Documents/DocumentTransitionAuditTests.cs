@@ -78,7 +78,7 @@ public class DocumentTransitionAuditTests
         Guid docId;
         using (var db = new CimsDbContext(options, tenant))
         {
-            var svc = new DocumentsService(db, new AuditService(db));
+            var svc = new DocumentsService(db, new AuditService(db), new CimsApp.Services.Iso19650.Iso19650FilenameValidator());
             var doc = await svc.CreateAsync(projectId, NewDocRequest(), userId, null, null);
             docId = doc.Id;
             // WIP → Shared is the first valid transition. ReviewedBy

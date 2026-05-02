@@ -564,6 +564,40 @@ public record CustomReportRunResultDto(
     int RowCount,
     List<string> Columns,
     List<Dictionary<string, object?>> Rows);
+// T-S9-05 MIDP entry DTOs.
+public record MidpEntryDto(
+    Guid Id, Guid ProjectId,
+    string Title, string? Description,
+    string? DocTypeFilter,
+    DateTime DueDate,
+    Guid OwnerId, Guid? DocumentId,
+    bool IsCompleted, DateTime? CompletedAt,
+    DateTime CreatedAt, DateTime UpdatedAt);
+public record CreateMidpEntryRequest(
+    string Title, string? Description,
+    string? DocTypeFilter,
+    DateTime DueDate,
+    Guid OwnerId);
+public record UpdateMidpEntryRequest(
+    string? Title, string? Description,
+    string? DocTypeFilter,
+    DateTime? DueDate,
+    Guid? OwnerId);
+public record CompleteMidpEntryRequest(Guid? DocumentId);
+// T-S9-06 TIDP entry DTOs.
+public record TidpEntryDto(
+    Guid Id, Guid ProjectId, Guid MidpEntryId,
+    string TeamName, DateTime DueDate,
+    bool IsSignedOff, Guid? SignedOffById, DateTime? SignedOffAt, string? SignOffNote,
+    DateTime CreatedAt, DateTime UpdatedAt);
+public record CreateTidpEntryRequest(
+    Guid MidpEntryId,
+    string TeamName,
+    DateTime DueDate);
+public record UpdateTidpEntryRequest(
+    string? TeamName,
+    DateTime? DueDate);
+public record SignOffTidpEntryRequest(string? Note);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

@@ -1648,6 +1648,124 @@ public class ReportingController(ReportingService svc, CimsDbContext db) : CimsC
     }
 }
 
+// ── MIDP — Master Information Delivery Plan (T-S9-05) ────────────────────────
+// PAFM-SD F.9 second bullet — ISO 19650-2 §5.4. Per-project list of
+// planned information deliveries.
+[Route("api/v1/projects/{projectId:guid}/midp/entries")]
+public class MidpController(MidpService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.ListAsync(projectId, ct) });
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> Get(Guid projectId, Guid id, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.GetAsync(projectId, id, ct) });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Create(Guid projectId, CreateMidpEntryRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.InformationManager))
+            throw new ForbiddenException();
+        var dto = await svc.CreateAsync(projectId, req, CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = dto });
+    }
+
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid projectId, Guid id, UpdateMidpEntryRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.InformationManager))
+            throw new ForbiddenException();
+        return Ok(new { success = true, data = await svc.UpdateAsync(projectId, id, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+    }
+
+    [HttpPost("{id:guid}/complete")]
+    public async Task<IActionResult> Complete(Guid projectId, Guid id, CompleteMidpEntryRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.InformationManager))
+            throw new ForbiddenException();
+        return Ok(new { success = true, data = await svc.CompleteAsync(projectId, id, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+    }
+
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid projectId, Guid id, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.DeleteAsync(projectId, id, CurrentUserId, ClientIp, ClientAgent, ct);
+        return NoContent();
+    }
+}
+
+// ── TIDP — Task Information Delivery Plan (T-S9-06) ──────────────────────────
+// PAFM-SD F.9 third bullet — per-team slice of an MIDP entry.
+[Route("api/v1/projects/{projectId:guid}/tidp/entries")]
+public class TidpController(TidpService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(
+        Guid projectId, [FromQuery] Guid? midpEntryId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.ListAsync(projectId, midpEntryId, ct) });
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> Get(Guid projectId, Guid id, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.GetAsync(projectId, id, ct) });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Create(Guid projectId, CreateTidpEntryRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.InformationManager))
+            throw new ForbiddenException();
+        var dto = await svc.CreateAsync(projectId, req, CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = dto });
+    }
+
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid projectId, Guid id, UpdateTidpEntryRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.InformationManager))
+            throw new ForbiddenException();
+        return Ok(new { success = true, data = await svc.UpdateAsync(projectId, id, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+    }
+
+    [HttpPost("{id:guid}/sign-off")]
+    public async Task<IActionResult> SignOff(Guid projectId, Guid id, SignOffTidpEntryRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        return Ok(new { success = true, data = await svc.SignOffAsync(projectId, id, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+    }
+
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid projectId, Guid id, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        await svc.DeleteAsync(projectId, id, CurrentUserId, ClientIp, ClientAgent, ct);
+        return NoContent();
+    }
+}
+
 // ── Custom Report Definitions (T-S7-05) ───────────────────────────────────────
 // PAFM-SD F.8 fourth bullet — basic custom report builder. Saved
 // queries persisted per project. CRUD gated `TaskTeamMember+`;

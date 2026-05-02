@@ -238,6 +238,27 @@ custom-report-definition write paths produce mutations + audit.
 | PUT    | `/api/v1/projects/{projectId}/procurement/tender-packages/{packageId}/tenders/{tenderId}/scores/{criterionId}` | authenticated | `InformationManager+` | T-S6-05. Body `SetEvaluationScoreRequest(score, notes?)`. Score ∈ [0, 100]. Upsert (one score per (tender, criterion); re-scoring updates in place but emits a fresh audit row). **Allowed only when TenderPackage is Issued and Tender is in Submitted / Evaluated state** (not Awarded / Rejected / Withdrawn). Audit: `evaluation_score.set`. |
 | GET    | `/api/v1/projects/{projectId}/procurement/tender-packages/{packageId}/evaluation-matrix` | authenticated | membership | T-S6-05. Returns the `EvaluationMatrixDto` with per-tender weighted overall scores + per-criterion breakdown. **`IsValid = true` iff Σ weights ≈ 1.0** (epsilon 0.0001) — UI should show a "weights don't sum to 1.0" warning when false. OverallScore is null for tenders missing any score. Withdrawn tenders excluded. |
 
+## ISO 19650 / MIDP / TIDP
+
+PAFM-SD F.9. Master + Task Information Delivery Plans. The
+ISO 19650 filename validator is wired into `POST /documents`
+strict-on-new-only per T-S9-03; MIDP / TIDP CRUD live here.
+
+| Method | Route | Global role | Project role | Comment |
+|---|---|---|---|---|
+| GET    | `/api/v1/projects/{projectId}/midp/entries` | authenticated | membership | T-S9-05. Lists active MIDP entries ordered by DueDate. |
+| GET    | `/api/v1/projects/{projectId}/midp/entries/{id}` | authenticated | membership | T-S9-05. Cross-tenant 404 via the query filter. |
+| POST   | `/api/v1/projects/{projectId}/midp/entries` | authenticated | `InformationManager+` | T-S9-05. Body `CreateMidpEntryRequest(title, description?, docTypeFilter?, dueDate, ownerId)`. DocTypeFilter validated against `Iso19650Codes.TypeCodeSet` at write time. Audit: `midp_entry.created`. |
+| PUT    | `/api/v1/projects/{projectId}/midp/entries/{id}` | authenticated | `InformationManager+` | T-S9-05. Body `UpdateMidpEntryRequest` — partial update. No-op rejected. Audit: `midp_entry.updated` with `{ changedFields }`. |
+| POST   | `/api/v1/projects/{projectId}/midp/entries/{id}/complete` | authenticated | `InformationManager+` | T-S9-05. Body `CompleteMidpEntryRequest(documentId?)`. Marks the planned delivery as completed; optional FK to the satisfying Document. Service-layer guard: Document.DocType must match MidpEntry.DocTypeFilter when both are set. Idempotent — re-completing throws 409. Audit: `midp_entry.completed`. |
+| DELETE | `/api/v1/projects/{projectId}/midp/entries/{id}` | authenticated | `ProjectManager+` | T-S9-05. Soft delete via IsActive = false. Audit: `midp_entry.deleted`. |
+| GET    | `/api/v1/projects/{projectId}/tidp/entries?midpEntryId=` | authenticated | membership | T-S9-06. Lists TIDP entries; optional `midpEntryId` filter to scope to one MIDP entry. Ordered by DueDate then TeamName. |
+| GET    | `/api/v1/projects/{projectId}/tidp/entries/{id}` | authenticated | membership | T-S9-06. Cross-tenant 404 via the query filter. |
+| POST   | `/api/v1/projects/{projectId}/tidp/entries` | authenticated | `InformationManager+` | T-S9-06. Body `CreateTidpEntryRequest(midpEntryId, teamName, dueDate)`. MidpEntry must exist in the same project. v1.0 stores TeamName as free text (B-069 for structured Team entity). Audit: `tidp_entry.created`. |
+| PUT    | `/api/v1/projects/{projectId}/tidp/entries/{id}` | authenticated | `InformationManager+` | T-S9-06. Body `UpdateTidpEntryRequest` — partial update of TeamName / DueDate. **Rejected for already-signed-off entries** (sign-off is the freeze point in v1.0). Audit: `tidp_entry.updated` with `{ changedFields }`. |
+| POST   | `/api/v1/projects/{projectId}/tidp/entries/{id}/sign-off` | authenticated | `TaskTeamMember+` | T-S9-06. Body `SignOffTidpEntryRequest(note?)`. One-way — un-sign-off is not a v1.0 transition (v1.1 / B-NNN if pilot need surfaces). Records signing user + timestamp + optional note. Audit: `tidp_entry.signed_off`. |
+| DELETE | `/api/v1/projects/{projectId}/tidp/entries/{id}` | authenticated | `ProjectManager+` | T-S9-06. Soft delete via IsActive = false. Audit: `tidp_entry.deleted`. |
+
 ## Documents
 
 | Method | Route | Global role | Project role | Comment |

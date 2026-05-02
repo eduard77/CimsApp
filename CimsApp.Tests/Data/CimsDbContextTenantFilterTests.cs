@@ -67,6 +67,9 @@ public class CimsDbContextTenantFilterTests
         typeof(CompensationEvent),
         // S7 reporting-domain addition (T-S7-05).
         typeof(CustomReportDefinition),
+        // S9 ISO 19650 / MIDP additions (T-S9-05 / T-S9-06).
+        typeof(MidpEntry),
+        typeof(TidpEntry),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =

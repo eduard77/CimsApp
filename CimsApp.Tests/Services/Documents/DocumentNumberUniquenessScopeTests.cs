@@ -97,7 +97,7 @@ public class DocumentNumberUniquenessScopeTests
         // Tenant A creates first.
         using (var dbA = new CimsDbContext(options, tenantA))
         {
-            var svc = new DocumentsService(dbA, new AuditService(dbA));
+            var svc = new DocumentsService(dbA, new AuditService(dbA), new CimsApp.Services.Iso19650.Iso19650FilenameValidator());
             await svc.CreateAsync(projectInA, NewRequest(), userA, null, null);
         }
 
@@ -105,7 +105,7 @@ public class DocumentNumberUniquenessScopeTests
         // their own project — must succeed.
         using (var dbB = new CimsDbContext(options, tenantB))
         {
-            var svc = new DocumentsService(dbB, new AuditService(dbB));
+            var svc = new DocumentsService(dbB, new AuditService(dbB), new CimsApp.Services.Iso19650.Iso19650FilenameValidator());
             await svc.CreateAsync(projectInB, NewRequest(), userB, null, null);
         }
 
@@ -134,7 +134,7 @@ public class DocumentNumberUniquenessScopeTests
         var tenantA = new StubTenantContext { OrganisationId = orgA, UserId = userA };
 
         using var db = new CimsDbContext(options, tenantA);
-        var svc = new DocumentsService(db, new AuditService(db));
+        var svc = new DocumentsService(db, new AuditService(db), new CimsApp.Services.Iso19650.Iso19650FilenameValidator());
         await svc.CreateAsync(projectInA, NewRequest(), userA, null, null);
         await Assert.ThrowsAsync<ConflictException>(() =>
             svc.CreateAsync(projectInA, NewRequest(), userA, null, null));
