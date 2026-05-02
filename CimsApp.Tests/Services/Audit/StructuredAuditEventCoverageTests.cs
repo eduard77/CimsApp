@@ -135,7 +135,7 @@ public class StructuredAuditEventCoverageTests
         Guid docId;
         using (var db = new CimsDbContext(options, tenant))
         {
-            var svc = new DocumentsService(db, new AuditService(db));
+            var svc = new DocumentsService(db, new AuditService(db), new CimsApp.Services.Iso19650.Iso19650FilenameValidator());
             var doc = await svc.CreateAsync(projectId,
                 new CreateDocumentRequest(
                     ProjectCode: "PR1", Originator: "ABC",

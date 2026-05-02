@@ -165,6 +165,14 @@ public static class Iso19650Codes
     // with an NBS-backed feed; v1.1 / B-065 adds per-tenant overrides.
     // ─────────────────────────────────────────────────────────────────────────
 
+    /// <summary>Volume codes as a HashSet for O(1) Contains-check.</summary>
+    public static readonly HashSet<string> VolumeCodeSet =
+        Volumes.Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>Level codes as a HashSet for O(1) Contains-check.</summary>
+    public static readonly HashSet<string> LevelCodeSet =
+        Levels.Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
+
     /// <summary>Type codes as a HashSet for O(1) Contains-check.</summary>
     public static readonly HashSet<string> TypeCodeSet =
         DocumentTypes.Select(c => c.Code).ToHashSet(StringComparer.Ordinal);

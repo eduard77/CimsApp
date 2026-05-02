@@ -65,8 +65,13 @@ public sealed class Iso19650FilenameValidator
         // Volume and Level are 2-digit numerics.
         var typeOk  = CimsApp.Core.Iso19650Codes.TypeCodeSet.Contains(type);
         var roleOk  = CimsApp.Core.Iso19650Codes.RoleCodeSet.Contains(role);
-        var volOk   = Regex.IsMatch(volume, "^\\d{2}$");
-        var levelOk = Regex.IsMatch(level,  "^\\d{2}$");
+        // Volume / Level use the ISO 19650-2 Annex A whitelists; the
+        // pre-S9 "must be 2 digits" rule was wrong against the
+        // standard which allows ZZ (not applicable), XX (all zones),
+        // single-letter blocks (A-E for Volume), B1/B2/GF/RF/M for
+        // Level, etc.
+        var volOk   = CimsApp.Core.Iso19650Codes.VolumeCodeSet.Contains(volume);
+        var levelOk = CimsApp.Core.Iso19650Codes.LevelCodeSet.Contains(level);
         var fieldOk = typeOk && roleOk && volOk && levelOk;
         checks.Add(new Iso19650CheckOutcome(
             Iso19650CheckId.FieldValidity,
@@ -251,8 +256,8 @@ public sealed class Iso19650FilenameValidator
         string type, string role)
     {
         var problems = new List<string>();
-        if (!volOk)   problems.Add("Volume must be 2 digits");
-        if (!levelOk) problems.Add("Level must be 2 digits");
+        if (!volOk)   problems.Add("Volume not in ISO 19650-2 Annex A whitelist");
+        if (!levelOk) problems.Add("Level not in ISO 19650-2 Annex A whitelist");
         if (!typeOk)  problems.Add($"Type '{type}' not recognised");
         if (!roleOk)  problems.Add($"Role '{role}' not recognised");
         return string.Join("; ", problems) + ".";

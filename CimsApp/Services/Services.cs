@@ -5660,7 +5660,10 @@ public class CdeService(CimsDbContext db, AuditService audit)
 }
 
 // ── Documents ─────────────────────────────────────────────────────────────────
-public class DocumentsService(CimsDbContext db, AuditService audit)
+public class DocumentsService(
+    CimsDbContext db,
+    AuditService audit,
+    CimsApp.Services.Iso19650.Iso19650FilenameValidator iso19650)
 {
     public async Task<List<Document>> ListAsync(Guid projectId, CdeState? state = null, string? search = null)
     {
@@ -5682,6 +5685,29 @@ public class DocumentsService(CimsDbContext db, AuditService audit)
     {
         var errors = DocumentNaming.Validate(req.ProjectCode, req.Originator, req.DocType, req.Number);
         if (errors.Count > 0) throw new ValidationException(errors);
+
+        // T-S9-03: ISO 19650 filename validation. Construct the 9-field
+        // canonical name with S0 + P01 defaults for Suitability and
+        // Revision (those become real values per-DocumentRevision; at
+        // Document create time the document hasn't been issued so S0 /
+        // P01 are the natural starting state). Run the validator and
+        // fail-fast on checks 1-3 (Structure / FieldValidity /
+        // Numbering). Checks 4 (Suitability) and 6 (Revision) are
+        // skipped at create time because the placeholder defaults
+        // would never reflect a real filename. Checks 7-10 (Uniclass
+        // / IFC / cross-reference) are deferred to v1.1 / B-068.
+        var canonical = DocumentNaming.Build(req.ProjectCode, req.Originator, req.Volume, req.Level, req.DocType, req.Role, req.Number)
+                      + "-S0-P01";
+        var validation = iso19650.Validate(canonical);
+        var blocking = validation.Checks
+            .Where(c => !c.Passed
+                     && (c.Id == CimsApp.Services.Iso19650.Iso19650CheckId.Structure
+                      || c.Id == CimsApp.Services.Iso19650.Iso19650CheckId.FieldValidity
+                      || c.Id == CimsApp.Services.Iso19650.Iso19650CheckId.Numbering))
+            .Select(c => $"ISO 19650 {c.Label}: {c.Message}")
+            .ToList();
+        if (blocking.Count > 0) throw new ValidationException(blocking);
+
         var docNum = DocumentNaming.Build(req.ProjectCode, req.Originator, req.Volume, req.Level, req.DocType, req.Role, req.Number);
         // DocumentNumber uniqueness is per-project (matches the
         // (ProjectId, DocumentNumber) unique index). Without the
