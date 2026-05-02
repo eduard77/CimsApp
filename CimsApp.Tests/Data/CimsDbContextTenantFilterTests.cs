@@ -73,6 +73,11 @@ public class CimsDbContextTenantFilterTests
         // S10 BSA 2022 / Golden Thread additions (T-S10-03 / T-S10-04).
         typeof(GatewayPackage),
         typeof(MandatoryOccurrenceReport),
+        // S12 Kaizen / Lessons Learned additions (T-S12-02..04).
+        // Mixed: 2 project-scoped, 1 org-scoped (LessonLearned).
+        typeof(ImprovementRegisterEntry),
+        typeof(LessonLearned),
+        typeof(OpportunityToImprove),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =
