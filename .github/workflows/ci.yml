@@ -18,15 +18,56 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
+          # T-S8-06: cache the NuGet restore output so the second
+          # PR push onwards skips the (~30s) package download.
+          cache: true
+          cache-dependency-path: |
+            **/packages.lock.json
+            **/*.csproj
 
       - name: Restore
         run: dotnet restore CimsApp.sln
 
-      - name: Build
-        run: dotnet build CimsApp.sln --configuration Release --no-restore
+      - name: Build (warnings as errors)
+        # T-S8-06: -p:TreatWarningsAsErrors=true elevates any new
+        # compiler warnings to build failures so the green-CI bar
+        # stays green. Today's build is 0 warnings (verified at
+        # S7 close); this keeps it that way.
+        run: dotnet build CimsApp.sln --configuration Release --no-restore -p:TreatWarningsAsErrors=true
 
       - name: Test
-        run: dotnet test CimsApp.sln --configuration Release --no-build --verbosity normal
+        id: test
+        run: |
+          # T-S8-06: capture test results into a TRX log so the step
+          # summary can surface counts + duration.
+          dotnet test CimsApp.sln \
+            --configuration Release --no-build \
+            --logger "trx;LogFileName=test-results.trx" \
+            --results-directory artifacts/test-results \
+            --verbosity normal
+
+      - name: Step summary (test counts + duration)
+        if: always()
+        run: |
+          TRX=$(find artifacts/test-results -name '*.trx' | head -1)
+          if [ -z "$TRX" ]; then
+            echo "No TRX found." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          PASSED=$(grep -oP 'passed="\K[0-9]+' "$TRX" | head -1 || echo "?")
+          FAILED=$(grep -oP 'failed="\K[0-9]+' "$TRX" | head -1 || echo "?")
+          TOTAL=$(grep -oP 'total="\K[0-9]+' "$TRX" | head -1 || echo "?")
+          DURATION=$(grep -oP 'duration="\K[^"]+' "$TRX" | head -1 || echo "?")
+          {
+            echo "### Test results"
+            echo ""
+            echo "| Metric | Value |"
+            echo "| --- | --- |"
+            echo "| Total | $TOTAL |"
+            echo "| Passed | $PASSED |"
+            echo "| Failed | $FAILED |"
+            echo "| Duration | $DURATION |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   smoke-sqlserver:
     name: SQL Server smoke (B-027)
