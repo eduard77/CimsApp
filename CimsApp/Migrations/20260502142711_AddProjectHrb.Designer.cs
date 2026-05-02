@@ -4,6 +4,7 @@ using CimsApp.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CimsApp.Migrations
 {
     [DbContext(typeof(CimsDbContext))]
-    partial class CimsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260502142711_AddProjectHrb")]
+    partial class AddProjectHrb
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -905,12 +908,6 @@ namespace CimsApp.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<DateTime?>("AddedToGoldenThreadAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("AddedToGoldenThreadById")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<Guid?>("ContainerId")
                         .HasColumnType("uniqueidentifier");
 
@@ -937,9 +934,6 @@ namespace CimsApp.Migrations
                         .HasColumnType("nvarchar(100)");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsInGoldenThread")
                         .HasColumnType("bit");
 
                     b.Property<string>("Level")
@@ -1263,81 +1257,6 @@ namespace CimsApp.Migrations
                     b.ToTable("EvaluationScores");
                 });
 
-            modelBuilder.Entity("CimsApp.Models.GatewayPackage", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DecidedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("DecidedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int?>("Decision")
-                        .HasColumnType("int");
-
-                    b.Property<string>("DecisionNote")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Number")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("State")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("SubmittedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("SubmittedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
-
-                    b.Property<int>("Type")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CreatedById");
-
-                    b.HasIndex("DecidedById");
-
-                    b.HasIndex("SubmittedById");
-
-                    b.HasIndex("ProjectId", "State");
-
-                    b.HasIndex("ProjectId", "Type", "Number")
-                        .IsUnique()
-                        .HasFilter("[IsActive] = 1");
-
-                    b.ToTable("GatewayPackages");
-                });
-
             modelBuilder.Entity("CimsApp.Models.Invitation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1427,66 +1346,6 @@ namespace CimsApp.Migrations
                     b.HasIndex("ProjectId", "WeekStarting", "IsActive");
 
                     b.ToTable("LookaheadEntries");
-                });
-
-            modelBuilder.Entity("CimsApp.Models.MandatoryOccurrenceReport", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("BsrReference")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Number")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<DateTime>("OccurredAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("ReportedToBsr")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime?>("ReportedToBsrAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("ReporterId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("Severity")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ReporterId");
-
-                    b.HasIndex("ProjectId", "Number")
-                        .IsUnique();
-
-                    b.HasIndex("ProjectId", "OccurredAt");
-
-                    b.ToTable("MandatoryOccurrenceReports");
                 });
 
             modelBuilder.Entity("CimsApp.Models.MidpEntry", b =>
@@ -3305,39 +3164,6 @@ namespace CimsApp.Migrations
                     b.Navigation("Tender");
                 });
 
-            modelBuilder.Entity("CimsApp.Models.GatewayPackage", b =>
-                {
-                    b.HasOne("CimsApp.Models.User", "CreatedBy")
-                        .WithMany()
-                        .HasForeignKey("CreatedById")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.User", "DecidedBy")
-                        .WithMany()
-                        .HasForeignKey("DecidedById")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("CimsApp.Models.Project", "Project")
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.User", "SubmittedBy")
-                        .WithMany()
-                        .HasForeignKey("SubmittedById")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.Navigation("CreatedBy");
-
-                    b.Navigation("DecidedBy");
-
-                    b.Navigation("Project");
-
-                    b.Navigation("SubmittedBy");
-                });
-
             modelBuilder.Entity("CimsApp.Models.Invitation", b =>
                 {
                     b.HasOne("CimsApp.Models.User", "ConsumedByUser")
@@ -3388,25 +3214,6 @@ namespace CimsApp.Migrations
                     b.Navigation("CreatedBy");
 
                     b.Navigation("Project");
-                });
-
-            modelBuilder.Entity("CimsApp.Models.MandatoryOccurrenceReport", b =>
-                {
-                    b.HasOne("CimsApp.Models.Project", "Project")
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.User", "Reporter")
-                        .WithMany()
-                        .HasForeignKey("ReporterId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.Navigation("Project");
-
-                    b.Navigation("Reporter");
                 });
 
             modelBuilder.Entity("CimsApp.Models.MidpEntry", b =>

@@ -536,6 +536,43 @@ public class ProjectsService(CimsDbContext db, AuditService audit, CimsApp.Servi
             });
         await db.SaveChangesAsync();
     }
+
+    /// <summary>
+    /// T-S10-02. Sets the BSA 2022 HRB metadata on a project. Service
+    /// invariant: HrbCategory must be NotApplicable when IsHrb=false
+    /// and one of A/B/C when IsHrb=true. v1.0 ships manual PM toggle;
+    /// per-tenant inference rules → v1.1 / B-072.
+    /// </summary>
+    public async Task<Project> SetHrbMetadataAsync(
+        Guid projectId, bool isHrb, BsaHrbCategory category,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (isHrb && category == BsaHrbCategory.NotApplicable)
+            throw new ValidationException(new List<string>
+            { "HrbCategory must be A / B / C when IsHrb is true" });
+        if (!isHrb && category != BsaHrbCategory.NotApplicable)
+            throw new ValidationException(new List<string>
+            { "HrbCategory must be NotApplicable when IsHrb is false" });
+
+        var p = await db.Projects.FirstOrDefaultAsync(x => x.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var previous = new { p.IsHrb, HrbCategory = p.HrbCategory.ToString() };
+        p.IsHrb = isHrb;
+        p.HrbCategory = category;
+        await audit.WriteAsync(actorId, "project.hrb_set",
+            "Project", projectId.ToString(),
+            projectId: projectId,
+            detail: new
+            {
+                previous,
+                current = new { p.IsHrb, HrbCategory = p.HrbCategory.ToString() },
+            },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return p;
+    }
 }
 
 // ── Cost & Commercial ─────────────────────────────────────────────────────────
@@ -5722,6 +5759,280 @@ public class TidpService(CimsDbContext db, AuditService audit)
             x.CreatedAt, x.UpdatedAt);
 }
 
+// T-S10-03 GatewayPackage service. PAFM-SD F.10 second bullet
+// (BSA 2022 Gateway 1/2/3 packages). 3-state state-machine via
+// Core/GatewayPackageWorkflow. Project-scoped sequential
+// GW1-NNNN / GW2-NNNN / GW3-NNNN per Type.
+// // BSA 2022 ref: Part 3 (HRB construction).
+public class GatewayPackageService(CimsDbContext db, AuditService audit)
+{
+    public async Task<List<GatewayPackageDto>> ListAsync(Guid projectId, CancellationToken ct = default)
+    {
+        var rows = await db.GatewayPackages
+            .Where(x => x.ProjectId == projectId && x.IsActive)
+            .OrderBy(x => x.Type).ThenBy(x => x.Number)
+            .ToListAsync(ct);
+        return rows.Select(ToDto).ToList();
+    }
+
+    public async Task<GatewayPackageDto> GetAsync(Guid projectId, Guid id, CancellationToken ct = default)
+    {
+        var x = await db.GatewayPackages
+            .FirstOrDefaultAsync(g => g.Id == id && g.ProjectId == projectId && g.IsActive, ct)
+            ?? throw new NotFoundException("GatewayPackage");
+        return ToDto(x);
+    }
+
+    public async Task<GatewayPackageDto> CreateAsync(
+        Guid projectId, CreateGatewayPackageRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(new List<string> { "Title is required" });
+
+        // Project-scoped sequential per Type. Latest existing of
+        // same Type drives the next number.
+        var prefix = req.Type switch
+        {
+            GatewayType.Gateway1 => "GW1",
+            GatewayType.Gateway2 => "GW2",
+            GatewayType.Gateway3 => "GW3",
+            _ => throw new ValidationException(new List<string> { $"Unknown GatewayType {req.Type}" }),
+        };
+        var existingCount = await db.GatewayPackages
+            .Where(g => g.ProjectId == projectId && g.Type == req.Type)
+            .CountAsync(ct);
+        var number = $"{prefix}-{(existingCount + 1):D4}";
+
+        var pkg = new GatewayPackage
+        {
+            ProjectId = projectId,
+            Number = number,
+            Type = req.Type,
+            Title = req.Title.Trim(),
+            Description = req.Description,
+            CreatedById = actorId,
+            State = GatewayPackageState.Drafting,
+        };
+        db.GatewayPackages.Add(pkg);
+        await audit.WriteAsync(actorId, "gateway_package.created",
+            "GatewayPackage", pkg.Id.ToString(),
+            projectId: projectId,
+            detail: new { pkg.Number, pkg.Type, pkg.Title },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(pkg);
+    }
+
+    public async Task<GatewayPackageDto> SubmitAsync(
+        Guid projectId, Guid id,
+        Guid actorId, UserRole role, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var pkg = await db.GatewayPackages
+            .FirstOrDefaultAsync(g => g.Id == id && g.ProjectId == projectId && g.IsActive, ct)
+            ?? throw new NotFoundException("GatewayPackage");
+        if (!GatewayPackageWorkflow.IsValidTransition(pkg.State, GatewayPackageState.Submitted))
+            throw new ConflictException($"Cannot submit a package in state {pkg.State}.");
+        if (!GatewayPackageWorkflow.CanTransition(pkg.State, GatewayPackageState.Submitted, role))
+            throw new ForbiddenException($"Role {role} cannot submit Gateway packages.");
+
+        pkg.State = GatewayPackageState.Submitted;
+        pkg.SubmittedById = actorId;
+        pkg.SubmittedAt = DateTime.UtcNow;
+        await audit.WriteAsync(actorId, "gateway_package.submitted",
+            "GatewayPackage", pkg.Id.ToString(),
+            projectId: projectId,
+            detail: new { pkg.Number, pkg.Type },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(pkg);
+    }
+
+    public async Task<GatewayPackageDto> DecideAsync(
+        Guid projectId, Guid id, DecideGatewayPackageRequest req,
+        Guid actorId, UserRole role, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.DecisionNote))
+            throw new ValidationException(new List<string> { "DecisionNote is required" });
+
+        var pkg = await db.GatewayPackages
+            .FirstOrDefaultAsync(g => g.Id == id && g.ProjectId == projectId && g.IsActive, ct)
+            ?? throw new NotFoundException("GatewayPackage");
+        if (!GatewayPackageWorkflow.IsValidTransition(pkg.State, GatewayPackageState.Decided))
+            throw new ConflictException($"Cannot decide a package in state {pkg.State}.");
+        if (!GatewayPackageWorkflow.CanTransition(pkg.State, GatewayPackageState.Decided, role))
+            throw new ForbiddenException($"Role {role} cannot decide Gateway packages.");
+
+        pkg.State = GatewayPackageState.Decided;
+        pkg.Decision = req.Decision;
+        pkg.DecisionNote = req.DecisionNote;
+        pkg.DecidedById = actorId;
+        pkg.DecidedAt = DateTime.UtcNow;
+        await audit.WriteAsync(actorId, "gateway_package.decided",
+            "GatewayPackage", pkg.Id.ToString(),
+            projectId: projectId,
+            detail: new { pkg.Number, pkg.Type, Decision = pkg.Decision.ToString() },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(pkg);
+    }
+
+    private static GatewayPackageDto ToDto(GatewayPackage x) =>
+        new(x.Id, x.ProjectId, x.Number, x.Type, x.Title, x.Description, x.State,
+            x.SubmittedAt, x.SubmittedById, x.DecidedAt, x.DecidedById,
+            x.Decision, x.DecisionNote, x.CreatedAt, x.UpdatedAt);
+}
+
+// T-S10-04 Mandatory Occurrence Report service. PAFM-SD F.10
+// third bullet. v1.0 captures the report data + manual-push flag;
+// programmatic BSR API push → v1.1 / B-070.
+// // BSA 2022 ref: s.87 (mandatory occurrence reporting).
+public class MorService(CimsDbContext db, AuditService audit)
+{
+    public async Task<List<MandatoryOccurrenceReportDto>> ListAsync(Guid projectId, CancellationToken ct = default)
+    {
+        var rows = await db.MandatoryOccurrenceReports
+            .Where(x => x.ProjectId == projectId)
+            .OrderByDescending(x => x.OccurredAt)
+            .ToListAsync(ct);
+        return rows.Select(ToDto).ToList();
+    }
+
+    public async Task<MandatoryOccurrenceReportDto> GetAsync(Guid projectId, Guid id, CancellationToken ct = default)
+    {
+        var x = await db.MandatoryOccurrenceReports
+            .FirstOrDefaultAsync(m => m.Id == id && m.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("MandatoryOccurrenceReport");
+        return ToDto(x);
+    }
+
+    public async Task<MandatoryOccurrenceReportDto> CreateAsync(
+        Guid projectId, CreateMorRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(new List<string> { "Title is required" });
+        if (string.IsNullOrWhiteSpace(req.Description))
+            throw new ValidationException(new List<string> { "Description is required" });
+
+        var existingCount = await db.MandatoryOccurrenceReports
+            .Where(m => m.ProjectId == projectId).CountAsync(ct);
+        var number = $"MOR-{(existingCount + 1):D4}";
+
+        var mor = new MandatoryOccurrenceReport
+        {
+            ProjectId = projectId,
+            Number = number,
+            Title = req.Title.Trim(),
+            Description = req.Description,
+            Severity = req.Severity,
+            OccurredAt = req.OccurredAt,
+            ReporterId = actorId,
+        };
+        db.MandatoryOccurrenceReports.Add(mor);
+        await audit.WriteAsync(actorId, "mor.created",
+            "MandatoryOccurrenceReport", mor.Id.ToString(),
+            projectId: projectId,
+            detail: new { mor.Number, Severity = mor.Severity.ToString(), mor.OccurredAt },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(mor);
+    }
+
+    public async Task<MandatoryOccurrenceReportDto> MarkReportedToBsrAsync(
+        Guid projectId, Guid id, MarkMorReportedToBsrRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var mor = await db.MandatoryOccurrenceReports
+            .FirstOrDefaultAsync(m => m.Id == id && m.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("MandatoryOccurrenceReport");
+        if (mor.ReportedToBsr)
+            throw new ConflictException("MOR is already marked as reported to BSR.");
+
+        mor.ReportedToBsr = true;
+        mor.ReportedToBsrAt = DateTime.UtcNow;
+        mor.BsrReference = req.BsrReference;
+        await audit.WriteAsync(actorId, "mor.reported_to_bsr",
+            "MandatoryOccurrenceReport", mor.Id.ToString(),
+            projectId: projectId,
+            detail: new { mor.Number, mor.BsrReference },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(mor);
+    }
+
+    private static MandatoryOccurrenceReportDto ToDto(MandatoryOccurrenceReport x) =>
+        new(x.Id, x.ProjectId, x.Number, x.Title, x.Description,
+            x.Severity, x.OccurredAt, x.ReporterId,
+            x.ReportedToBsr, x.ReportedToBsrAt, x.BsrReference,
+            x.CreatedAt, x.UpdatedAt);
+}
+
+// T-S10-05 Safety Case Summary aggregator. PAFM-SD F.10 fourth
+// bullet. v1.0 best-effort inference of BSA 2022 Schedule 5
+// structure; canonical reconciliation + PDF rendering → v1.1 /
+// B-071. Read-only — no audit, no entity.
+// // BSA 2022 ref: Schedule 5 (Safety Case).
+public class SafetyCaseService(CimsDbContext db)
+{
+    public async Task<SafetyCaseSummaryDto> GenerateAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var p = await db.Projects.FirstOrDefaultAsync(x => x.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var openRisks = await db.Risks.CountAsync(
+            r => r.ProjectId == projectId && r.Status != RiskStatus.Closed, ct);
+        var openRfis = await db.Rfis.CountAsync(
+            r => r.ProjectId == projectId
+              && r.Status != RfiStatus.Closed && r.Status != RfiStatus.Cancelled, ct);
+        var openActions = await db.ActionItems.CountAsync(
+            a => a.ProjectId == projectId
+              && (a.Status == ActionStatus.Open || a.Status == ActionStatus.InProgress), ct);
+        var openMors = await db.MandatoryOccurrenceReports.CountAsync(
+            m => m.ProjectId == projectId && !m.ReportedToBsr, ct);
+        var openGwPkgs = await db.GatewayPackages.CountAsync(
+            g => g.ProjectId == projectId && g.IsActive
+              && g.State != GatewayPackageState.Decided, ct);
+        var gtDocs = await db.Documents.CountAsync(
+            d => d.ProjectId == projectId && d.IsActive && d.IsInGoldenThread, ct);
+
+        var gw1 = await db.GatewayPackages
+            .Where(g => g.ProjectId == projectId && g.Type == GatewayType.Gateway1 && g.IsActive)
+            .OrderByDescending(g => g.CreatedAt)
+            .Select(g => (GatewayPackageState?)g.State).FirstOrDefaultAsync(ct);
+        var gw2 = await db.GatewayPackages
+            .Where(g => g.ProjectId == projectId && g.Type == GatewayType.Gateway2 && g.IsActive)
+            .OrderByDescending(g => g.CreatedAt)
+            .Select(g => (GatewayPackageState?)g.State).FirstOrDefaultAsync(ct);
+        var gw3 = await db.GatewayPackages
+            .Where(g => g.ProjectId == projectId && g.Type == GatewayType.Gateway3 && g.IsActive)
+            .OrderByDescending(g => g.CreatedAt)
+            .Select(g => (GatewayPackageState?)g.State).FirstOrDefaultAsync(ct);
+
+        return new SafetyCaseSummaryDto(
+            ProjectId:                  p.Id,
+            ProjectName:                p.Name,
+            ProjectCode:                p.Code,
+            IsHrb:                      p.IsHrb,
+            HrbCategory:                p.HrbCategory,
+            GeneratedAtUtc:             DateTime.UtcNow,
+            OpenRisksCount:             openRisks,
+            OpenIssuesCount:            openRfis + openActions,
+            OpenMorsCount:              openMors,
+            OpenGatewayPackagesCount:   openGwPkgs,
+            GoldenThreadDocumentsCount: gtDocs,
+            Gateway1State:              gw1,
+            Gateway2State:              gw2,
+            Gateway3State:              gw3);
+    }
+}
+
 // T-S7-05 Custom Report Definitions service. Per-project saved
 // queries; pure-equality JSON filter against per-entity field
 // allow-list (CustomReportRunner). Audit-twin per write path
@@ -6006,6 +6317,11 @@ public class DocumentsService(
     public async Task<Document> TransitionAsync(Guid docId, Guid projectId, CdeState toState, SuitabilityCode? suitability, Guid userId, UserRole userRole, string? ip, string? ua)
     {
         var doc = await db.Documents.FirstOrDefaultAsync(d => d.Id == docId && d.ProjectId == projectId && d.IsActive) ?? throw new NotFoundException("Document");
+        // T-S10-06. Soft-immutability guard: documents marked as
+        // part of the Golden Thread cannot be state-transitioned.
+        // Mark-into-GT is one-way for v1.0 (B-075 for un-mark).
+        if (doc.IsInGoldenThread)
+            throw new ConflictException("Cannot transition a Golden-Thread document.");
         if (!CdeStateMachine.IsValidTransition(doc.CurrentState, toState)) throw new CdeTransitionException(doc.CurrentState, toState);
         if (!CdeStateMachine.CanTransition(doc.CurrentState, toState, userRole)) throw new ForbiddenException($"Role {userRole} cannot perform this transition");
         // Wrap the revision-publish ExecuteUpdateAsync (separate SQL
@@ -6028,6 +6344,52 @@ public class DocumentsService(
         await db.SaveChangesAsync();
         await tx.CommitAsync();
         return doc;
+    }
+
+    /// <summary>
+    /// T-S10-06. Adds a Document to the project's Golden Thread of
+    /// information per BSA 2022 Schedule 5. Mark-into-GT is one-way
+    /// for v1.0 (un-mark workflow → v1.1 / B-075). Subsequent edits
+    /// / state-transitions / soft-deletes on the document are
+    /// blocked at the service layer.
+    /// </summary>
+    public async Task<Document> AddToGoldenThreadAsync(
+        Guid docId, Guid projectId,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var doc = await db.Documents
+            .FirstOrDefaultAsync(d => d.Id == docId && d.ProjectId == projectId && d.IsActive, ct)
+            ?? throw new NotFoundException("Document");
+        if (doc.IsInGoldenThread)
+            throw new ConflictException("Document is already in the Golden Thread.");
+
+        doc.IsInGoldenThread = true;
+        doc.AddedToGoldenThreadAt = DateTime.UtcNow;
+        doc.AddedToGoldenThreadById = actorId;
+        await audit.WriteAsync(actorId, "document.added_to_golden_thread",
+            "Document", doc.Id.ToString(),
+            projectId: projectId, documentId: doc.Id,
+            detail: new { doc.DocumentNumber, doc.Title },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return doc;
+    }
+
+    /// <summary>T-S10-06. Lists all GT-marked documents on a
+    /// project. Used by the Safety Case Summary aggregator and by
+    /// future compliance-export endpoints (B-074).</summary>
+    public async Task<List<GoldenThreadDocumentDto>> ListGoldenThreadAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var rows = await db.Documents
+            .Where(d => d.ProjectId == projectId && d.IsActive && d.IsInGoldenThread)
+            .OrderByDescending(d => d.AddedToGoldenThreadAt)
+            .Select(d => new GoldenThreadDocumentDto(
+                d.Id, d.DocumentNumber, d.Title, d.CurrentState,
+                d.AddedToGoldenThreadAt!.Value, d.AddedToGoldenThreadById!.Value))
+            .ToListAsync(ct);
+        return rows;
     }
 }
 

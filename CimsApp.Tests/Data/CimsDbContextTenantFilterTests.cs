@@ -70,6 +70,9 @@ public class CimsDbContextTenantFilterTests
         // S9 ISO 19650 / MIDP additions (T-S9-05 / T-S9-06).
         typeof(MidpEntry),
         typeof(TidpEntry),
+        // S10 BSA 2022 / Golden Thread additions (T-S10-03 / T-S10-04).
+        typeof(GatewayPackage),
+        typeof(MandatoryOccurrenceReport),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =

@@ -598,6 +598,60 @@ public record UpdateTidpEntryRequest(
     string? TeamName,
     DateTime? DueDate);
 public record SignOffTidpEntryRequest(string? Note);
+// T-S10-02 BSA 2022 HRB project metadata.
+// // BSA 2022 ref: Part 4 (Higher-Risk Buildings); Schedule 1
+// (HRB categorisation).
+public record SetProjectHrbRequest(bool IsHrb, BsaHrbCategory HrbCategory);
+// T-S10-03 GatewayPackage DTOs.
+// // BSA 2022 ref: Part 3 (HRB construction).
+public record GatewayPackageDto(
+    Guid Id, Guid ProjectId,
+    string Number, GatewayType Type,
+    string Title, string? Description,
+    GatewayPackageState State,
+    DateTime? SubmittedAt, Guid? SubmittedById,
+    DateTime? DecidedAt, Guid? DecidedById,
+    GatewayDecision? Decision, string? DecisionNote,
+    DateTime CreatedAt, DateTime UpdatedAt);
+public record CreateGatewayPackageRequest(
+    GatewayType Type,
+    string Title,
+    string? Description);
+public record DecideGatewayPackageRequest(
+    GatewayDecision Decision,
+    string DecisionNote);
+// T-S10-04 MOR DTOs.
+// // BSA 2022 ref: s.87 (mandatory occurrence reporting).
+public record MandatoryOccurrenceReportDto(
+    Guid Id, Guid ProjectId,
+    string Number, string Title, string Description,
+    MorSeverity Severity, DateTime OccurredAt,
+    Guid ReporterId,
+    bool ReportedToBsr, DateTime? ReportedToBsrAt, string? BsrReference,
+    DateTime CreatedAt, DateTime UpdatedAt);
+public record CreateMorRequest(
+    string Title, string Description,
+    MorSeverity Severity, DateTime OccurredAt);
+public record MarkMorReportedToBsrRequest(string? BsrReference);
+// T-S10-05 Safety Case Summary DTO. v1.0 best-effort
+// inference; canonical Schedule 5 reconciliation → v1.1 / B-071.
+// // BSA 2022 ref: Schedule 5 (Safety Case).
+public record SafetyCaseSummaryDto(
+    Guid ProjectId, string ProjectName, string ProjectCode,
+    bool IsHrb, BsaHrbCategory HrbCategory,
+    DateTime GeneratedAtUtc,
+    int OpenRisksCount, int OpenIssuesCount,
+    int OpenMorsCount, int OpenGatewayPackagesCount,
+    int GoldenThreadDocumentsCount,
+    GatewayPackageState? Gateway1State,
+    GatewayPackageState? Gateway2State,
+    GatewayPackageState? Gateway3State);
+// T-S10-06 Golden Thread DTOs.
+public record AddDocumentToGoldenThreadRequest(string? Note);
+public record GoldenThreadDocumentDto(
+    Guid Id, string DocumentNumber, string Title,
+    CdeState CurrentState,
+    DateTime AddedToGoldenThreadAt, Guid AddedToGoldenThreadById);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

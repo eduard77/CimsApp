@@ -69,6 +69,8 @@ public class CimsDbContext(
     public DbSet<CustomReportDefinition> CustomReportDefinitions => Set<CustomReportDefinition>();
     public DbSet<MidpEntry>           MidpEntries          => Set<MidpEntry>();
     public DbSet<TidpEntry>           TidpEntries          => Set<TidpEntry>();
+    public DbSet<GatewayPackage>      GatewayPackages      => Set<GatewayPackage>();
+    public DbSet<MandatoryOccurrenceReport> MandatoryOccurrenceReports => Set<MandatoryOccurrenceReport>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -637,6 +639,34 @@ public class CimsDbContext(
              .HasForeignKey(w => w.ClosedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<GatewayPackage>(e =>
+        {
+            // (ProjectId, Type, Number) unique-when-active gives
+            // predictable per-type sequential numbering. Soft-deleted
+            // rows can re-use a freed number.
+            e.HasIndex(x => new { x.ProjectId, x.Type, x.Number }).IsUnique()
+             .HasFilter("[IsActive] = 1");
+            e.HasIndex(x => new { x.ProjectId, x.State });
+            e.HasOne(x => x.Project).WithMany()
+             .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.CreatedBy).WithMany()
+             .HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.SubmittedBy).WithMany()
+             .HasForeignKey(x => x.SubmittedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.DecidedBy).WithMany()
+             .HasForeignKey(x => x.DecidedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<MandatoryOccurrenceReport>(e =>
+        {
+            e.HasIndex(x => new { x.ProjectId, x.Number }).IsUnique();
+            e.HasIndex(x => new { x.ProjectId, x.OccurredAt });
+            e.HasOne(x => x.Project).WithMany()
+             .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.Reporter).WithMany()
+             .HasForeignKey(x => x.ReporterId).OnDelete(DeleteBehavior.NoAction);
+        });
+
         m.Entity<MidpEntry>(e =>
         {
             e.HasIndex(x => new { x.ProjectId, x.DueDate });
@@ -756,6 +786,8 @@ public class CimsDbContext(
         m.Entity<CustomReportDefinition>().HasQueryFilter(d => d.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<MidpEntry>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<TidpEntry>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<GatewayPackage>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<MandatoryOccurrenceReport>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -795,6 +827,8 @@ public class CimsDbContext(
             else if (e.Entity is CustomReportDefinition crd) crd.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is MidpEntry midp) midp.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is TidpEntry tidp) tidp.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is GatewayPackage gp) gp.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is MandatoryOccurrenceReport mor) mor.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

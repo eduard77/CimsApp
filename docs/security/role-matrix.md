@@ -259,6 +259,29 @@ strict-on-new-only per T-S9-03; MIDP / TIDP CRUD live here.
 | POST   | `/api/v1/projects/{projectId}/tidp/entries/{id}/sign-off` | authenticated | `TaskTeamMember+` | T-S9-06. Body `SignOffTidpEntryRequest(note?)`. One-way — un-sign-off is not a v1.0 transition (v1.1 / B-NNN if pilot need surfaces). Records signing user + timestamp + optional note. Audit: `tidp_entry.signed_off`. |
 | DELETE | `/api/v1/projects/{projectId}/tidp/entries/{id}` | authenticated | `ProjectManager+` | T-S9-06. Soft delete via IsActive = false. Audit: `tidp_entry.deleted`. |
 
+## Golden Thread / BSA 2022
+
+PAFM-SD F.10. HRB flagging, Gateway 1/2/3 packages, MOR,
+Safety Case Summary, Golden Thread immutability. Statutory
+legal sign-off is a pre-pilot review step (PAFM-CIMS-001 PDF
++ legal review), not a v1.0 deliverable.
+
+| Method | Route | Global role | Project role | Comment |
+|---|---|---|---|---|
+| PUT    | `/api/v1/projects/{projectId}/hrb` | authenticated | `ProjectManager+` | T-S10-02. Body `SetProjectHrbRequest(isHrb, hrbCategory)`. Service invariant: HrbCategory = NotApplicable when IsHrb=false; one of A/B/C when IsHrb=true. Per-tenant inference rules → v1.1 / B-072. Audit: `project.hrb_set` with `{ previous, current }`. // BSA 2022 ref: Part 4 + Schedule 1. |
+| GET    | `/api/v1/projects/{projectId}/gateway-packages` | authenticated | membership | T-S10-03. Lists active Gateway packages, ordered by Type then Number. |
+| GET    | `/api/v1/projects/{projectId}/gateway-packages/{id}` | authenticated | membership | T-S10-03. Cross-tenant 404 via the query filter. |
+| POST   | `/api/v1/projects/{projectId}/gateway-packages` | authenticated | `InformationManager+` | T-S10-03. Body `CreateGatewayPackageRequest(type, title, description?)`. Auto-generates GW1-NNNN / GW2-NNNN / GW3-NNNN sequential per Type. Initial state Drafting. Audit: `gateway_package.created`. // BSA 2022 ref: Part 3. |
+| POST   | `/api/v1/projects/{projectId}/gateway-packages/{id}/submit` | authenticated | `InformationManager+` | T-S10-03. State Drafting → Submitted; records SubmittedAt + SubmittedById. State machine via `Core/GatewayPackageWorkflow`. Audit: `gateway_package.submitted`. |
+| POST   | `/api/v1/projects/{projectId}/gateway-packages/{id}/decide` | authenticated | `ProjectManager+` | T-S10-03. Body `DecideGatewayPackageRequest(decision, decisionNote)`. Decision ∈ {Approved, ApprovedWithConditions, Refused}. State Submitted → Decided. DecisionNote required. Decided is terminal. Audit: `gateway_package.decided`. Statutory deadline tracking → v1.1 / B-073. |
+| GET    | `/api/v1/projects/{projectId}/mandatory-occurrence-reports` | authenticated | membership | T-S10-04. Lists MORs ordered by OccurredAt desc. |
+| GET    | `/api/v1/projects/{projectId}/mandatory-occurrence-reports/{id}` | authenticated | membership | T-S10-04. Cross-tenant 404 via the query filter. |
+| POST   | `/api/v1/projects/{projectId}/mandatory-occurrence-reports` | authenticated | `TaskTeamMember+` | T-S10-04. Body `CreateMorRequest(title, description, severity, occurredAt)`. Auto-generates MOR-NNNN. ReporterId = caller. // BSA 2022 ref: s.87. Audit: `mor.created`. |
+| POST   | `/api/v1/projects/{projectId}/mandatory-occurrence-reports/{id}/mark-reported` | authenticated | `ProjectManager+` | T-S10-04. Body `MarkMorReportedToBsrRequest(bsrReference?)`. One-way: sets ReportedToBsr=true + ReportedToBsrAt + optional BSR case reference. Programmatic BSR API push → v1.1 / B-070. Audit: `mor.reported_to_bsr`. |
+| GET    | `/api/v1/projects/{projectId}/safety-case/summary` | authenticated | membership | T-S10-05. Returns `SafetyCaseSummaryDto` aggregating HRB metadata + open Risks / Issues / MORs / Gateway packages + GT document count. v1.0 best-effort inference; canonical Schedule 5 reconciliation + PDF rendering → v1.1 / B-071. Read-only. // BSA 2022 ref: Schedule 5. |
+| GET    | `/api/v1/projects/{projectId}/golden-thread` | authenticated | membership | T-S10-06. Lists active GT-marked Documents, ordered by AddedToGoldenThreadAt desc. Audit-log query layer for compliance reports → v1.1 / B-074. |
+| POST   | `/api/v1/projects/{projectId}/golden-thread/documents/{documentId}` | authenticated | `ProjectManager+` | T-S10-06. Body `AddDocumentToGoldenThreadRequest(note?)`. Marks Document as in Golden Thread; one-way for v1.0 (un-mark workflow → v1.1 / B-075). Subsequent state-transitions on the Document are blocked at the service layer. Audit: `document.added_to_golden_thread`. // BSA 2022 ref: Schedule 5. |
+
 ## Documents
 
 | Method | Route | Global role | Project role | Comment |

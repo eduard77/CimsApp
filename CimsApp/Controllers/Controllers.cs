@@ -253,6 +253,19 @@ public class ProjectsController(ProjectsService svc, CimsDbContext db) : CimsCon
         await svc.AddMemberAsync(projectId, req.UserId, req.Role, CurrentUserId);
         return Created("", new { success = true });
     }
+
+    // T-S10-02. BSA 2022 HRB metadata. PM-only because the
+    // categorisation has statutory weight; per-tenant inference
+    // rules → v1.1 / B-072.
+    [HttpPut("{projectId:guid}/hrb")]
+    public async Task<IActionResult> SetHrb(Guid projectId, SetProjectHrbRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var p = await svc.SetHrbMetadataAsync(projectId, req.IsHrb, req.HrbCategory, CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = new { p.Id, p.IsHrb, HrbCategory = p.HrbCategory.ToString() } });
+    }
 }
 
 // ── CDE ───────────────────────────────────────────────────────────────────────
@@ -1645,6 +1658,128 @@ public class ReportingController(ReportingService svc, CimsDbContext db) : CimsC
         await GetProjectRoleAsync(db, projectId);
         var dto = await svc.GetProjectKpiCardsAsync(projectId, ct);
         return Ok(new { success = true, data = dto });
+    }
+}
+
+// ── BSA 2022 Gateway packages (T-S10-03) ─────────────────────────────────────
+// PAFM-SD F.10 second bullet — Gateway 1/2/3 statutory submissions.
+[Route("api/v1/projects/{projectId:guid}/gateway-packages")]
+public class GatewayPackagesController(GatewayPackageService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.ListAsync(projectId, ct) });
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> Get(Guid projectId, Guid id, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.GetAsync(projectId, id, ct) });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Create(Guid projectId, CreateGatewayPackageRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.InformationManager))
+            throw new ForbiddenException();
+        var dto = await svc.CreateAsync(projectId, req, CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = dto });
+    }
+
+    [HttpPost("{id:guid}/submit")]
+    public async Task<IActionResult> Submit(Guid projectId, Guid id, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.SubmitAsync(projectId, id, CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    [HttpPost("{id:guid}/decide")]
+    public async Task<IActionResult> Decide(Guid projectId, Guid id, DecideGatewayPackageRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.DecideAsync(projectId, id, req, CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = dto });
+    }
+}
+
+// ── BSA 2022 Mandatory Occurrence Reports (T-S10-04) ─────────────────────────
+// PAFM-SD F.10 third bullet — BSA 2022 s.87.
+[Route("api/v1/projects/{projectId:guid}/mandatory-occurrence-reports")]
+public class MorController(MorService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.ListAsync(projectId, ct) });
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> Get(Guid projectId, Guid id, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.GetAsync(projectId, id, ct) });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Create(Guid projectId, CreateMorRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var dto = await svc.CreateAsync(projectId, req, CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = dto });
+    }
+
+    [HttpPost("{id:guid}/mark-reported")]
+    public async Task<IActionResult> MarkReported(Guid projectId, Guid id, MarkMorReportedToBsrRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var dto = await svc.MarkReportedToBsrAsync(projectId, id, req, CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = dto });
+    }
+}
+
+// ── BSA 2022 Safety Case Summary (T-S10-05) ──────────────────────────────────
+// PAFM-SD F.10 fourth bullet — JSON aggregator.
+[Route("api/v1/projects/{projectId:guid}/safety-case")]
+public class SafetyCaseController(SafetyCaseService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet("summary")]
+    public async Task<IActionResult> Summary(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.GenerateAsync(projectId, ct) });
+    }
+}
+
+// ── BSA 2022 Golden Thread (T-S10-06) ────────────────────────────────────────
+// PAFM-SD F.10 fifth bullet — soft immutability + listing endpoint.
+[Route("api/v1/projects/{projectId:guid}/golden-thread")]
+public class GoldenThreadController(DocumentsService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.ListGoldenThreadAsync(projectId, ct) });
+    }
+
+    [HttpPost("documents/{documentId:guid}")]
+    public async Task<IActionResult> Add(Guid projectId, Guid documentId, AddDocumentToGoldenThreadRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var doc = await svc.AddToGoldenThreadAsync(documentId, projectId, CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = new { doc.Id, doc.DocumentNumber, doc.IsInGoldenThread, doc.AddedToGoldenThreadAt } });
     }
 }
 
