@@ -165,3 +165,17 @@ public enum CompensationEventState
 {
     Notified, Quoted, Accepted, Rejected, Implemented,
 }
+
+// S7 Reporting (PAFM-SD F.8 fourth bullet — basic custom report
+// builder, T-S7-05). Constrains the saved-query EntityType to
+// the v1.0 allow-list. Cross-entity joins (e.g. Actions joined
+// to RFIs) → v1.1 / B-056. New entries land in lock-step with
+// the per-entity field allow-list in CustomReportRunner.
+public enum CustomReportEntityType
+{
+    Risk,
+    ActionItem,
+    Rfi,
+    Variation,
+    ChangeRequest,
+}

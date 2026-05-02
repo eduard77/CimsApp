@@ -1757,3 +1757,44 @@ public class CompensationEvent
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// Saved custom-report definition (T-S7-05, PAFM-SD F.8 fourth
+/// bullet — "Basic custom report builder"). Per-project saved
+/// queries: pick an EntityType from the allow-list, define a
+/// JSON filter, choose JSON columns to project. v1.0 ships
+/// pure-equality filtering against a strict per-entity field
+/// allow-list — richer operators (gt / lt / ne / contains) are
+/// v1.1 / B-060. Cross-entity joins → v1.1 / B-056. Scheduled
+/// runs + email → v1.1 / B-057. Export formats → v1.1 / B-058.
+/// Soft-deleted via IsActive to preserve history.
+/// </summary>
+public class CustomReportDefinition
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    [Required, MaxLength(200)] public string Name { get; set; } = "";
+
+    public CustomReportEntityType EntityType { get; set; }
+
+    /// <summary>JSON object of field-equality clauses, e.g.
+    /// `{"Status":"Open","Priority":"High"}`. Service validates
+    /// every key against the per-entity allow-list at write time.
+    /// Empty object `{}` = no filter (returns all rows for project).</summary>
+    [Required] public string FilterJson { get; set; } = "{}";
+
+    /// <summary>JSON array of field names to project, e.g.
+    /// `["RfiNumber","Subject","Status"]`. Strict allow-list per
+    /// EntityType. Empty array `[]` = whole entity (allow-list).</summary>
+    [Required] public string ColumnsJson { get; set; } = "[]";
+
+    public Guid CreatedById { get; set; }
+    public User CreatedBy { get; set; } = null!;
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+

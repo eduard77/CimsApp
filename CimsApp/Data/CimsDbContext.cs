@@ -66,6 +66,7 @@ public class CimsDbContext(
     public DbSet<Contract>            Contracts            => Set<Contract>();
     public DbSet<EarlyWarning>        EarlyWarnings        => Set<EarlyWarning>();
     public DbSet<CompensationEvent>   CompensationEvents   => Set<CompensationEvent>();
+    public DbSet<CustomReportDefinition> CustomReportDefinitions => Set<CustomReportDefinition>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -634,6 +635,19 @@ public class CimsDbContext(
              .HasForeignKey(w => w.ClosedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<CustomReportDefinition>(e =>
+        {
+            // (ProjectId, Name) unique-when-active gives users
+            // predictable saved-report naming per project. Soft-
+            // deleted rows can re-use a freed name.
+            e.HasIndex(d => new { d.ProjectId, d.Name }).IsUnique()
+             .HasFilter("[IsActive] = 1");
+            e.HasOne(d => d.Project).WithMany()
+             .HasForeignKey(d => d.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(d => d.CreatedBy).WithMany()
+             .HasForeignKey(d => d.CreatedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         m.Entity<CompensationEvent>(e =>
         {
             // Project-scoped sequential CE-NNNN; unique per project.
@@ -711,6 +725,7 @@ public class CimsDbContext(
         m.Entity<Contract>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<EarlyWarning>().HasQueryFilter(w => w.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<CompensationEvent>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<CustomReportDefinition>().HasQueryFilter(d => d.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -747,6 +762,7 @@ public class CimsDbContext(
             else if (e.Entity is Contract con) con.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is EarlyWarning ew) ew.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is CompensationEvent ce) ce.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is CustomReportDefinition crd) crd.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

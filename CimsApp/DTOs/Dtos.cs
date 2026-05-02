@@ -534,6 +534,36 @@ public record KpiCardsDto(
     string ProjectName,
     string ProjectCode,
     List<DashboardCardDto> Cards);
+// T-S7-05 Custom report definitions. v1.0 ships pure-equality
+// filtering against a per-entity field allow-list. Richer
+// operators → v1.1 / B-060. Cross-entity joins → B-056.
+// Scheduled runs + email → B-057. Export formats → B-058.
+public record CustomReportDefinitionDto(
+    Guid Id,
+    Guid ProjectId,
+    string Name,
+    CustomReportEntityType EntityType,
+    string FilterJson,
+    string ColumnsJson,
+    Guid CreatedById,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+public record CreateCustomReportDefinitionRequest(
+    string Name,
+    CustomReportEntityType EntityType,
+    string? FilterJson,
+    string? ColumnsJson);
+public record UpdateCustomReportDefinitionRequest(
+    string? Name,
+    string? FilterJson,
+    string? ColumnsJson);
+public record CustomReportRunResultDto(
+    Guid DefinitionId,
+    string Name,
+    CustomReportEntityType EntityType,
+    int RowCount,
+    List<string> Columns,
+    List<Dictionary<string, object?>> Rows);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

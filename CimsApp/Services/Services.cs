@@ -5443,6 +5443,207 @@ public class ReportingService(CimsDbContext db)
     }
 }
 
+// T-S7-05 Custom Report Definitions service. Per-project saved
+// queries; pure-equality JSON filter against per-entity field
+// allow-list (CustomReportRunner). Audit-twin per write path
+// per the ADR-0014 pattern. Run path is read-only (no audit).
+public class CustomReportDefinitionsService(CimsDbContext db, AuditService audit)
+{
+    public async Task<List<CustomReportDefinitionDto>> ListAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var rows = await db.CustomReportDefinitions
+            .Where(d => d.ProjectId == projectId && d.IsActive)
+            .OrderBy(d => d.Name)
+            .ToListAsync(ct);
+        return rows.Select(ToDto).ToList();
+    }
+
+    public async Task<CustomReportDefinitionDto> GetAsync(
+        Guid projectId, Guid definitionId, CancellationToken ct = default)
+    {
+        var d = await db.CustomReportDefinitions
+            .FirstOrDefaultAsync(x => x.Id == definitionId
+                                   && x.ProjectId == projectId
+                                   && x.IsActive, ct)
+            ?? throw new NotFoundException("CustomReportDefinition");
+        return ToDto(d);
+    }
+
+    public async Task<CustomReportDefinitionDto> CreateAsync(
+        Guid projectId, CreateCustomReportDefinitionRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Name))
+            throw new ValidationException(new List<string> { "Name is required" });
+
+        var filter  = req.FilterJson  ?? "{}";
+        var columns = req.ColumnsJson ?? "[]";
+        // Validate at write time so bad JSON / unknown fields can't
+        // be persisted.
+        CustomReportRunner.ValidateFilterJson(filter, req.EntityType);
+        CustomReportRunner.ValidateColumnsJson(columns, req.EntityType);
+
+        if (await db.CustomReportDefinitions.AnyAsync(
+                x => x.ProjectId == projectId
+                  && x.IsActive
+                  && x.Name == req.Name, ct))
+            throw new ConflictException(
+                $"A custom report named '{req.Name}' already exists.");
+
+        var def = new CustomReportDefinition
+        {
+            ProjectId   = projectId,
+            Name        = req.Name.Trim(),
+            EntityType  = req.EntityType,
+            FilterJson  = filter,
+            ColumnsJson = columns,
+            CreatedById = actorId,
+        };
+        db.CustomReportDefinitions.Add(def);
+        await audit.WriteAsync(actorId, "custom_report.created",
+            "CustomReportDefinition", def.Id.ToString(),
+            projectId: projectId,
+            detail: new { def.Name, def.EntityType },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(def);
+    }
+
+    public async Task<CustomReportDefinitionDto> UpdateAsync(
+        Guid projectId, Guid definitionId,
+        UpdateCustomReportDefinitionRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var d = await db.CustomReportDefinitions
+            .FirstOrDefaultAsync(x => x.Id == definitionId
+                                   && x.ProjectId == projectId
+                                   && x.IsActive, ct)
+            ?? throw new NotFoundException("CustomReportDefinition");
+
+        var changed = new List<string>();
+        if (req.Name is not null && req.Name != d.Name)
+        {
+            var newName = req.Name.Trim();
+            if (newName.Length == 0)
+                throw new ValidationException(new List<string> { "Name cannot be empty" });
+            if (await db.CustomReportDefinitions.AnyAsync(
+                    x => x.ProjectId == projectId
+                      && x.IsActive
+                      && x.Id != definitionId
+                      && x.Name == newName, ct))
+                throw new ConflictException(
+                    $"A custom report named '{newName}' already exists.");
+            d.Name = newName;
+            changed.Add(nameof(d.Name));
+        }
+        if (req.FilterJson is not null && req.FilterJson != d.FilterJson)
+        {
+            CustomReportRunner.ValidateFilterJson(req.FilterJson, d.EntityType);
+            d.FilterJson = req.FilterJson;
+            changed.Add(nameof(d.FilterJson));
+        }
+        if (req.ColumnsJson is not null && req.ColumnsJson != d.ColumnsJson)
+        {
+            CustomReportRunner.ValidateColumnsJson(req.ColumnsJson, d.EntityType);
+            d.ColumnsJson = req.ColumnsJson;
+            changed.Add(nameof(d.ColumnsJson));
+        }
+        if (changed.Count == 0)
+            throw new ConflictException("No changes specified.");
+
+        await audit.WriteAsync(actorId, "custom_report.updated",
+            "CustomReportDefinition", d.Id.ToString(),
+            projectId: projectId,
+            detail: new { changedFields = changed },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(d);
+    }
+
+    public async Task DeleteAsync(
+        Guid projectId, Guid definitionId,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var d = await db.CustomReportDefinitions
+            .FirstOrDefaultAsync(x => x.Id == definitionId
+                                   && x.ProjectId == projectId
+                                   && x.IsActive, ct)
+            ?? throw new NotFoundException("CustomReportDefinition");
+        d.IsActive = false;
+        await audit.WriteAsync(actorId, "custom_report.deleted",
+            "CustomReportDefinition", d.Id.ToString(),
+            projectId: projectId,
+            detail: new { d.Name },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<CustomReportRunResultDto> RunAsync(
+        Guid projectId, Guid definitionId, CancellationToken ct = default)
+    {
+        var d = await db.CustomReportDefinitions
+            .FirstOrDefaultAsync(x => x.Id == definitionId
+                                   && x.ProjectId == projectId
+                                   && x.IsActive, ct)
+            ?? throw new NotFoundException("CustomReportDefinition");
+
+        var filter  = CustomReportRunner.ValidateFilterJson(d.FilterJson, d.EntityType);
+        var columns = CustomReportRunner.ValidateColumnsJson(d.ColumnsJson, d.EntityType);
+
+        var rows = await LoadRowsAsync(projectId, d.EntityType, ct);
+        var matched = rows.Where(r => CustomReportRunner.MatchesFilter(r, filter))
+                          .Select(r => CustomReportRunner.ProjectColumns(r, columns))
+                          .ToList();
+
+        return new CustomReportRunResultDto(
+            DefinitionId: d.Id,
+            Name:         d.Name,
+            EntityType:   d.EntityType,
+            RowCount:     matched.Count,
+            Columns:      columns,
+            Rows:         matched);
+    }
+
+    private async Task<List<object>> LoadRowsAsync(
+        Guid projectId, CustomReportEntityType type, CancellationToken ct)
+    {
+        // v1.0 in-memory filter pass: load the project's rows for
+        // the chosen entity, filter / project in-memory. Single-
+        // project queries are bounded by domain volume; pushdown to
+        // SQL is a v1.1 perf concern if pilot data grows past the
+        // simple-query envelope.
+        return type switch
+        {
+            CustomReportEntityType.Risk =>
+                (await db.Risks.Where(x => x.ProjectId == projectId).ToListAsync(ct))
+                    .Cast<object>().ToList(),
+            CustomReportEntityType.ActionItem =>
+                (await db.ActionItems.Where(x => x.ProjectId == projectId).ToListAsync(ct))
+                    .Cast<object>().ToList(),
+            CustomReportEntityType.Rfi =>
+                (await db.Rfis.Where(x => x.ProjectId == projectId).ToListAsync(ct))
+                    .Cast<object>().ToList(),
+            CustomReportEntityType.Variation =>
+                (await db.Variations.Where(x => x.ProjectId == projectId).ToListAsync(ct))
+                    .Cast<object>().ToList(),
+            CustomReportEntityType.ChangeRequest =>
+                (await db.ChangeRequests.Where(x => x.ProjectId == projectId).ToListAsync(ct))
+                    .Cast<object>().ToList(),
+            _ => throw new ValidationException(new List<string>
+                 { $"EntityType {type} is not supported" }),
+        };
+    }
+
+    private static CustomReportDefinitionDto ToDto(CustomReportDefinition d) =>
+        new(d.Id, d.ProjectId, d.Name, d.EntityType,
+            d.FilterJson, d.ColumnsJson,
+            d.CreatedById, d.CreatedAt, d.UpdatedAt);
+}
+
 public class CdeService(CimsDbContext db, AuditService audit)
 {
     public async Task<List<CdeContainer>> ListContainersAsync(Guid projectId) =>
