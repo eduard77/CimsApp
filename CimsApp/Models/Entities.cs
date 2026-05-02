@@ -98,6 +98,21 @@ public class Project
     public string? Sponsor { get; set; }
     public string? EirRef { get; set; }
     public string? MidpRef { get; set; }
+
+    /// <summary>T-S10-02. Higher-Risk Building flag per Building
+    /// Safety Act 2022. False for the majority of projects. When
+    /// true, <see cref="HrbCategory"/> classifies the building
+    /// per Building Safety Regulator guidance. v1.0 ships manual
+    /// PM toggling; per-tenant inference rules → v1.1 / B-072.
+    /// // BSA 2022 ref: Part 4 (Higher-Risk Buildings).</summary>
+    public bool IsHrb { get; set; }
+
+    /// <summary>BSA 2022 HRB category (A / B / C). NotApplicable
+    /// for non-HRB projects (must agree with IsHrb=false). Mirrors
+    /// the per-ChangeRequest `BsaHrbCategory` from S5.
+    /// // BSA 2022 ref: Schedule 1 (HRB categorisation).</summary>
+    public BsaHrbCategory HrbCategory { get; set; } = BsaHrbCategory.NotApplicable;
+
     public Guid AppointingPartyId { get; set; }
     public Organisation AppointingParty { get; set; } = null!;
     public bool IsActive { get; set; } = true;

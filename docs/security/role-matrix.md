@@ -259,6 +259,17 @@ strict-on-new-only per T-S9-03; MIDP / TIDP CRUD live here.
 | POST   | `/api/v1/projects/{projectId}/tidp/entries/{id}/sign-off` | authenticated | `TaskTeamMember+` | T-S9-06. Body `SignOffTidpEntryRequest(note?)`. One-way — un-sign-off is not a v1.0 transition (v1.1 / B-NNN if pilot need surfaces). Records signing user + timestamp + optional note. Audit: `tidp_entry.signed_off`. |
 | DELETE | `/api/v1/projects/{projectId}/tidp/entries/{id}` | authenticated | `ProjectManager+` | T-S9-06. Soft delete via IsActive = false. Audit: `tidp_entry.deleted`. |
 
+## Golden Thread / BSA 2022
+
+PAFM-SD F.10. HRB flagging, Gateway 1/2/3 packages, MOR,
+Safety Case Summary, Golden Thread immutability. Statutory
+legal sign-off is a pre-pilot review step (PAFM-CIMS-001 PDF
++ legal review), not a v1.0 deliverable.
+
+| Method | Route | Global role | Project role | Comment |
+|---|---|---|---|---|
+| PUT    | `/api/v1/projects/{projectId}/hrb` | authenticated | `ProjectManager+` | T-S10-02. Body `SetProjectHrbRequest(isHrb, hrbCategory)`. Service invariant: HrbCategory = NotApplicable when IsHrb=false; one of A/B/C when IsHrb=true. Per-tenant inference rules → v1.1 / B-072. Audit: `project.hrb_set` with `{ previous, current }`. // BSA 2022 ref: Part 4 + Schedule 1. |
+
 ## Documents
 
 | Method | Route | Global role | Project role | Comment |

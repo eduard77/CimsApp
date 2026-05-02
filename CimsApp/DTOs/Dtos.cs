@@ -598,6 +598,10 @@ public record UpdateTidpEntryRequest(
     string? TeamName,
     DateTime? DueDate);
 public record SignOffTidpEntryRequest(string? Note);
+// T-S10-02 BSA 2022 HRB project metadata.
+// // BSA 2022 ref: Part 4 (Higher-Risk Buildings); Schedule 1
+// (HRB categorisation).
+public record SetProjectHrbRequest(bool IsHrb, BsaHrbCategory HrbCategory);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

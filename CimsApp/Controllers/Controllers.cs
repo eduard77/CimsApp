@@ -253,6 +253,19 @@ public class ProjectsController(ProjectsService svc, CimsDbContext db) : CimsCon
         await svc.AddMemberAsync(projectId, req.UserId, req.Role, CurrentUserId);
         return Created("", new { success = true });
     }
+
+    // T-S10-02. BSA 2022 HRB metadata. PM-only because the
+    // categorisation has statutory weight; per-tenant inference
+    // rules → v1.1 / B-072.
+    [HttpPut("{projectId:guid}/hrb")]
+    public async Task<IActionResult> SetHrb(Guid projectId, SetProjectHrbRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var p = await svc.SetHrbMetadataAsync(projectId, req.IsHrb, req.HrbCategory, CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = new { p.Id, p.IsHrb, HrbCategory = p.HrbCategory.ToString() } });
+    }
 }
 
 // ── CDE ───────────────────────────────────────────────────────────────────────

@@ -536,6 +536,43 @@ public class ProjectsService(CimsDbContext db, AuditService audit, CimsApp.Servi
             });
         await db.SaveChangesAsync();
     }
+
+    /// <summary>
+    /// T-S10-02. Sets the BSA 2022 HRB metadata on a project. Service
+    /// invariant: HrbCategory must be NotApplicable when IsHrb=false
+    /// and one of A/B/C when IsHrb=true. v1.0 ships manual PM toggle;
+    /// per-tenant inference rules → v1.1 / B-072.
+    /// </summary>
+    public async Task<Project> SetHrbMetadataAsync(
+        Guid projectId, bool isHrb, BsaHrbCategory category,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (isHrb && category == BsaHrbCategory.NotApplicable)
+            throw new ValidationException(new List<string>
+            { "HrbCategory must be A / B / C when IsHrb is true" });
+        if (!isHrb && category != BsaHrbCategory.NotApplicable)
+            throw new ValidationException(new List<string>
+            { "HrbCategory must be NotApplicable when IsHrb is false" });
+
+        var p = await db.Projects.FirstOrDefaultAsync(x => x.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var previous = new { p.IsHrb, HrbCategory = p.HrbCategory.ToString() };
+        p.IsHrb = isHrb;
+        p.HrbCategory = category;
+        await audit.WriteAsync(actorId, "project.hrb_set",
+            "Project", projectId.ToString(),
+            projectId: projectId,
+            detail: new
+            {
+                previous,
+                current = new { p.IsHrb, HrbCategory = p.HrbCategory.ToString() },
+            },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return p;
+    }
 }
 
 // ── Cost & Commercial ─────────────────────────────────────────────────────────
