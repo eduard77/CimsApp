@@ -524,6 +524,16 @@ public record MprStakeholderUpdates(
     int StakeholdersTotal,
     int EngagementLogsInPeriod,
     int CommunicationsTotal);
+// T-S7-04 KPI cards. PAFM-SD F.8 third bullet — "KPI cards
+// tied to success criteria" mapped to PAFM-SD Ch 2.6 v1.0
+// success criteria. Single project-level endpoint returning
+// the card list. Re-uses DashboardCardDto for shape parity
+// with the per-role dashboards.
+public record KpiCardsDto(
+    Guid ProjectId,
+    string ProjectName,
+    string ProjectCode,
+    List<DashboardCardDto> Cards);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

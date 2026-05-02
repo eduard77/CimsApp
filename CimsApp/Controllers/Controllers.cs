@@ -1638,6 +1638,14 @@ public class ReportingController(ReportingService svc, CimsDbContext db) : CimsC
         var dto = await svc.GenerateMonthlyProjectReportAsync(projectId, from, to, ct);
         return Ok(new { success = true, data = dto });
     }
+
+    [HttpGet("kpi")]
+    public async Task<IActionResult> Kpi(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetProjectKpiCardsAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
 }
 
 // ── Documents ─────────────────────────────────────────────────────────────────

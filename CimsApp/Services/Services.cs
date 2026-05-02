@@ -5335,6 +5335,112 @@ public class ReportingService(CimsDbContext db)
                 EngagementLogsInPeriod:  engagementsInPeriod,
                 CommunicationsTotal:     communicationsTotal));
     }
+
+    // T-S7-04 KPI cards. Project-level success-criteria dashboard
+    // mapped to PAFM-SD Ch 2.6 v1.0 success criteria. Honest v1.0
+    // proxies where genuine EVM (CPI / SPI) needs the v1.1 per-line
+    // progress signal — subtitles call out which cards are proxies.
+    public async Task<KpiCardsDto> GetProjectKpiCardsAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var p = await db.Projects.FirstOrDefaultAsync(x => x.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var now    = DateTime.UtcNow;
+        var thirty = now.AddDays(-30);
+
+        // Module activity (last 30 days) — sum of new rows across
+        // the user-facing modules. Direct row counts (not audit log)
+        // because some modules emit audit records in atomic batches
+        // that are awkward to per-entity bucket.
+        var rfi30      = await db.Rfis.CountAsync(            r => r.ProjectId == projectId && r.CreatedAt >= thirty, ct);
+        var actions30  = await db.ActionItems.CountAsync(     a => a.ProjectId == projectId && a.CreatedAt >= thirty, ct);
+        var crs30      = await db.ChangeRequests.CountAsync(  c => c.ProjectId == projectId && c.CreatedAt >= thirty, ct);
+        var vars30     = await db.Variations.CountAsync(      v => v.ProjectId == projectId && v.CreatedAt >= thirty, ct);
+        var engs30     = await db.EngagementLogs.CountAsync(  e => e.ProjectId == projectId && e.CreatedAt >= thirty, ct);
+        var moduleActivity = rfi30 + actions30 + crs30 + vars30 + engs30;
+
+        // MPR data freshness — latest CostPeriod EndDate.
+        var latestPeriodEnd = await db.CostPeriods
+            .Where(c => c.ProjectId == projectId)
+            .OrderByDescending(c => c.EndDate)
+            .Select(c => (DateTime?)c.EndDate)
+            .FirstOrDefaultAsync(ct);
+
+        var criticalActivities = await db.Activities.CountAsync(
+            a => a.ProjectId == projectId && a.IsActive && a.IsCritical, ct);
+
+        var totalBudget = await db.CostBreakdownItems
+            .Where(c => c.ProjectId == projectId && c.Budget.HasValue)
+            .SumAsync(c => c.Budget!.Value, ct);
+        var totalActuals = await db.ActualCosts
+            .Where(a => a.ProjectId == projectId)
+            .SumAsync(a => (decimal?)a.Amount, ct) ?? 0m;
+        decimal? percentSpent = totalBudget == 0m
+            ? null
+            : Math.Round(100m * totalActuals / totalBudget, 2);
+
+        var actsList = await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive)
+            .Select(a => a.PercentComplete)
+            .ToListAsync(ct);
+        var totalActs     = actsList.Count;
+        var completedActs = actsList.Count(pc => pc >= 1m);
+        decimal? completionPct = totalActs == 0
+            ? null
+            : Math.Round(100m * completedActs / totalActs, 2);
+
+        var closedRfis30 = await db.Rfis
+            .Where(r => r.ProjectId == projectId
+                     && r.Status == RfiStatus.Closed
+                     && r.ClosedAt.HasValue
+                     && r.ClosedAt >= thirty)
+            .Select(r => new { r.CreatedAt, r.ClosedAt })
+            .ToListAsync(ct);
+        decimal? avgRfiDays = closedRfis30.Count == 0
+            ? null
+            : Math.Round(
+                (decimal)closedRfis30.Average(
+                    r => (r.ClosedAt!.Value - r.CreatedAt).TotalDays), 1);
+
+        var overdueActions = await db.ActionItems.CountAsync(
+            a => a.ProjectId == projectId
+              && (a.Status == ActionStatus.Open || a.Status == ActionStatus.InProgress)
+              && a.DueDate.HasValue && a.DueDate < now, ct);
+
+        return new KpiCardsDto(p.Id, p.Name, p.Code, new List<DashboardCardDto>
+        {
+            new("Module Activity (Last 30d)",
+                moduleActivity.ToString(), DashboardCardType.Count,
+                "RFIs + Actions + CRs + Variations + Engagements"),
+            new("MPR Period Coverage",
+                latestPeriodEnd?.ToString("yyyy-MM-dd") ?? "—",
+                DashboardCardType.Date,
+                latestPeriodEnd is null
+                    ? "No CostPeriod yet"
+                    : "Latest CostPeriod end-date"),
+            new("Critical Path Activities",
+                criticalActivities.ToString(),
+                DashboardCardType.Count,
+                "CPM IsCritical = true"),
+            new("Cost Spent vs Budget",
+                percentSpent?.ToString("0.##") ?? "—",
+                DashboardCardType.Percentage,
+                "Proxy for CPI; genuine EVM-CPI requires v1.1 per-line progress signal"),
+            new("Schedule Completion",
+                completionPct?.ToString("0.##") ?? "—",
+                DashboardCardType.Percentage,
+                "Proxy for SPI; activities at 100% / total active"),
+            new("RFI Avg Response (Last 30d, days)",
+                avgRfiDays?.ToString("0.#") ?? "—",
+                DashboardCardType.Text,
+                avgRfiDays is null ? "No RFIs closed in window" : null),
+            new("Overdue Actions",
+                overdueActions.ToString(),
+                DashboardCardType.Count,
+                "Open / InProgress with DueDate in past"),
+        });
+    }
 }
 
 public class CdeService(CimsDbContext db, AuditService audit)
