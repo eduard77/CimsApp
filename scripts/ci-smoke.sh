@@ -21,7 +21,13 @@
 set -euo pipefail
 
 BASE_URL="${CIMS_BASE_URL:-http://localhost:5000}"
-RUN_ID="${CIMS_RUN_ID:-$RANDOM-$$}"
+# Organisation.Code MaxLength is 10. Keep RUN_ID short enough that
+# "CI<run_id>" fits inside the column. GitHub Actions provides
+# GITHUB_RUN_ID (numeric, 10-12 digits) which is unique across CI
+# runs; locally we fall back to a 5-digit random seed. Both are
+# truncated to 6 chars so "CI<run_id>" is at most 8.
+DEFAULT_RUN_ID="${GITHUB_RUN_ID:-$RANDOM}"
+RUN_ID="${CIMS_RUN_ID:-${DEFAULT_RUN_ID:0:6}}"
 
 ORG_CODE="CI${RUN_ID}"
 USER_EMAIL="ci+${RUN_ID}@example.com"
