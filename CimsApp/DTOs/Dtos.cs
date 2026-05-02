@@ -309,6 +309,42 @@ public record GanttDto(
     DateTime? ProjectStart, DateTime? ProjectFinish,
     List<GanttActivityDto> Activities,
     List<GanttDependencyDto> Dependencies);
+// T-S5 ChangeRequest workflow DTOs (PAFM-SD F.6).
+// Raise: TaskTeamMember+. Title required; Category required;
+// BsaCategory defaults to NotApplicable. Impact summaries are
+// optional at raise time and typically populated at assess.
+public record RaiseChangeRequestRequest(
+    string Title,
+    string? Description,
+    ChangeRequestCategory Category,
+    BsaHrbCategory BsaCategory,
+    string? ProgrammeImpactSummary,
+    string? CostImpactSummary,
+    decimal? EstimatedCostImpact,
+    int? EstimatedTimeImpactDays);
+// Assess: InformationManager+. AssessmentNote required (the
+// whole point of the assess step is the impact analysis text).
+// Optional impact-summary / estimate updates if the IM refines
+// what the raiser captured.
+public record AssessChangeRequestRequest(
+    string AssessmentNote,
+    string? ProgrammeImpactSummary,
+    string? CostImpactSummary,
+    decimal? EstimatedCostImpact,
+    int? EstimatedTimeImpactDays,
+    BsaHrbCategory? BsaCategory);
+// Approve: ProjectManager+. DecisionNote required. CreateVariation
+// flag (T-S5-06) atomically spawns an S1 Variation as a side-effect.
+public record ApproveChangeRequestRequest(
+    string DecisionNote,
+    bool CreateVariation);
+// Reject: ProjectManager+. DecisionNote required so the audit
+// trail carries a "why rejected" rationale.
+public record RejectChangeRequestRequest(string DecisionNote);
+// Implement / Close take optional notes only (the body itself is
+// just a marker that the transition occurred).
+public record ImplementChangeRequestRequest(string? Note);
+public record CloseChangeRequestRequest(string? Note);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

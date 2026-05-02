@@ -150,6 +150,27 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 | PUT  | `/api/v1/projects/{projectId}/communications/{itemId}` | authenticated | `TaskTeamMember+` | T-S3-07. Body `UpdateCommunicationItemRequest` — all fields nullable for partial update. Owner change re-validates project membership. Already-deactivated rejected with `ConflictException`; no-op rejected with `ValidationException`. Audit: `communication.updated` with `{ changedFields }`. |
 | POST | `/api/v1/projects/{projectId}/communications/{itemId}/deactivate` | authenticated | `ProjectManager+` | T-S3-07. Sets IsActive = false; idempotent rejection on already-deactivated. Audit: `communication.deactivated` with `{ itemType }`. |
 
+## Change Control
+
+PAFM-SD F.6. Five-state ChangeRequest workflow per `Core/ChangeWorkflow.cs`:
+Raised → Assessed → Approved | Rejected → Implemented → Closed.
+Reject is allowed from Raised or Assessed only; once Approved the
+only forward path is Implemented → Closed. State machine + role
+gates enforced via `ChangeWorkflow.CanTransition`; service maps
+to `ConflictException` on invalid transitions and `ForbiddenException`
+on insufficient role.
+
+| Method | Route | Global role | Project role | Comment |
+|---|---|---|---|---|
+| GET  | `/api/v1/projects/{projectId}/change-requests` | authenticated | membership | T-S5-05. Optional `?state=...` and `?category=...` filters. Ordered by RaisedAt desc. |
+| GET  | `/api/v1/projects/{projectId}/change-requests/{id}` | authenticated | membership | T-S5-05. Cross-tenant 404 via the query filter. |
+| POST | `/api/v1/projects/{projectId}/change-requests` | authenticated | `TaskTeamMember+` | T-S5-04. Body `RaiseChangeRequestRequest(title, description?, category, bsaCategory, programmeImpactSummary?, costImpactSummary?, estimatedCostImpact?, estimatedTimeImpactDays?)`. Auto-generates `CR-NNNN`; initial state Raised. Audit: `change_request.raised`. |
+| POST | `/api/v1/projects/{projectId}/change-requests/{id}/assess` | authenticated | `InformationManager+` | T-S5-04. Body `AssessChangeRequestRequest(assessmentNote, programmeImpactSummary?, costImpactSummary?, estimatedCostImpact?, estimatedTimeImpactDays?, bsaCategory?)`. State Raised → Assessed. AssessmentNote required. IM may refine impact summaries / estimates / BSA categorisation. Audit: `change_request.assessed`. |
+| POST | `/api/v1/projects/{projectId}/change-requests/{id}/approve` | authenticated | `ProjectManager+` | T-S5-04 / T-S5-06. Body `ApproveChangeRequestRequest(decisionNote, createVariation)`. State Assessed → Approved. DecisionNote required. **`createVariation = true`** atomically spawns an S1 Variation in state Raised, with EstimatedCostImpact / EstimatedTimeImpactDays carried over from the CR; the CR's `GeneratedVariationId` carries the FK link. Two audit events emit: `change_request.variation_created` (when applicable) + `change_request.approved`. |
+| POST | `/api/v1/projects/{projectId}/change-requests/{id}/reject` | authenticated | `ProjectManager+` | T-S5-04. Body `RejectChangeRequestRequest(decisionNote)`. State Raised|Assessed → Rejected. DecisionNote required. **Rejected after Approved** rejected with `ConflictException` via the state machine. Audit: `change_request.rejected`. |
+| POST | `/api/v1/projects/{projectId}/change-requests/{id}/implement` | authenticated | `ProjectManager+` | T-S5-04. Body `ImplementChangeRequestRequest(note?)`. State Approved → Implemented. Marks the change as actioned in delivery. Audit: `change_request.implemented`. |
+| POST | `/api/v1/projects/{projectId}/change-requests/{id}/close` | authenticated | `ProjectManager+` | T-S5-04. Body `CloseChangeRequestRequest(note?)`. State Implemented → Closed. Skipping Implement (Approved → Closed direct) rejected with `ConflictException`. Closed is terminal. Audit: `change_request.closed`. |
+
 ## Documents
 
 | Method | Route | Global role | Project role | Comment |

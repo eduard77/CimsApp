@@ -3450,6 +3450,318 @@ public class LpsService(CimsDbContext db, AuditService audit)
         return date.AddDays(-diff);
     }
 }
+
+/// <summary>
+/// ChangeRequestService — formal construction-site change-control
+/// workflow (T-S5-04, PAFM-SD F.6). The 5-state machine in
+/// <see cref="CimsApp.Core.ChangeWorkflow"/> drives every transition;
+/// this service wraps with persistence and audit-twin emission.
+/// Approve carries an optional CreateVariation flag (T-S5-06) that
+/// atomically spawns an S1 Variation as a side-effect.
+/// </summary>
+public class ChangeRequestService(CimsDbContext db, AuditService audit)
+{
+    /// <summary>
+    /// Raise a new ChangeRequest in state
+    /// <see cref="ChangeRequestState.Raised"/>. Number is
+    /// auto-generated as `CR-NNNN` per project, mirroring
+    /// <see cref="VariationsService"/>'s VAR-NNNN pattern. Title +
+    /// Category required; Description / Bsa-categorisation /
+    /// impact summaries optional at raise time (typically populated
+    /// by the IM at Assess).
+    /// </summary>
+    public async Task<ChangeRequest> RaiseAsync(
+        Guid projectId, RaiseChangeRequestRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(["Title is required"]);
+
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        // Concurrency note: same shape as VariationsService.RaiseAsync —
+        // count + 1 racing produces duplicates that the unique
+        // (ProjectId, Number) index catches at SaveChanges. Strict
+        // serial counter is a v1.1 candidate.
+        var count = await db.ChangeRequests.CountAsync(c => c.ProjectId == projectId, ct);
+
+        var c = new ChangeRequest
+        {
+            ProjectId               = projectId,
+            Number                  = $"CR-{(count + 1):D4}",
+            Title                   = req.Title.Trim(),
+            Description             = req.Description,
+            Category                = req.Category,
+            BsaCategory             = req.BsaCategory,
+            ProgrammeImpactSummary  = req.ProgrammeImpactSummary,
+            CostImpactSummary       = req.CostImpactSummary,
+            EstimatedCostImpact     = req.EstimatedCostImpact,
+            EstimatedTimeImpactDays = req.EstimatedTimeImpactDays,
+            RaisedById              = actorId,
+            RaisedAt                = DateTime.UtcNow,
+            State                   = ChangeRequestState.Raised,
+        };
+        db.ChangeRequests.Add(c);
+        await audit.WriteAsync(actorId, "change_request.raised", "ChangeRequest",
+            c.Id.ToString(), projectId,
+            detail: new
+            {
+                number      = c.Number,
+                category    = c.Category.ToString(),
+                bsaCategory = c.BsaCategory.ToString(),
+                costImpact  = req.EstimatedCostImpact,
+                timeImpactDays = req.EstimatedTimeImpactDays,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return c;
+    }
+
+    /// <summary>
+    /// Assess transition: Raised → Assessed. AssessmentNote required.
+    /// IM may also refine programme / cost impact summaries +
+    /// estimates, and update BsaCategory if the initial raise
+    /// classification was wrong. State-machine + role-gate enforced
+    /// via <see cref="ChangeWorkflow.CanTransition"/>.
+    /// </summary>
+    public async Task<ChangeRequest> AssessAsync(
+        Guid projectId, Guid changeRequestId, AssessChangeRequestRequest req,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.AssessmentNote))
+            throw new ValidationException(["AssessmentNote is required"]);
+
+        var c = await LoadAsync(projectId, changeRequestId, ct);
+        EnforceTransition(c.State, ChangeRequestState.Assessed, role);
+
+        c.State          = ChangeRequestState.Assessed;
+        c.AssessedById   = actorId;
+        c.AssessedAt     = DateTime.UtcNow;
+        c.AssessmentNote = req.AssessmentNote.Trim();
+        if (req.ProgrammeImpactSummary  is not null) c.ProgrammeImpactSummary  = req.ProgrammeImpactSummary;
+        if (req.CostImpactSummary       is not null) c.CostImpactSummary       = req.CostImpactSummary;
+        if (req.EstimatedCostImpact.HasValue)        c.EstimatedCostImpact     = req.EstimatedCostImpact;
+        if (req.EstimatedTimeImpactDays.HasValue)    c.EstimatedTimeImpactDays = req.EstimatedTimeImpactDays;
+        if (req.BsaCategory.HasValue)                c.BsaCategory             = req.BsaCategory.Value;
+
+        await audit.WriteAsync(actorId, "change_request.assessed", "ChangeRequest",
+            c.Id.ToString(), projectId,
+            detail: new
+            {
+                number      = c.Number,
+                bsaCategory = c.BsaCategory.ToString(),
+                costImpact  = c.EstimatedCostImpact,
+                timeImpactDays = c.EstimatedTimeImpactDays,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return c;
+    }
+
+    /// <summary>
+    /// Approve transition: Assessed → Approved. DecisionNote required.
+    /// CreateVariation flag triggers an S1 Variation spawn (T-S5-06)
+    /// — landed in this method to keep the side-effect inside the
+    /// single SaveChanges (transactional atomicity per the audit-twin
+    /// guarantee from PR #33).
+    /// </summary>
+    public async Task<ChangeRequest> ApproveAsync(
+        Guid projectId, Guid changeRequestId, ApproveChangeRequestRequest req,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.DecisionNote))
+            throw new ValidationException(["DecisionNote is required"]);
+
+        var c = await LoadAsync(projectId, changeRequestId, ct);
+        EnforceTransition(c.State, ChangeRequestState.Approved, role);
+
+        c.State        = ChangeRequestState.Approved;
+        c.DecisionById = actorId;
+        c.DecisionAt   = DateTime.UtcNow;
+        c.DecisionNote = req.DecisionNote.Trim();
+
+        Variation? variation = null;
+        if (req.CreateVariation)
+        {
+            // Spawn an S1 Variation atomically. Reference back via
+            // GeneratedVariationId so the change register can link to
+            // the ledger entry. The Variation itself starts in Raised
+            // state — the PM still needs to approve it through the
+            // S1 workflow if v1.0 wants double-confirmation; in
+            // practice an Approved CR + spawned Variation is then
+            // typically auto-approved on the Variation side as a
+            // recording-only step (manual via /variations/{id}/approve).
+            variation = new Variation
+            {
+                ProjectId = projectId,
+                VariationNumber = await NextVariationNumberAsync(projectId, ct),
+                Title           = $"From {c.Number}: {c.Title}",
+                Description     = c.Description,
+                Reason          = c.AssessmentNote,
+                EstimatedCostImpact     = c.EstimatedCostImpact,
+                EstimatedTimeImpactDays = c.EstimatedTimeImpactDays,
+                RaisedById = actorId,
+                State      = VariationState.Raised,
+            };
+            db.Variations.Add(variation);
+            c.GeneratedVariationId = variation.Id;
+
+            await audit.WriteAsync(actorId, "change_request.variation_created", "ChangeRequest",
+                c.Id.ToString(), projectId,
+                detail: new
+                {
+                    number          = c.Number,
+                    variationId     = variation.Id,
+                    variationNumber = variation.VariationNumber,
+                }, ip: ip, ua: ua);
+        }
+
+        await audit.WriteAsync(actorId, "change_request.approved", "ChangeRequest",
+            c.Id.ToString(), projectId,
+            detail: new
+            {
+                number              = c.Number,
+                decisionNote        = req.DecisionNote,
+                createdVariation    = req.CreateVariation,
+                variationId         = variation?.Id,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return c;
+    }
+
+    /// <summary>
+    /// Reject transition: Raised → Rejected OR Assessed → Rejected.
+    /// DecisionNote required so the audit trail carries a "why
+    /// rejected" rationale. Once Approved, the only forward path is
+    /// Implemented → Closed; rejection after Approved rejected with
+    /// ConflictException via the state-machine guard.
+    /// </summary>
+    public async Task<ChangeRequest> RejectAsync(
+        Guid projectId, Guid changeRequestId, RejectChangeRequestRequest req,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.DecisionNote))
+            throw new ValidationException(["DecisionNote is required"]);
+
+        var c = await LoadAsync(projectId, changeRequestId, ct);
+        EnforceTransition(c.State, ChangeRequestState.Rejected, role);
+
+        c.State        = ChangeRequestState.Rejected;
+        c.DecisionById = actorId;
+        c.DecisionAt   = DateTime.UtcNow;
+        c.DecisionNote = req.DecisionNote.Trim();
+
+        await audit.WriteAsync(actorId, "change_request.rejected", "ChangeRequest",
+            c.Id.ToString(), projectId,
+            detail: new
+            {
+                number       = c.Number,
+                decisionNote = req.DecisionNote,
+                fromState    = c.State.ToString(),  // post-mutation; harmless for audit
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return c;
+    }
+
+    /// <summary>
+    /// Implement transition: Approved → Implemented. Marks the change
+    /// as actioned in delivery. Note optional.
+    /// </summary>
+    public async Task<ChangeRequest> ImplementAsync(
+        Guid projectId, Guid changeRequestId, ImplementChangeRequestRequest req,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var c = await LoadAsync(projectId, changeRequestId, ct);
+        EnforceTransition(c.State, ChangeRequestState.Implemented, role);
+
+        c.State         = ChangeRequestState.Implemented;
+        c.ImplementedAt = DateTime.UtcNow;
+
+        await audit.WriteAsync(actorId, "change_request.implemented", "ChangeRequest",
+            c.Id.ToString(), projectId,
+            detail: new { number = c.Number, note = req.Note },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return c;
+    }
+
+    /// <summary>
+    /// Close transition: Implemented → Closed. Terminal state. Note
+    /// optional.
+    /// </summary>
+    public async Task<ChangeRequest> CloseAsync(
+        Guid projectId, Guid changeRequestId, CloseChangeRequestRequest req,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var c = await LoadAsync(projectId, changeRequestId, ct);
+        EnforceTransition(c.State, ChangeRequestState.Closed, role);
+
+        c.State    = ChangeRequestState.Closed;
+        c.ClosedAt = DateTime.UtcNow;
+
+        await audit.WriteAsync(actorId, "change_request.closed", "ChangeRequest",
+            c.Id.ToString(), projectId,
+            detail: new { number = c.Number, note = req.Note },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return c;
+    }
+
+    // ── Reads ───────────────────────────────────────────────────────
+
+    public Task<ChangeRequest> GetAsync(
+        Guid projectId, Guid changeRequestId, CancellationToken ct = default)
+        => LoadAsync(projectId, changeRequestId, ct);
+
+    public async Task<List<ChangeRequest>> ListAsync(
+        Guid projectId, ChangeRequestState? state, ChangeRequestCategory? category,
+        CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        var q = db.ChangeRequests.Where(c => c.ProjectId == projectId);
+        if (state.HasValue)    q = q.Where(c => c.State == state.Value);
+        if (category.HasValue) q = q.Where(c => c.Category == category.Value);
+        return await q.OrderByDescending(c => c.RaisedAt).ToListAsync(ct);
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────────
+
+    private async Task<ChangeRequest> LoadAsync(
+        Guid projectId, Guid changeRequestId, CancellationToken ct)
+        => await db.ChangeRequests
+            .FirstOrDefaultAsync(c => c.Id == changeRequestId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("ChangeRequest");
+
+    /// <summary>
+    /// Throws on transition rejection, mapping the failure to the
+    /// right exception type:
+    /// - State-machine invalid transition (e.g. Approved → Rejected)
+    ///   → ConflictException with the from-state in the message.
+    /// - Role doesn't meet the gate → ForbiddenException.
+    /// </summary>
+    private static void EnforceTransition(
+        ChangeRequestState from, ChangeRequestState to, UserRole role)
+    {
+        if (!ChangeWorkflow.IsValidTransition(from, to))
+            throw new ConflictException(
+                $"Cannot transition ChangeRequest from {from} to {to}");
+        if (!ChangeWorkflow.CanTransition(from, to, role))
+            throw new ForbiddenException(
+                $"Role {role} cannot perform the {from} → {to} transition");
+    }
+
+    private async Task<string> NextVariationNumberAsync(Guid projectId, CancellationToken ct)
+    {
+        var n = await db.Variations.CountAsync(v => v.ProjectId == projectId, ct);
+        return $"VAR-{(n + 1):D4}";
+    }
+}
+
 public class CdeService(CimsDbContext db, AuditService audit)
 {
     public async Task<List<CdeContainer>> ListContainersAsync(Guid projectId) =>

@@ -79,3 +79,19 @@ public enum LpsReasonForNonCompletion
     AccessIssue,
     Other,
 }
+
+// S5 Change Control module (PAFM-SD F.6).
+// Construction-site change category — F.6 second bullet.
+public enum ChangeRequestCategory { Scope, Time, Cost, Quality }
+// Building Safety Act 2022 HRB categorisation — F.6 third bullet.
+// NotApplicable for non-HRB projects (the majority); A/B/C tagged
+// per Building Safety Regulator guidance for HRB projects. v1.0
+// ships the categorisation as a tag (no auto-inference); per-tenant
+// configurable inference rules → v1.1 / S14 Admin Console.
+public enum BsaHrbCategory { NotApplicable, A, B, C }
+// 5-state ChangeRequest workflow — F.6 first bullet. Raised → Assessed
+// → Approved | Rejected → Implemented → Closed. Reject is allowed from
+// Raised or Assessed only; once Approved the only forward path is
+// Implemented → Closed. State-machine enforcement in
+// Core/ChangeWorkflow.cs.
+public enum ChangeRequestState { Raised, Assessed, Approved, Rejected, Implemented, Closed }

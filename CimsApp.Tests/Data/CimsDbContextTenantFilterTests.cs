@@ -54,6 +54,8 @@ public class CimsDbContextTenantFilterTests
         typeof(LookaheadEntry),
         typeof(WeeklyWorkPlan),
         typeof(WeeklyTaskCommitment),
+        // S5 change-control addition (T-S5-02).
+        typeof(ChangeRequest),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =
