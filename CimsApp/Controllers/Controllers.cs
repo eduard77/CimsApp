@@ -1567,6 +1567,152 @@ public class CompensationEventsController(CompensationEventsService svc, CimsDbC
     }
 }
 
+// ── Dashboards (T-S7-02) ──────────────────────────────────────────────────────
+// PAFM-SD F.8 first bullet — six per-role dashboards.
+[Route("api/v1/projects/{projectId:guid}/dashboards")]
+public class DashboardsController(DashboardsService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet("pm")]
+    public async Task<IActionResult> Pm(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetPmDashboardAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    [HttpGet("cm")]
+    public async Task<IActionResult> Cm(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetCmDashboardAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    [HttpGet("sm")]
+    public async Task<IActionResult> Sm(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetSmDashboardAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    [HttpGet("im")]
+    public async Task<IActionResult> Im(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetImDashboardAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    [HttpGet("hse")]
+    public async Task<IActionResult> Hse(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetHseDashboardAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    [HttpGet("client")]
+    public async Task<IActionResult> Client(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetClientDashboardAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+}
+
+// ── Reporting / MPR (T-S7-03) ─────────────────────────────────────────────────
+// PAFM-SD F.8 second bullet — Monthly Project Report. v1.0 returns
+// JSON only; PDF rendering deferred to v1.1 / B-055.
+[Route("api/v1/projects/{projectId:guid}/reports")]
+public class ReportingController(ReportingService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet("mpr")]
+    public async Task<IActionResult> Mpr(
+        Guid projectId,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GenerateMonthlyProjectReportAsync(projectId, from, to, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    [HttpGet("kpi")]
+    public async Task<IActionResult> Kpi(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var dto = await svc.GetProjectKpiCardsAsync(projectId, ct);
+        return Ok(new { success = true, data = dto });
+    }
+}
+
+// ── Custom Report Definitions (T-S7-05) ───────────────────────────────────────
+// PAFM-SD F.8 fourth bullet — basic custom report builder. Saved
+// queries persisted per project. CRUD gated `TaskTeamMember+`;
+// list / get / run gated to project membership.
+[Route("api/v1/projects/{projectId:guid}/custom-reports")]
+public class CustomReportDefinitionsController(
+    CustomReportDefinitionsService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.ListAsync(projectId, ct) });
+    }
+
+    [HttpGet("{definitionId:guid}")]
+    public async Task<IActionResult> Get(Guid projectId, Guid definitionId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.GetAsync(projectId, definitionId, ct) });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Create(
+        Guid projectId, CreateCustomReportDefinitionRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var dto = await svc.CreateAsync(projectId, req, CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = dto });
+    }
+
+    [HttpPut("{definitionId:guid}")]
+    public async Task<IActionResult> Update(
+        Guid projectId, Guid definitionId,
+        UpdateCustomReportDefinitionRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var dto = await svc.UpdateAsync(projectId, definitionId, req, CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = dto });
+    }
+
+    [HttpDelete("{definitionId:guid}")]
+    public async Task<IActionResult> Delete(
+        Guid projectId, Guid definitionId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        await svc.DeleteAsync(projectId, definitionId, CurrentUserId, ClientIp, ClientAgent, ct);
+        return NoContent();
+    }
+
+    [HttpPost("{definitionId:guid}/run")]
+    public async Task<IActionResult> Run(
+        Guid projectId, Guid definitionId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.RunAsync(projectId, definitionId, ct) });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

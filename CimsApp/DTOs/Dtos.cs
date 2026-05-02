@@ -447,6 +447,123 @@ public record QuoteCompensationEventRequest(
 public record DecideCompensationEventRequest(string DecisionNote);
 // Implement: optional note.
 public record ImplementCompensationEventRequest(string? Note);
+// T-S7-02 Dashboards. Six per-role aggregation views (PM / CM /
+// SM / IM / HSE / Client). All return the same DTO shape — a
+// list of DashboardCardDto rows, each tagged with a semantic type
+// so the UI can format Counts, Percentages, Currency, Dates, and
+// free-text values appropriately.
+public enum DashboardCardType { Count, Percentage, Currency, Date, Text }
+public record DashboardCardDto(
+    string Name,
+    string Value,
+    DashboardCardType Type,
+    string? Subtitle);
+public record DashboardDto(
+    string Role,
+    Guid ProjectId,
+    string ProjectName,
+    string ProjectCode,
+    List<DashboardCardDto> Cards);
+// T-S7-03 Monthly Project Report (MPR). PAFM-SD F.8 second
+// bullet. v1.0 returns JSON-only — PDF rendering deferred to
+// v1.1 / B-055. Section layout is a best-effort inference from
+// PMBOK 7 / NEC4 standard reporting templates; reconcile against
+// canonical PAFM Ch 30 paste when B-055 lands.
+// PAFM Ch 30 reference: best-effort inference v1.0
+public record MprDto(
+    Guid ProjectId,
+    string ProjectName,
+    string ProjectCode,
+    DateTime PeriodStart,
+    DateTime PeriodEnd,
+    DateTime GeneratedAtUtc,
+    MprExecutiveSummary ExecutiveSummary,
+    MprProgrammeStatus Programme,
+    MprCostStatus Cost,
+    MprRiskStatus Risk,
+    MprVariationsAndChanges Changes,
+    MprIssues Issues,
+    MprStakeholderUpdates Stakeholders);
+public record MprExecutiveSummary(
+    string ProjectStatus,
+    DateTime? PlannedEndDate,
+    DateTime? EstimatedEndDate,
+    int OpenRisksCount,
+    int OpenIssuesCount);
+public record MprProgrammeStatus(
+    int TotalActivities,
+    int CompletedActivities,
+    decimal? PercentComplete,
+    DateTime? EarliestEarlyStart,
+    DateTime? LatestEarlyFinish,
+    string? LatestBaselineLabel,
+    DateTime? LatestBaselineCapturedAt);
+public record MprCostStatus(
+    string Currency,
+    decimal TotalBudget,
+    decimal TotalCommitted,
+    decimal TotalActuals,
+    decimal? PercentSpent);
+public record MprRiskStatus(
+    int OpenTotal,
+    int OpenHighSeverity,
+    int OpenMediumSeverity,
+    int OpenLowSeverity);
+public record MprVariationsAndChanges(
+    int VariationsRaisedInPeriod,
+    int VariationsApprovedInPeriod,
+    decimal VariationsApprovedValueInPeriod,
+    int ChangeRequestsRaisedInPeriod,
+    int ChangeRequestsApprovedInPeriod);
+public record MprIssues(
+    int OpenRfis,
+    int OpenActions,
+    int OpenEarlyWarnings,
+    int OpenCompensationEvents);
+public record MprStakeholderUpdates(
+    int StakeholdersTotal,
+    int EngagementLogsInPeriod,
+    int CommunicationsTotal);
+// T-S7-04 KPI cards. PAFM-SD F.8 third bullet — "KPI cards
+// tied to success criteria" mapped to PAFM-SD Ch 2.6 v1.0
+// success criteria. Single project-level endpoint returning
+// the card list. Re-uses DashboardCardDto for shape parity
+// with the per-role dashboards.
+public record KpiCardsDto(
+    Guid ProjectId,
+    string ProjectName,
+    string ProjectCode,
+    List<DashboardCardDto> Cards);
+// T-S7-05 Custom report definitions. v1.0 ships pure-equality
+// filtering against a per-entity field allow-list. Richer
+// operators → v1.1 / B-060. Cross-entity joins → B-056.
+// Scheduled runs + email → B-057. Export formats → B-058.
+public record CustomReportDefinitionDto(
+    Guid Id,
+    Guid ProjectId,
+    string Name,
+    CustomReportEntityType EntityType,
+    string FilterJson,
+    string ColumnsJson,
+    Guid CreatedById,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+public record CreateCustomReportDefinitionRequest(
+    string Name,
+    CustomReportEntityType EntityType,
+    string? FilterJson,
+    string? ColumnsJson);
+public record UpdateCustomReportDefinitionRequest(
+    string? Name,
+    string? FilterJson,
+    string? ColumnsJson);
+public record CustomReportRunResultDto(
+    Guid DefinitionId,
+    string Name,
+    CustomReportEntityType EntityType,
+    int RowCount,
+    List<string> Columns,
+    List<Dictionary<string, object?>> Rows);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

@@ -4923,6 +4923,727 @@ public class CompensationEventsService(CimsDbContext db, AuditService audit)
     }
 }
 
+/// <summary>
+/// DashboardsService — per-role aggregation views (T-S7-02,
+/// PAFM-SD F.8 first bullet — "Role-specific dashboards (PM, CM,
+/// SM, IM, HSE, Client)"). Read-only; no mutations and no audit
+/// twin. Each per-role method returns a uniform
+/// <see cref="DashboardDto"/> with a list of
+/// <see cref="DashboardCardDto"/> rows. The HSE dashboard is
+/// sparse in v1.0 because the HSE module is S12 — explicit
+/// B-059 backlog entry covers the deferral.
+///
+/// Performance note: each dashboard runs ~5-8 small COUNT /
+/// AGG queries per request. Top-3 risk #2 in the kickoff: if
+/// pilot profiling shows real latency, the v1.1 candidate is a
+/// single-batched query per dashboard.
+/// </summary>
+public class DashboardsService(CimsDbContext db)
+{
+    public async Task<DashboardDto> GetPmDashboardAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var p = await LoadProjectAsync(projectId, ct);
+
+        var openRfis = await db.Rfis.CountAsync(
+            r => r.ProjectId == projectId
+              && r.Status != RfiStatus.Closed && r.Status != RfiStatus.Cancelled, ct);
+        var openActions = await db.ActionItems.CountAsync(
+            a => a.ProjectId == projectId
+              && (a.Status == ActionStatus.Open || a.Status == ActionStatus.InProgress), ct);
+        var openChangeRequests = await db.ChangeRequests.CountAsync(
+            c => c.ProjectId == projectId
+              && c.State != ChangeRequestState.Rejected
+              && c.State != ChangeRequestState.Closed, ct);
+        var openEarlyWarnings = await db.EarlyWarnings.CountAsync(
+            w => w.ProjectId == projectId && w.State != EarlyWarningState.Closed, ct);
+        var openCompensationEvents = await db.CompensationEvents.CountAsync(
+            c => c.ProjectId == projectId
+              && c.State != CompensationEventState.Rejected
+              && c.State != CompensationEventState.Implemented, ct);
+        var openRisks = await db.Risks.CountAsync(
+            r => r.Project.Id == projectId && r.Status != RiskStatus.Closed, ct);
+
+        return new DashboardDto("PM", p.Id, p.Name, p.Code, new List<DashboardCardDto>
+        {
+            new("Open RFIs",                 openRfis.ToString(),                DashboardCardType.Count, null),
+            new("Open Actions",              openActions.ToString(),             DashboardCardType.Count, null),
+            new("Open Change Requests",      openChangeRequests.ToString(),      DashboardCardType.Count, null),
+            new("Open Early Warnings",       openEarlyWarnings.ToString(),       DashboardCardType.Count, null),
+            new("Open Compensation Events",  openCompensationEvents.ToString(),  DashboardCardType.Count, null),
+            new("Open Risks",                openRisks.ToString(),               DashboardCardType.Count, null),
+        });
+    }
+
+    public async Task<DashboardDto> GetCmDashboardAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var p = await LoadProjectAsync(projectId, ct);
+
+        var totalBudget = await db.CostBreakdownItems
+            .Where(c => c.ProjectId == projectId && c.Budget.HasValue)
+            .SumAsync(c => c.Budget!.Value, ct);
+        var totalCommitted = await db.Commitments
+            .Where(c => c.ProjectId == projectId)
+            .SumAsync(c => (decimal?)c.Amount, ct) ?? 0m;
+        var totalActuals = await db.ActualCosts
+            .Where(a => a.ProjectId == projectId)
+            .SumAsync(a => (decimal?)a.Amount, ct) ?? 0m;
+        var raisedVariations = await db.Variations.CountAsync(
+            v => v.ProjectId == projectId && v.State == VariationState.Raised, ct);
+        var approvedVariations = await db.Variations.CountAsync(
+            v => v.ProjectId == projectId && v.State == VariationState.Approved, ct);
+        var latestPaymentCert = await db.PaymentCertificates
+            .Where(c => c.ProjectId == projectId)
+            .OrderByDescending(c => c.CreatedAt)
+            .Select(c => new { c.CertificateNumber, c.State })
+            .FirstOrDefaultAsync(ct);
+
+        var cards = new List<DashboardCardDto>
+        {
+            new("Total CBS Budget",     FormatCurrency(totalBudget,    p.Currency), DashboardCardType.Currency, null),
+            new("Total Committed",      FormatCurrency(totalCommitted, p.Currency), DashboardCardType.Currency, null),
+            new("Total Actuals",        FormatCurrency(totalActuals,   p.Currency), DashboardCardType.Currency, null),
+            new("Raised Variations",    raisedVariations.ToString(),                DashboardCardType.Count, null),
+            new("Approved Variations",  approvedVariations.ToString(),              DashboardCardType.Count, null),
+            new("Latest Payment Cert",
+                latestPaymentCert?.CertificateNumber ?? "—",
+                DashboardCardType.Text,
+                latestPaymentCert is null ? "No certificate yet" : $"State: {latestPaymentCert.State}"),
+        };
+        return new DashboardDto("CM", p.Id, p.Name, p.Code, cards);
+    }
+
+    public async Task<DashboardDto> GetSmDashboardAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var p = await LoadProjectAsync(projectId, ct);
+
+        var activeLookaheads = await db.LookaheadEntries.CountAsync(
+            le => le.ProjectId == projectId && le.IsActive, ct);
+        var latestWwp = await db.WeeklyWorkPlans
+            .Where(w => w.ProjectId == projectId)
+            .OrderByDescending(w => w.WeekStarting)
+            .Select(w => new { w.Id, w.WeekStarting })
+            .FirstOrDefaultAsync(ct);
+
+        // PPC computed-on-read for the latest WWP, mirroring
+        // LpsService.GetWeeklyWorkPlanAsync's compute path.
+        decimal? latestPpc = null;
+        if (latestWwp is not null)
+        {
+            var commits = await db.WeeklyTaskCommitments
+                .Where(c => c.WeeklyWorkPlanId == latestWwp.Id)
+                .Select(c => new { c.Committed, c.Completed })
+                .ToListAsync(ct);
+            var committedCount = commits.Count(c => c.Committed);
+            var completedCount = commits.Count(c => c.Completed);
+            if (committedCount > 0)
+                latestPpc = Math.Round(100m * completedCount / committedCount, 2);
+        }
+
+        var openActions = await db.ActionItems.CountAsync(
+            a => a.ProjectId == projectId
+              && (a.Status == ActionStatus.Open || a.Status == ActionStatus.InProgress), ct);
+        var openEarlyWarnings = await db.EarlyWarnings.CountAsync(
+            w => w.ProjectId == projectId && w.State != EarlyWarningState.Closed, ct);
+
+        return new DashboardDto("SM", p.Id, p.Name, p.Code, new List<DashboardCardDto>
+        {
+            new("Active Lookaheads",    activeLookaheads.ToString(), DashboardCardType.Count, null),
+            new("Latest WWP",
+                latestWwp?.WeekStarting.ToString("yyyy-MM-dd") ?? "—",
+                DashboardCardType.Date,
+                latestWwp is null ? "No weekly plan yet" : null),
+            new("Latest WWP PPC",
+                latestPpc?.ToString("0.##") ?? "—",
+                DashboardCardType.Percentage,
+                latestPpc is null ? "No commitments recorded" : null),
+            new("Open Actions",          openActions.ToString(),       DashboardCardType.Count, null),
+            new("Open Early Warnings",   openEarlyWarnings.ToString(), DashboardCardType.Count, null),
+        });
+    }
+
+    public async Task<DashboardDto> GetImDashboardAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var p = await LoadProjectAsync(projectId, ct);
+
+        var docCounts = await db.Documents
+            .Where(d => d.ProjectId == projectId)
+            .GroupBy(d => d.CurrentState)
+            .Select(g => new { State = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+        var byState = docCounts.ToDictionary(g => g.State, g => g.Count);
+
+        var openRfis = await db.Rfis.CountAsync(
+            r => r.ProjectId == projectId
+              && r.Status != RfiStatus.Closed && r.Status != RfiStatus.Cancelled, ct);
+        var crsAwaitingAssessment = await db.ChangeRequests.CountAsync(
+            c => c.ProjectId == projectId && c.State == ChangeRequestState.Raised, ct);
+
+        return new DashboardDto("IM", p.Id, p.Name, p.Code, new List<DashboardCardDto>
+        {
+            new("Docs - Work in Progress", (byState.GetValueOrDefault(CdeState.WorkInProgress)).ToString(), DashboardCardType.Count, null),
+            new("Docs - Shared",           (byState.GetValueOrDefault(CdeState.Shared)).ToString(),         DashboardCardType.Count, null),
+            new("Docs - Published",        (byState.GetValueOrDefault(CdeState.Published)).ToString(),      DashboardCardType.Count, null),
+            new("Docs - Archived",         (byState.GetValueOrDefault(CdeState.Archived)).ToString(),       DashboardCardType.Count, null),
+            new("Open RFIs",               openRfis.ToString(),                                              DashboardCardType.Count, null),
+            new("CRs Awaiting Assessment", crsAwaitingAssessment.ToString(),                                 DashboardCardType.Count, null),
+        });
+    }
+
+    public async Task<DashboardDto> GetHseDashboardAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var p = await LoadProjectAsync(projectId, ct);
+
+        // HSE module integration is S12 (Genera Systems QA, HS&E
+        // Integration). v1.0 dashboard is sparse — surfaces the
+        // deferral explicitly so the UI can render a placeholder
+        // with a "Coming in S12 (B-059)" message.
+        return new DashboardDto("HSE", p.Id, p.Name, p.Code, new List<DashboardCardDto>
+        {
+            new("HSE Module",
+                "Coming in S12",
+                DashboardCardType.Text,
+                "Per PAFM-SD roadmap; see backlog entry B-059 for HSE-specific dashboard cards"),
+        });
+    }
+
+    public async Task<DashboardDto> GetClientDashboardAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var p = await LoadProjectAsync(projectId, ct);
+
+        var raisedVariations = await db.Variations.CountAsync(
+            v => v.ProjectId == projectId && v.State == VariationState.Raised, ct);
+        var approvedVariations = await db.Variations.CountAsync(
+            v => v.ProjectId == projectId && v.State == VariationState.Approved, ct);
+
+        // Project finish date best-estimate: max EarlyFinish across
+        // active activities (post-CPM-recompute). Falls back to
+        // Project.EndDate if no schedule exists, else null.
+        var efs = await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive && a.EarlyFinish.HasValue)
+            .Select(a => a.EarlyFinish!.Value)
+            .ToListAsync(ct);
+        DateTime? estimatedFinish = efs.Count == 0 ? p.EndDate : efs.Max();
+
+        var latestBaseline = await db.ScheduleBaselines
+            .Where(b => b.ProjectId == projectId)
+            .OrderByDescending(b => b.CapturedAt)
+            .Select(b => new { b.Label, b.CapturedAt })
+            .FirstOrDefaultAsync(ct);
+
+        return new DashboardDto("Client", p.Id, p.Name, p.Code, new List<DashboardCardDto>
+        {
+            new("Project Status",         p.Status.ToString(),                            DashboardCardType.Text, null),
+            new("Estimated Finish",
+                estimatedFinish?.ToString("yyyy-MM-dd") ?? "—",
+                DashboardCardType.Date,
+                estimatedFinish is null ? "No schedule yet" : null),
+            new("Raised Variations",      raisedVariations.ToString(),                    DashboardCardType.Count, null),
+            new("Approved Variations",    approvedVariations.ToString(),                  DashboardCardType.Count, null),
+            new("Latest Baseline",
+                latestBaseline?.Label ?? "—",
+                DashboardCardType.Text,
+                latestBaseline is null ? "No baseline captured" : $"Captured {latestBaseline.CapturedAt:yyyy-MM-dd}"),
+        });
+    }
+
+    private async Task<Project> LoadProjectAsync(Guid projectId, CancellationToken ct)
+        => await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+    private static string FormatCurrency(decimal value, string currency)
+        => $"{currency} {value:N2}";
+}
+
+// T-S7-03 Monthly Project Report (MPR) data aggregator.
+// PAFM-SD F.8 second bullet. v1.0 produces a JSON-only DTO;
+// PDF rendering deferred to v1.1 / B-055. Each section is a
+// best-effort inference of the canonical PAFM Ch 30 layout
+// (paste-on-request per reference_pafm_spec.md) — reconcile
+// at B-055 time. Read-only — no audit / mutation.
+public class ReportingService(CimsDbContext db)
+{
+    public async Task<MprDto> GenerateMonthlyProjectReportAsync(
+        Guid projectId,
+        DateTime? periodStart,
+        DateTime? periodEnd,
+        CancellationToken ct = default)
+    {
+        var p = await db.Projects.FirstOrDefaultAsync(x => x.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        // Default period = last full calendar month [00:00 UTC of
+        // first-of-last-month, 00:00 UTC of first-of-this-month).
+        // Caller can override via query string for ad-hoc windows.
+        var now = DateTime.UtcNow;
+        var defaultEnd = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var end = periodEnd ?? defaultEnd;
+        var start = periodStart ?? end.AddMonths(-1);
+
+        // ── Programme aggregates ────────────────────────────────
+        var activities = await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive)
+            .Select(a => new { a.PercentComplete, a.EarlyStart, a.EarlyFinish })
+            .ToListAsync(ct);
+        var totalActivities = activities.Count;
+        var completedActivities = activities.Count(a => a.PercentComplete >= 1m);
+        decimal? percentComplete = totalActivities == 0
+            ? null
+            : Math.Round(100m * activities.Sum(a => a.PercentComplete) / totalActivities, 2);
+        var earliestEarlyStart = activities
+            .Where(a => a.EarlyStart.HasValue)
+            .Select(a => (DateTime?)a.EarlyStart!.Value)
+            .DefaultIfEmpty(null).Min();
+        var latestEarlyFinish = activities
+            .Where(a => a.EarlyFinish.HasValue)
+            .Select(a => (DateTime?)a.EarlyFinish!.Value)
+            .DefaultIfEmpty(null).Max();
+        var latestBaseline = await db.ScheduleBaselines
+            .Where(b => b.ProjectId == projectId)
+            .OrderByDescending(b => b.CapturedAt)
+            .Select(b => new { b.Label, b.CapturedAt })
+            .FirstOrDefaultAsync(ct);
+
+        // ── Cost aggregates ────────────────────────────────────
+        var totalBudget = await db.CostBreakdownItems
+            .Where(c => c.ProjectId == projectId && c.Budget.HasValue)
+            .SumAsync(c => c.Budget!.Value, ct);
+        var totalCommitted = await db.Commitments
+            .Where(c => c.ProjectId == projectId)
+            .SumAsync(c => (decimal?)c.Amount, ct) ?? 0m;
+        var totalActuals = await db.ActualCosts
+            .Where(a => a.ProjectId == projectId)
+            .SumAsync(a => (decimal?)a.Amount, ct) ?? 0m;
+        decimal? percentSpent = totalBudget == 0m
+            ? null
+            : Math.Round(100m * totalActuals / totalBudget, 2);
+
+        // ── Risk severity buckets ──────────────────────────────
+        // v1.0 uses the standard PMI 5x5 split: high ≥ 15,
+        // medium 7..12, low ≤ 6. Per-tenant thresholds are S14
+        // Admin Console territory (kickoff Top-3 risk #3 of S2).
+        var openRiskScores = await db.Risks
+            .Where(r => r.ProjectId == projectId && r.Status != RiskStatus.Closed)
+            .Select(r => r.Score)
+            .ToListAsync(ct);
+        var openHigh   = openRiskScores.Count(s => s >= 15);
+        var openMed    = openRiskScores.Count(s => s >= 7 && s <= 12);
+        var openLow    = openRiskScores.Count(s => s <= 6);
+        var openRisks  = openRiskScores.Count;
+
+        // ── Variations & changes (period-windowed) ─────────────
+        var varsRaised = await db.Variations.CountAsync(
+            v => v.ProjectId == projectId
+              && v.CreatedAt >= start && v.CreatedAt < end, ct);
+        var varsApprovedInPeriod = await db.Variations
+            .Where(v => v.ProjectId == projectId
+                     && v.State == VariationState.Approved
+                     && v.DecidedAt.HasValue
+                     && v.DecidedAt >= start && v.DecidedAt < end)
+            .Select(v => v.EstimatedCostImpact)
+            .ToListAsync(ct);
+        var varsApprovedCount = varsApprovedInPeriod.Count;
+        var varsApprovedValue = varsApprovedInPeriod.Sum(x => x ?? 0m);
+        var crsRaised = await db.ChangeRequests.CountAsync(
+            c => c.ProjectId == projectId
+              && c.CreatedAt >= start && c.CreatedAt < end, ct);
+        var crsApproved = await db.ChangeRequests.CountAsync(
+            c => c.ProjectId == projectId
+              && c.State == ChangeRequestState.Approved
+              && c.UpdatedAt >= start && c.UpdatedAt < end, ct);
+
+        // ── Open issues ────────────────────────────────────────
+        var openRfis = await db.Rfis.CountAsync(
+            r => r.ProjectId == projectId
+              && r.Status != RfiStatus.Closed && r.Status != RfiStatus.Cancelled, ct);
+        var openActions = await db.ActionItems.CountAsync(
+            a => a.ProjectId == projectId
+              && (a.Status == ActionStatus.Open || a.Status == ActionStatus.InProgress), ct);
+        var openEarlyWarnings = await db.EarlyWarnings.CountAsync(
+            w => w.ProjectId == projectId && w.State != EarlyWarningState.Closed, ct);
+        var openCompensationEvents = await db.CompensationEvents.CountAsync(
+            c => c.ProjectId == projectId
+              && c.State != CompensationEventState.Rejected
+              && c.State != CompensationEventState.Implemented, ct);
+        var openIssuesTotal = openRfis + openActions
+                            + openEarlyWarnings + openCompensationEvents;
+
+        // ── Stakeholders ───────────────────────────────────────
+        var stakeholdersTotal = await db.Stakeholders.CountAsync(
+            s => s.ProjectId == projectId && s.IsActive, ct);
+        var engagementsInPeriod = await db.EngagementLogs.CountAsync(
+            e => e.ProjectId == projectId
+              && e.OccurredAt >= start && e.OccurredAt < end, ct);
+        var communicationsTotal = await db.CommunicationItems.CountAsync(
+            c => c.ProjectId == projectId && c.IsActive, ct);
+
+        // Estimated finish: max EarlyFinish across active activities,
+        // mirroring the Client dashboard's logic. Falls back to
+        // Project.EndDate if no schedule exists.
+        var estimatedFinish = latestEarlyFinish ?? p.EndDate;
+
+        return new MprDto(
+            ProjectId:        p.Id,
+            ProjectName:      p.Name,
+            ProjectCode:      p.Code,
+            PeriodStart:      start,
+            PeriodEnd:        end,
+            GeneratedAtUtc:   now,
+            ExecutiveSummary: new MprExecutiveSummary(
+                ProjectStatus:    p.Status.ToString(),
+                PlannedEndDate:   p.EndDate,
+                EstimatedEndDate: estimatedFinish,
+                OpenRisksCount:   openRisks,
+                OpenIssuesCount:  openIssuesTotal),
+            Programme: new MprProgrammeStatus(
+                TotalActivities:            totalActivities,
+                CompletedActivities:        completedActivities,
+                PercentComplete:            percentComplete,
+                EarliestEarlyStart:         earliestEarlyStart,
+                LatestEarlyFinish:          latestEarlyFinish,
+                LatestBaselineLabel:        latestBaseline?.Label,
+                LatestBaselineCapturedAt:   latestBaseline?.CapturedAt),
+            Cost: new MprCostStatus(
+                Currency:        p.Currency,
+                TotalBudget:     totalBudget,
+                TotalCommitted:  totalCommitted,
+                TotalActuals:    totalActuals,
+                PercentSpent:    percentSpent),
+            Risk: new MprRiskStatus(
+                OpenTotal:           openRisks,
+                OpenHighSeverity:    openHigh,
+                OpenMediumSeverity:  openMed,
+                OpenLowSeverity:     openLow),
+            Changes: new MprVariationsAndChanges(
+                VariationsRaisedInPeriod:        varsRaised,
+                VariationsApprovedInPeriod:      varsApprovedCount,
+                VariationsApprovedValueInPeriod: varsApprovedValue,
+                ChangeRequestsRaisedInPeriod:    crsRaised,
+                ChangeRequestsApprovedInPeriod:  crsApproved),
+            Issues: new MprIssues(
+                OpenRfis:                openRfis,
+                OpenActions:             openActions,
+                OpenEarlyWarnings:       openEarlyWarnings,
+                OpenCompensationEvents:  openCompensationEvents),
+            Stakeholders: new MprStakeholderUpdates(
+                StakeholdersTotal:       stakeholdersTotal,
+                EngagementLogsInPeriod:  engagementsInPeriod,
+                CommunicationsTotal:     communicationsTotal));
+    }
+
+    // T-S7-04 KPI cards. Project-level success-criteria dashboard
+    // mapped to PAFM-SD Ch 2.6 v1.0 success criteria. Honest v1.0
+    // proxies where genuine EVM (CPI / SPI) needs the v1.1 per-line
+    // progress signal — subtitles call out which cards are proxies.
+    public async Task<KpiCardsDto> GetProjectKpiCardsAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var p = await db.Projects.FirstOrDefaultAsync(x => x.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var now    = DateTime.UtcNow;
+        var thirty = now.AddDays(-30);
+
+        // Module activity (last 30 days) — sum of new rows across
+        // the user-facing modules. Direct row counts (not audit log)
+        // because some modules emit audit records in atomic batches
+        // that are awkward to per-entity bucket.
+        var rfi30      = await db.Rfis.CountAsync(            r => r.ProjectId == projectId && r.CreatedAt >= thirty, ct);
+        var actions30  = await db.ActionItems.CountAsync(     a => a.ProjectId == projectId && a.CreatedAt >= thirty, ct);
+        var crs30      = await db.ChangeRequests.CountAsync(  c => c.ProjectId == projectId && c.CreatedAt >= thirty, ct);
+        var vars30     = await db.Variations.CountAsync(      v => v.ProjectId == projectId && v.CreatedAt >= thirty, ct);
+        var engs30     = await db.EngagementLogs.CountAsync(  e => e.ProjectId == projectId && e.CreatedAt >= thirty, ct);
+        var moduleActivity = rfi30 + actions30 + crs30 + vars30 + engs30;
+
+        // MPR data freshness — latest CostPeriod EndDate.
+        var latestPeriodEnd = await db.CostPeriods
+            .Where(c => c.ProjectId == projectId)
+            .OrderByDescending(c => c.EndDate)
+            .Select(c => (DateTime?)c.EndDate)
+            .FirstOrDefaultAsync(ct);
+
+        var criticalActivities = await db.Activities.CountAsync(
+            a => a.ProjectId == projectId && a.IsActive && a.IsCritical, ct);
+
+        var totalBudget = await db.CostBreakdownItems
+            .Where(c => c.ProjectId == projectId && c.Budget.HasValue)
+            .SumAsync(c => c.Budget!.Value, ct);
+        var totalActuals = await db.ActualCosts
+            .Where(a => a.ProjectId == projectId)
+            .SumAsync(a => (decimal?)a.Amount, ct) ?? 0m;
+        decimal? percentSpent = totalBudget == 0m
+            ? null
+            : Math.Round(100m * totalActuals / totalBudget, 2);
+
+        var actsList = await db.Activities
+            .Where(a => a.ProjectId == projectId && a.IsActive)
+            .Select(a => a.PercentComplete)
+            .ToListAsync(ct);
+        var totalActs     = actsList.Count;
+        var completedActs = actsList.Count(pc => pc >= 1m);
+        decimal? completionPct = totalActs == 0
+            ? null
+            : Math.Round(100m * completedActs / totalActs, 2);
+
+        var closedRfis30 = await db.Rfis
+            .Where(r => r.ProjectId == projectId
+                     && r.Status == RfiStatus.Closed
+                     && r.ClosedAt.HasValue
+                     && r.ClosedAt >= thirty)
+            .Select(r => new { r.CreatedAt, r.ClosedAt })
+            .ToListAsync(ct);
+        decimal? avgRfiDays = closedRfis30.Count == 0
+            ? null
+            : Math.Round(
+                (decimal)closedRfis30.Average(
+                    r => (r.ClosedAt!.Value - r.CreatedAt).TotalDays), 1);
+
+        var overdueActions = await db.ActionItems.CountAsync(
+            a => a.ProjectId == projectId
+              && (a.Status == ActionStatus.Open || a.Status == ActionStatus.InProgress)
+              && a.DueDate.HasValue && a.DueDate < now, ct);
+
+        return new KpiCardsDto(p.Id, p.Name, p.Code, new List<DashboardCardDto>
+        {
+            new("Module Activity (Last 30d)",
+                moduleActivity.ToString(), DashboardCardType.Count,
+                "RFIs + Actions + CRs + Variations + Engagements"),
+            new("MPR Period Coverage",
+                latestPeriodEnd?.ToString("yyyy-MM-dd") ?? "—",
+                DashboardCardType.Date,
+                latestPeriodEnd is null
+                    ? "No CostPeriod yet"
+                    : "Latest CostPeriod end-date"),
+            new("Critical Path Activities",
+                criticalActivities.ToString(),
+                DashboardCardType.Count,
+                "CPM IsCritical = true"),
+            new("Cost Spent vs Budget",
+                percentSpent?.ToString("0.##") ?? "—",
+                DashboardCardType.Percentage,
+                "Proxy for CPI; genuine EVM-CPI requires v1.1 per-line progress signal"),
+            new("Schedule Completion",
+                completionPct?.ToString("0.##") ?? "—",
+                DashboardCardType.Percentage,
+                "Proxy for SPI; activities at 100% / total active"),
+            new("RFI Avg Response (Last 30d, days)",
+                avgRfiDays?.ToString("0.#") ?? "—",
+                DashboardCardType.Text,
+                avgRfiDays is null ? "No RFIs closed in window" : null),
+            new("Overdue Actions",
+                overdueActions.ToString(),
+                DashboardCardType.Count,
+                "Open / InProgress with DueDate in past"),
+        });
+    }
+}
+
+// T-S7-05 Custom Report Definitions service. Per-project saved
+// queries; pure-equality JSON filter against per-entity field
+// allow-list (CustomReportRunner). Audit-twin per write path
+// per the ADR-0014 pattern. Run path is read-only (no audit).
+public class CustomReportDefinitionsService(CimsDbContext db, AuditService audit)
+{
+    public async Task<List<CustomReportDefinitionDto>> ListAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var rows = await db.CustomReportDefinitions
+            .Where(d => d.ProjectId == projectId && d.IsActive)
+            .OrderBy(d => d.Name)
+            .ToListAsync(ct);
+        return rows.Select(ToDto).ToList();
+    }
+
+    public async Task<CustomReportDefinitionDto> GetAsync(
+        Guid projectId, Guid definitionId, CancellationToken ct = default)
+    {
+        var d = await db.CustomReportDefinitions
+            .FirstOrDefaultAsync(x => x.Id == definitionId
+                                   && x.ProjectId == projectId
+                                   && x.IsActive, ct)
+            ?? throw new NotFoundException("CustomReportDefinition");
+        return ToDto(d);
+    }
+
+    public async Task<CustomReportDefinitionDto> CreateAsync(
+        Guid projectId, CreateCustomReportDefinitionRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Name))
+            throw new ValidationException(new List<string> { "Name is required" });
+
+        var filter  = req.FilterJson  ?? "{}";
+        var columns = req.ColumnsJson ?? "[]";
+        // Validate at write time so bad JSON / unknown fields can't
+        // be persisted.
+        CustomReportRunner.ValidateFilterJson(filter, req.EntityType);
+        CustomReportRunner.ValidateColumnsJson(columns, req.EntityType);
+
+        if (await db.CustomReportDefinitions.AnyAsync(
+                x => x.ProjectId == projectId
+                  && x.IsActive
+                  && x.Name == req.Name, ct))
+            throw new ConflictException(
+                $"A custom report named '{req.Name}' already exists.");
+
+        var def = new CustomReportDefinition
+        {
+            ProjectId   = projectId,
+            Name        = req.Name.Trim(),
+            EntityType  = req.EntityType,
+            FilterJson  = filter,
+            ColumnsJson = columns,
+            CreatedById = actorId,
+        };
+        db.CustomReportDefinitions.Add(def);
+        await audit.WriteAsync(actorId, "custom_report.created",
+            "CustomReportDefinition", def.Id.ToString(),
+            projectId: projectId,
+            detail: new { def.Name, def.EntityType },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(def);
+    }
+
+    public async Task<CustomReportDefinitionDto> UpdateAsync(
+        Guid projectId, Guid definitionId,
+        UpdateCustomReportDefinitionRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var d = await db.CustomReportDefinitions
+            .FirstOrDefaultAsync(x => x.Id == definitionId
+                                   && x.ProjectId == projectId
+                                   && x.IsActive, ct)
+            ?? throw new NotFoundException("CustomReportDefinition");
+
+        var changed = new List<string>();
+        if (req.Name is not null && req.Name != d.Name)
+        {
+            var newName = req.Name.Trim();
+            if (newName.Length == 0)
+                throw new ValidationException(new List<string> { "Name cannot be empty" });
+            if (await db.CustomReportDefinitions.AnyAsync(
+                    x => x.ProjectId == projectId
+                      && x.IsActive
+                      && x.Id != definitionId
+                      && x.Name == newName, ct))
+                throw new ConflictException(
+                    $"A custom report named '{newName}' already exists.");
+            d.Name = newName;
+            changed.Add(nameof(d.Name));
+        }
+        if (req.FilterJson is not null && req.FilterJson != d.FilterJson)
+        {
+            CustomReportRunner.ValidateFilterJson(req.FilterJson, d.EntityType);
+            d.FilterJson = req.FilterJson;
+            changed.Add(nameof(d.FilterJson));
+        }
+        if (req.ColumnsJson is not null && req.ColumnsJson != d.ColumnsJson)
+        {
+            CustomReportRunner.ValidateColumnsJson(req.ColumnsJson, d.EntityType);
+            d.ColumnsJson = req.ColumnsJson;
+            changed.Add(nameof(d.ColumnsJson));
+        }
+        if (changed.Count == 0)
+            throw new ConflictException("No changes specified.");
+
+        await audit.WriteAsync(actorId, "custom_report.updated",
+            "CustomReportDefinition", d.Id.ToString(),
+            projectId: projectId,
+            detail: new { changedFields = changed },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(d);
+    }
+
+    public async Task DeleteAsync(
+        Guid projectId, Guid definitionId,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var d = await db.CustomReportDefinitions
+            .FirstOrDefaultAsync(x => x.Id == definitionId
+                                   && x.ProjectId == projectId
+                                   && x.IsActive, ct)
+            ?? throw new NotFoundException("CustomReportDefinition");
+        d.IsActive = false;
+        await audit.WriteAsync(actorId, "custom_report.deleted",
+            "CustomReportDefinition", d.Id.ToString(),
+            projectId: projectId,
+            detail: new { d.Name },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<CustomReportRunResultDto> RunAsync(
+        Guid projectId, Guid definitionId, CancellationToken ct = default)
+    {
+        var d = await db.CustomReportDefinitions
+            .FirstOrDefaultAsync(x => x.Id == definitionId
+                                   && x.ProjectId == projectId
+                                   && x.IsActive, ct)
+            ?? throw new NotFoundException("CustomReportDefinition");
+
+        var filter  = CustomReportRunner.ValidateFilterJson(d.FilterJson, d.EntityType);
+        var columns = CustomReportRunner.ValidateColumnsJson(d.ColumnsJson, d.EntityType);
+
+        var rows = await LoadRowsAsync(projectId, d.EntityType, ct);
+        var matched = rows.Where(r => CustomReportRunner.MatchesFilter(r, filter))
+                          .Select(r => CustomReportRunner.ProjectColumns(r, columns))
+                          .ToList();
+
+        return new CustomReportRunResultDto(
+            DefinitionId: d.Id,
+            Name:         d.Name,
+            EntityType:   d.EntityType,
+            RowCount:     matched.Count,
+            Columns:      columns,
+            Rows:         matched);
+    }
+
+    private async Task<List<object>> LoadRowsAsync(
+        Guid projectId, CustomReportEntityType type, CancellationToken ct)
+    {
+        // v1.0 in-memory filter pass: load the project's rows for
+        // the chosen entity, filter / project in-memory. Single-
+        // project queries are bounded by domain volume; pushdown to
+        // SQL is a v1.1 perf concern if pilot data grows past the
+        // simple-query envelope.
+        return type switch
+        {
+            CustomReportEntityType.Risk =>
+                (await db.Risks.Where(x => x.ProjectId == projectId).ToListAsync(ct))
+                    .Cast<object>().ToList(),
+            CustomReportEntityType.ActionItem =>
+                (await db.ActionItems.Where(x => x.ProjectId == projectId).ToListAsync(ct))
+                    .Cast<object>().ToList(),
+            CustomReportEntityType.Rfi =>
+                (await db.Rfis.Where(x => x.ProjectId == projectId).ToListAsync(ct))
+                    .Cast<object>().ToList(),
+            CustomReportEntityType.Variation =>
+                (await db.Variations.Where(x => x.ProjectId == projectId).ToListAsync(ct))
+                    .Cast<object>().ToList(),
+            CustomReportEntityType.ChangeRequest =>
+                (await db.ChangeRequests.Where(x => x.ProjectId == projectId).ToListAsync(ct))
+                    .Cast<object>().ToList(),
+            _ => throw new ValidationException(new List<string>
+                 { $"EntityType {type} is not supported" }),
+        };
+    }
+
+    private static CustomReportDefinitionDto ToDto(CustomReportDefinition d) =>
+        new(d.Id, d.ProjectId, d.Name, d.EntityType,
+            d.FilterJson, d.ColumnsJson,
+            d.CreatedById, d.CreatedAt, d.UpdatedAt);
+}
+
 public class CdeService(CimsDbContext db, AuditService audit)
 {
     public async Task<List<CdeContainer>> ListContainersAsync(Guid projectId) =>
