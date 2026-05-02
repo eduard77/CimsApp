@@ -160,6 +160,7 @@ builder.Services.AddScoped<CommunicationsService>();
 builder.Services.AddScoped<ScheduleService>();
 builder.Services.AddScoped<LpsService>();
 builder.Services.AddScoped<ChangeRequestService>();
+builder.Services.AddScoped<ProcurementStrategyService>();
 builder.Services.AddScoped<CdeService>();
 builder.Services.AddScoped<DocumentsService>();
 builder.Services.AddScoped<RfiService>();

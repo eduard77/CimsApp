@@ -58,6 +58,7 @@ public class CimsDbContext(
     public DbSet<WeeklyWorkPlan>      WeeklyWorkPlans      => Set<WeeklyWorkPlan>();
     public DbSet<WeeklyTaskCommitment> WeeklyTaskCommitments => Set<WeeklyTaskCommitment>();
     public DbSet<ChangeRequest>       ChangeRequests       => Set<ChangeRequest>();
+    public DbSet<ProcurementStrategy> ProcurementStrategies => Set<ProcurementStrategy>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -522,6 +523,19 @@ public class CimsDbContext(
              .HasForeignKey(c => c.GeneratedVariationId).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<ProcurementStrategy>(e =>
+        {
+            // One row per project — unique constraint enforces
+            // upsert semantics at the DB layer; the service-layer
+            // CreateOrUpdateAsync method does the read-then-update
+            // dance.
+            e.HasIndex(s => s.ProjectId).IsUnique();
+            e.HasOne(s => s.Project).WithMany()
+             .HasForeignKey(s => s.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(s => s.ApprovedBy).WithMany()
+             .HasForeignKey(s => s.ApprovedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -571,6 +585,7 @@ public class CimsDbContext(
         m.Entity<WeeklyWorkPlan>().HasQueryFilter(w => w.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<WeeklyTaskCommitment>().HasQueryFilter(c => c.WeeklyWorkPlan.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<ChangeRequest>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<ProcurementStrategy>().HasQueryFilter(s => s.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -599,6 +614,7 @@ public class CimsDbContext(
             else if (e.Entity is Activity act) act.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is WeeklyTaskCommitment wtc) wtc.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is ChangeRequest cr) cr.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is ProcurementStrategy ps) ps.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

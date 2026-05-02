@@ -345,6 +345,15 @@ public record RejectChangeRequestRequest(string DecisionNote);
 // just a marker that the transition occurred).
 public record ImplementChangeRequestRequest(string? Note);
 public record CloseChangeRequestRequest(string? Note);
+// T-S6-02 ProcurementStrategy upsert. One row per project; the
+// service does the read-then-update dance. Approve transition is
+// a separate endpoint (POST .../approve).
+public record UpsertProcurementStrategyRequest(
+    ProcurementApproach Approach,
+    ContractForm ContractForm,
+    decimal? EstimatedTotalValue,
+    string? KeyDates,
+    string? PackageBreakdownNotes);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

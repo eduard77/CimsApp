@@ -171,6 +171,19 @@ on insufficient role.
 | POST | `/api/v1/projects/{projectId}/change-requests/{id}/implement` | authenticated | `ProjectManager+` | T-S5-04. Body `ImplementChangeRequestRequest(note?)`. State Approved → Implemented. Marks the change as actioned in delivery. Audit: `change_request.implemented`. |
 | POST | `/api/v1/projects/{projectId}/change-requests/{id}/close` | authenticated | `ProjectManager+` | T-S5-04. Body `CloseChangeRequestRequest(note?)`. State Implemented → Closed. Skipping Implement (Approved → Closed direct) rejected with `ConflictException`. Closed is terminal. Audit: `change_request.closed`. |
 
+## Procurement
+
+PAFM-SD F.7. Procurement strategy + tender packages + tenders +
+evaluation matrix + award/contract + early warnings + compensation
+events. Strategy is single-row-per-project (upsert); packages /
+tenders / contracts / EWs / CEs are project-scoped collections.
+
+| Method | Route | Global role | Project role | Comment |
+|---|---|---|---|---|
+| GET  | `/api/v1/projects/{projectId}/procurement/strategy` | authenticated | membership | T-S6-02. Returns the project's procurement strategy or `null` if not yet captured. |
+| PUT  | `/api/v1/projects/{projectId}/procurement/strategy` | authenticated | `TaskTeamMember+` | T-S6-02. Body `UpsertProcurementStrategyRequest(approach, contractForm, estimatedTotalValue?, keyDates?, packageBreakdownNotes?)`. Upsert — first call creates, subsequent calls update. Audit: `procurement_strategy.created` (first write) / `procurement_strategy.updated` (subsequent). |
+| POST | `/api/v1/projects/{projectId}/procurement/strategy/approve` | authenticated | `ProjectManager+` | T-S6-02. Records `ApprovedById` + `ApprovedAt`. Re-approval allowed in v1.0 (timestamps refresh) — real workflows revisit strategies after risk reviews. Audit: `procurement_strategy.approved`. |
+
 ## Documents
 
 | Method | Route | Global role | Project role | Comment |

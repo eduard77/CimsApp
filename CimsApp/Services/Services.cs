@@ -3762,6 +3762,92 @@ public class ChangeRequestService(CimsDbContext db, AuditService audit)
     }
 }
 
+/// <summary>
+/// ProcurementStrategyService — single-row-per-project strategy
+/// capture (T-S6-02, PAFM-SD F.7 first bullet). Upsert semantics:
+/// `CreateOrUpdateAsync` creates the strategy on first call, updates
+/// it on subsequent calls. Approve transition is a separate
+/// `ApproveAsync` that records the approver + timestamp; v1.0 does
+/// not enforce a state-machine on the strategy itself (re-approval
+/// is allowed and timestamps refresh).
+/// </summary>
+public class ProcurementStrategyService(CimsDbContext db, AuditService audit)
+{
+    /// <summary>
+    /// Upsert the project's procurement strategy. Returns the
+    /// (created or updated) row. Audit emits `procurement_strategy.created`
+    /// on first write, `procurement_strategy.updated` on subsequent
+    /// writes.
+    /// </summary>
+    public async Task<ProcurementStrategy> CreateOrUpdateAsync(
+        Guid projectId, UpsertProcurementStrategyRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        if (req.EstimatedTotalValue.HasValue && req.EstimatedTotalValue.Value < 0m)
+            throw new ValidationException(["EstimatedTotalValue cannot be negative"]);
+
+        var existing = await db.ProcurementStrategies
+            .FirstOrDefaultAsync(s => s.ProjectId == projectId, ct);
+
+        var isCreate = existing is null;
+        var s = existing ?? new ProcurementStrategy { ProjectId = projectId };
+        s.Approach              = req.Approach;
+        s.ContractForm          = req.ContractForm;
+        s.EstimatedTotalValue   = req.EstimatedTotalValue;
+        s.KeyDates              = req.KeyDates;
+        s.PackageBreakdownNotes = req.PackageBreakdownNotes;
+        if (isCreate) db.ProcurementStrategies.Add(s);
+
+        var action = isCreate ? "procurement_strategy.created" : "procurement_strategy.updated";
+        await audit.WriteAsync(actorId, action, "ProcurementStrategy",
+            s.Id.ToString(), projectId,
+            detail: new
+            {
+                approach     = req.Approach.ToString(),
+                contractForm = req.ContractForm.ToString(),
+                estimatedValue = req.EstimatedTotalValue,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return s;
+    }
+
+    /// <summary>
+    /// Approve the strategy. Records the approver + UtcNow. v1.0
+    /// allows re-approval (timestamps refresh) — there's no
+    /// "already approved" rejection because real workflows revisit
+    /// strategies after risk reviews / cost feedback. Audit logs
+    /// each approval distinctly so the trail captures the history.
+    /// </summary>
+    public async Task<ProcurementStrategy> ApproveAsync(
+        Guid projectId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var s = await db.ProcurementStrategies
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("ProcurementStrategy");
+
+        s.ApprovedById = actorId;
+        s.ApprovedAt   = DateTime.UtcNow;
+        await audit.WriteAsync(actorId, "procurement_strategy.approved", "ProcurementStrategy",
+            s.Id.ToString(), projectId,
+            detail: new { approach = s.Approach.ToString(), contractForm = s.ContractForm.ToString() },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return s;
+    }
+
+    public async Task<ProcurementStrategy?> GetAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        return await db.ProcurementStrategies
+            .FirstOrDefaultAsync(s => s.ProjectId == projectId, ct);
+    }
+}
+
 public class CdeService(CimsDbContext db, AuditService audit)
 {
     public async Task<List<CdeContainer>> ListContainersAsync(Guid projectId) =>

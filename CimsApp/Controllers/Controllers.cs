@@ -1169,6 +1169,43 @@ public class ChangeRequestsController(ChangeRequestService svc, CimsDbContext db
     }
 }
 
+// ── Procurement (T-S6-02) ─────────────────────────────────────────────────────
+// PAFM-SD F.7. Project-level procurement strategy (single row per project).
+[Route("api/v1/projects/{projectId:guid}/procurement/strategy")]
+public class ProcurementStrategyController(ProcurementStrategyService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> Get(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var s = await svc.GetAsync(projectId, ct);
+        return Ok(new { success = true, data = s });
+    }
+
+    [HttpPut]
+    public async Task<IActionResult> Upsert(
+        Guid projectId, UpsertProcurementStrategyRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var s = await svc.CreateOrUpdateAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = s });
+    }
+
+    [HttpPost("approve")]
+    public async Task<IActionResult> Approve(Guid projectId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var s = await svc.ApproveAsync(projectId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = s });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

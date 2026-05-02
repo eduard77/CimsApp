@@ -95,3 +95,32 @@ public enum BsaHrbCategory { NotApplicable, A, B, C }
 // Implemented → Closed. State-machine enforcement in
 // Core/ChangeWorkflow.cs.
 public enum ChangeRequestState { Raised, Assessed, Approved, Rejected, Implemented, Closed }
+
+// S6 Procurement module (PAFM-SD F.7).
+// Procurement approach — F.7 first bullet (strategy capture). UK
+// construction default options. v1.1 candidate: per-tenant
+// configurable approach catalogue.
+public enum ProcurementApproach
+{
+    Traditional,
+    DesignAndBuild,
+    ConstructionManagement,
+    ManagementContracting,
+    PartneringFramework,
+    Other,
+}
+// Contract form — F.7 first bullet. NEC4 Options A..F + JCT
+// Standard Building / Design and Build are the dominant UK forms.
+// "Other" covers JCT minor works, FIDIC, bespoke contracts, etc.
+public enum ContractForm
+{
+    Nec4OptionA,   // Priced contract with activity schedule
+    Nec4OptionB,   // Priced contract with bill of quantities
+    Nec4OptionC,   // Target contract with activity schedule
+    Nec4OptionD,   // Target contract with bill of quantities
+    Nec4OptionE,   // Cost reimbursable contract
+    Nec4OptionF,   // Management contract
+    JctStandardBuilding,
+    JctDesignAndBuild,
+    Other,
+}

@@ -1358,3 +1358,49 @@ public class ChangeRequest
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// Project-level procurement strategy (T-S6-02, PAFM-SD F.7 first
+/// bullet — "Procurement strategy capture"). Single row per project
+/// (unique index on ProjectId — service enforces upsert semantics).
+/// Captures the procurement Approach + ContractForm + headline
+/// estimated value + key dates + package-breakdown notes. Approval
+/// (F.7 fourth bullet downstream) is recorded via ApprovedById /
+/// ApprovedAt.
+/// </summary>
+public class ProcurementStrategy
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public ProcurementApproach Approach { get; set; }
+    public ContractForm ContractForm { get; set; }
+
+    /// <summary>Headline estimated total project value, in
+    /// Project.Currency. Optional at strategy-capture time —
+    /// finalised after Tender Packages are built up.</summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? EstimatedTotalValue { get; set; }
+
+    /// <summary>Free-text key dates summary (e.g. "OJEU notice
+    /// 2026-06-01; Tender issue 2026-07-01; Award 2026-09-15").
+    /// v1.1 candidate: structured key-dates table (B-NNN — defer
+    /// inline at first real customer demand).</summary>
+    public string? KeyDates { get; set; }
+
+    /// <summary>Free-text breakdown of how the project will be
+    /// packaged for tender (e.g. "Concrete frame; MEP; Fit-out;
+    /// Lifts"). Each named package becomes a TenderPackage row.
+    /// Free text in v1.0; structural link is the TenderPackage
+    /// rows themselves.</summary>
+    public string? PackageBreakdownNotes { get; set; }
+
+    public Guid? ApprovedById { get; set; }
+    public User? ApprovedBy { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
