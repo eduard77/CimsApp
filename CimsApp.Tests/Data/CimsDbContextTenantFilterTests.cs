@@ -64,6 +64,7 @@ public class CimsDbContextTenantFilterTests
         typeof(EvaluationScore),
         typeof(Contract),
         typeof(EarlyWarning),
+        typeof(CompensationEvent),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =
