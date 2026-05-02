@@ -4055,6 +4055,127 @@ public class TenderPackagesService(CimsDbContext db, AuditService audit)
     }
 }
 
+/// <summary>
+/// TendersService — bid receipt + lifecycle (T-S6-04, PAFM-SD F.7
+/// second bullet downstream). Submit (create) records a bid against
+/// an Issued TenderPackage; Withdraw is the bidder-pulls-out branch
+/// (Submitted state only). Evaluated transition arrives via T-S6-05
+/// (after all required scores are recorded); Awarded / Rejected
+/// transitions arrive via T-S6-06 Award workflow.
+/// </summary>
+public class TendersService(CimsDbContext db, AuditService audit)
+{
+    /// <summary>
+    /// Record a bid against an Issued TenderPackage. Validates
+    /// the package is currently in Issued state — submissions
+    /// against Draft (not yet released) or Closed (already
+    /// awarded / abandoned) packages are rejected with
+    /// ConflictException. SubmittedAt = UtcNow at create.
+    /// </summary>
+    public async Task<Tender> SubmitAsync(
+        Guid projectId, Guid tenderPackageId, SubmitTenderRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.BidderName))
+            throw new ValidationException(["BidderName is required"]);
+        if (req.BidAmount <= 0m)
+            throw new ValidationException(["BidAmount must be greater than zero"]);
+
+        var pkg = await db.TenderPackages
+            .FirstOrDefaultAsync(p => p.Id == tenderPackageId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("TenderPackage");
+
+        if (pkg.State != TenderPackageState.Issued)
+            throw new ConflictException(
+                $"TenderPackage is in state {pkg.State}; tenders can only be submitted against Issued packages");
+
+        var t = new Tender
+        {
+            ProjectId          = projectId,
+            TenderPackageId    = tenderPackageId,
+            BidderName         = req.BidderName.Trim(),
+            BidderOrganisation = req.BidderOrganisation,
+            ContactEmail       = req.ContactEmail,
+            BidAmount          = req.BidAmount,
+            SubmittedAt        = DateTime.UtcNow,
+            State              = TenderState.Submitted,
+            CreatedById        = actorId,
+        };
+        db.Tenders.Add(t);
+
+        await audit.WriteAsync(actorId, "tender.submitted", "Tender",
+            t.Id.ToString(), projectId,
+            detail: new
+            {
+                tenderPackageId    = tenderPackageId,
+                tenderPackageNumber = pkg.Number,
+                bidderName         = t.BidderName,
+                bidderOrganisation = t.BidderOrganisation,
+                bidAmount          = t.BidAmount,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return t;
+    }
+
+    /// <summary>
+    /// Bidder withdraws: Submitted → Withdrawn. Note required so
+    /// the audit trail captures the rationale. Withdrawn is
+    /// terminal — once withdrawn the bid is out of evaluation
+    /// scope. v1.0 doesn't allow re-submission of the same bidder
+    /// in the same package (the audit chain is preferable to the
+    /// workflow churn); a fresh bid would be a new Tender row.
+    /// </summary>
+    public async Task<Tender> WithdrawAsync(
+        Guid projectId, Guid tenderId, WithdrawTenderRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Note))
+            throw new ValidationException(["Note is required"]);
+
+        var t = await db.Tenders
+            .FirstOrDefaultAsync(x => x.Id == tenderId && x.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Tender");
+
+        if (t.State != TenderState.Submitted)
+            throw new ConflictException(
+                $"Tender is in state {t.State}; only Submitted tenders can be withdrawn");
+
+        t.State     = TenderState.Withdrawn;
+        t.StateNote = req.Note.Trim();
+
+        await audit.WriteAsync(actorId, "tender.withdrawn", "Tender",
+            t.Id.ToString(), projectId,
+            detail: new { bidderName = t.BidderName, note = req.Note },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return t;
+    }
+
+    public async Task<List<Tender>> ListAsync(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct = default)
+    {
+        // Validate the package belongs to the project (cross-tenant
+        // 404 via the query filter); empty list if no tenders yet.
+        _ = await db.TenderPackages
+            .FirstOrDefaultAsync(p => p.Id == tenderPackageId && p.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("TenderPackage");
+        return await db.Tenders
+            .Where(t => t.TenderPackageId == tenderPackageId)
+            .OrderBy(t => t.BidAmount)
+            .ToListAsync(ct);
+    }
+
+    public Task<Tender> GetAsync(
+        Guid projectId, Guid tenderId, CancellationToken ct = default)
+        => LoadAsync(projectId, tenderId, ct);
+
+    private async Task<Tender> LoadAsync(
+        Guid projectId, Guid tenderId, CancellationToken ct)
+        => await db.Tenders
+            .FirstOrDefaultAsync(t => t.Id == tenderId && t.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Tender");
+}
+
 public class CdeService(CimsDbContext db, AuditService audit)
 {
     public async Task<List<CdeContainer>> ListContainersAsync(Guid projectId) =>

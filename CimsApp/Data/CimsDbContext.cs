@@ -60,6 +60,7 @@ public class CimsDbContext(
     public DbSet<ChangeRequest>       ChangeRequests       => Set<ChangeRequest>();
     public DbSet<ProcurementStrategy> ProcurementStrategies => Set<ProcurementStrategy>();
     public DbSet<TenderPackage>       TenderPackages       => Set<TenderPackage>();
+    public DbSet<Tender>              Tenders              => Set<Tender>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -554,6 +555,20 @@ public class CimsDbContext(
              .HasForeignKey(t => t.ClosedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<Tender>(e =>
+        {
+            // Listings hit (TenderPackageId, State) for the per-package
+            // bid-evaluation view.
+            e.HasIndex(t => new { t.TenderPackageId, t.State });
+            e.HasIndex(t => new { t.ProjectId, t.SubmittedAt });
+            e.HasOne(t => t.Project).WithMany()
+             .HasForeignKey(t => t.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(t => t.TenderPackage).WithMany(p => p.Tenders)
+             .HasForeignKey(t => t.TenderPackageId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(t => t.CreatedBy).WithMany()
+             .HasForeignKey(t => t.CreatedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -605,6 +620,7 @@ public class CimsDbContext(
         m.Entity<ChangeRequest>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<ProcurementStrategy>().HasQueryFilter(s => s.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<TenderPackage>().HasQueryFilter(t => t.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Tender>().HasQueryFilter(t => t.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -635,6 +651,7 @@ public class CimsDbContext(
             else if (e.Entity is ChangeRequest cr) cr.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is ProcurementStrategy ps) ps.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is TenderPackage tp) tp.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is Tender ten) ten.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

@@ -162,6 +162,7 @@ builder.Services.AddScoped<LpsService>();
 builder.Services.AddScoped<ChangeRequestService>();
 builder.Services.AddScoped<ProcurementStrategyService>();
 builder.Services.AddScoped<TenderPackagesService>();
+builder.Services.AddScoped<TendersService>();
 builder.Services.AddScoped<CdeService>();
 builder.Services.AddScoped<DocumentsService>();
 builder.Services.AddScoped<RfiService>();

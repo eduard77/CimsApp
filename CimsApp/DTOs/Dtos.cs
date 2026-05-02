@@ -370,6 +370,19 @@ public record UpdateTenderPackageRequest(
     decimal? EstimatedValue,
     DateTime? IssueDate,
     DateTime? ReturnDate);
+// T-S6-04 Tender submission. The act of "submitting" is just
+// recording — bidders submit externally; the project admin / PM
+// captures the bid receipt. SubmittedAt is set to UtcNow at
+// create.
+public record SubmitTenderRequest(
+    string BidderName,
+    string? BidderOrganisation,
+    string? ContactEmail,
+    decimal BidAmount);
+// Bidder withdraws — only allowed before evaluation / award
+// (Submitted state only). Note required so the audit trail
+// captures the rationale.
+public record WithdrawTenderRequest(string Note);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

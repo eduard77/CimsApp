@@ -190,6 +190,10 @@ tenders / contracts / EWs / CEs are project-scoped collections.
 | POST   | `/api/v1/projects/{projectId}/procurement/tender-packages/{id}/issue` | authenticated | `ProjectManager+` | T-S6-03. State Draft → Issued. Records `IssuedById` + `IssuedAt`; freezes the package details. State machine + role gate via `Core/TenderPackageWorkflow`. Audit: `tender_package.issued`. |
 | POST   | `/api/v1/projects/{projectId}/procurement/tender-packages/{id}/close` | authenticated | `ProjectManager+` | T-S6-03 (also called from T-S6-06 Award). State Issued → Closed. Closed is terminal. Audit: `tender_package.closed`. |
 | POST   | `/api/v1/projects/{projectId}/procurement/tender-packages/{id}/deactivate` | authenticated | `ProjectManager+` | T-S6-03. Soft-delete (sets IsActive = false). **Only Draft packages can be deactivated** — Issued / Closed packages are part of the audit chain. Idempotent rejection on already-deactivated. Audit: `tender_package.deactivated`. |
+| GET    | `/api/v1/projects/{projectId}/procurement/tender-packages/{packageId}/tenders` | authenticated | membership | T-S6-04. Lists tenders submitted against the package, ordered by BidAmount asc. |
+| GET    | `/api/v1/projects/{projectId}/procurement/tender-packages/{packageId}/tenders/{tenderId}` | authenticated | membership | T-S6-04. Cross-tenant 404 via the query filter. |
+| POST   | `/api/v1/projects/{projectId}/procurement/tender-packages/{packageId}/tenders` | authenticated | `TaskTeamMember+` | T-S6-04. Body `SubmitTenderRequest(bidderName, bidderOrganisation?, contactEmail?, bidAmount)`. **TenderPackage must be in Issued state** — submissions against Draft / Closed packages rejected with `ConflictException`. SubmittedAt = UtcNow. BidAmount > 0. Audit: `tender.submitted`. |
+| POST   | `/api/v1/projects/{projectId}/procurement/tender-packages/{packageId}/tenders/{tenderId}/withdraw` | authenticated | `TaskTeamMember+` | T-S6-04. Body `WithdrawTenderRequest(note)`. State Submitted → Withdrawn. Note required. Withdrawn is terminal — re-submission would be a new Tender row. Audit: `tender.withdrawn`. |
 
 ## Documents
 

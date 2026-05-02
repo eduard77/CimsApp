@@ -1452,5 +1452,61 @@ public class TenderPackage
     public Guid CreatedById { get; set; }
     public User CreatedBy { get; set; } = null!;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<Tender> Tenders { get; set; } = [];
+}
+
+/// <summary>
+/// One bid submitted against a <see cref="TenderPackage"/> (T-S6-04,
+/// PAFM-SD F.7 second bullet — bids received). Recorded by the
+/// project admin / PM at receipt; SubmittedAt is set to UtcNow at
+/// create. Bidders are identified by free-text BidderName +
+/// optional BidderOrganisation; v1.1 candidate is the
+/// pre-qualification register at B-054 which would replace the
+/// free-text identification with a structural FK to a Bidder
+/// entity.
+/// State machine: Submitted → Evaluated (T-S6-05 once criteria
+/// scored) → Awarded | Rejected (T-S6-06 Award workflow). Submitted
+/// → Withdrawn is the bidder-pulls-out branch, allowed only before
+/// evaluation / award (Submitted state only). Awarded / Rejected /
+/// Withdrawn are terminal.
+/// </summary>
+public class Tender
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Denormalised for the tenant query filter — same
+    /// pattern as Dependency.ProjectId. Always equals
+    /// TenderPackage.ProjectId; service enforces.</summary>
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid TenderPackageId { get; set; }
+    public TenderPackage TenderPackage { get; set; } = null!;
+
+    [Required, MaxLength(200)] public string BidderName { get; set; } = "";
+    [MaxLength(200)] public string? BidderOrganisation { get; set; }
+    [MaxLength(200)] public string? ContactEmail { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal BidAmount { get; set; }
+
+    public DateTime SubmittedAt { get; set; } = DateTime.UtcNow;
+
+    public TenderState State { get; set; } = TenderState.Submitted;
+
+    /// <summary>Reason / rationale recorded at the terminal-state
+    /// transition (Withdrawn / Rejected / Awarded). Single field
+    /// covers all three since at most one transition is reached.</summary>
+    public string? StateNote { get; set; }
+
+    /// <summary>Set by the T-S6-06 Award workflow once a winner is
+    /// chosen and a Contract spawned.</summary>
+    public Guid? GeneratedContractId { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public Guid CreatedById { get; set; }
+    public User CreatedBy { get; set; } = null!;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 

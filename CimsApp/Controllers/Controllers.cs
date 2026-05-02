@@ -1287,6 +1287,55 @@ public class TenderPackagesController(TenderPackagesService svc, CimsDbContext d
     }
 }
 
+// PAFM-SD F.7 — Tenders (bids submitted against an Issued package).
+[Route("api/v1/projects/{projectId:guid}/procurement/tender-packages/{tenderPackageId:guid}/tenders")]
+public class TendersController(TendersService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(
+        Guid projectId, Guid tenderPackageId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListAsync(projectId, tenderPackageId, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpGet("{tenderId:guid}")]
+    public async Task<IActionResult> Get(
+        Guid projectId, Guid tenderPackageId, Guid tenderId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var t = await svc.GetAsync(projectId, tenderId, ct);
+        return Ok(new { success = true, data = t });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Submit(
+        Guid projectId, Guid tenderPackageId,
+        SubmitTenderRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var t = await svc.SubmitAsync(projectId, tenderPackageId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = t });
+    }
+
+    [HttpPost("{tenderId:guid}/withdraw")]
+    public async Task<IActionResult> Withdraw(
+        Guid projectId, Guid tenderPackageId, Guid tenderId,
+        WithdrawTenderRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var t = await svc.WithdrawAsync(projectId, tenderId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = t });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

@@ -131,3 +131,10 @@ public enum ContractForm
 // (abandon-without-award). State-machine enforcement in
 // Core/TenderPackageWorkflow.cs.
 public enum TenderPackageState { Draft, Issued, Closed }
+// Tender lifecycle (T-S6-04 onwards). Submitted is the initial
+// state when the bid is recorded. Evaluated is set by T-S6-05
+// once all required criteria scores are recorded. Awarded /
+// Rejected are set by the T-S6-06 Award workflow. Withdrawn is
+// the bidder-pulls-out branch (only allowed before evaluation /
+// award). Awarded / Rejected / Withdrawn are all terminal.
+public enum TenderState { Submitted, Evaluated, Awarded, Rejected, Withdrawn }
