@@ -90,7 +90,9 @@ REG_STATUS=$(curl -s -o "$REG_RESP_FILE" -w '%{http_code}' \
   }")
 REG_BODY=$(cat "$REG_RESP_FILE"); rm -f "$REG_RESP_FILE"
 assert_status 201 "$REG_STATUS" "POST /auth/register"
-assert_jq_nonempty "$REG_BODY" '.data.accessToken' "RegAccessToken" >/dev/null
+# RegisterAsync returns UserSummaryDto (no token); login follows
+# in step 3 to mint the JWT. Just assert the user shape here.
+assert_jq_nonempty "$REG_BODY" '.data.id' "RegisteredUserId" >/dev/null
 echo
 
 # ── 3. Login (full SQL Server auth path) ──────────────────────
