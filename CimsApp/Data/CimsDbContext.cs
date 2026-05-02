@@ -65,6 +65,7 @@ public class CimsDbContext(
     public DbSet<EvaluationScore>     EvaluationScores     => Set<EvaluationScore>();
     public DbSet<Contract>            Contracts            => Set<Contract>();
     public DbSet<EarlyWarning>        EarlyWarnings        => Set<EarlyWarning>();
+    public DbSet<CompensationEvent>   CompensationEvents   => Set<CompensationEvent>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -633,6 +634,26 @@ public class CimsDbContext(
              .HasForeignKey(w => w.ClosedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<CompensationEvent>(e =>
+        {
+            // Project-scoped sequential CE-NNNN; unique per project.
+            e.HasIndex(c => new { c.ProjectId, c.Number }).IsUnique();
+            e.HasIndex(c => new { c.ContractId, c.State });
+            e.HasIndex(c => new { c.ProjectId, c.NotifiedAt });
+            e.HasOne(c => c.Project).WithMany()
+             .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.Contract).WithMany()
+             .HasForeignKey(c => c.ContractId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.NotifiedBy).WithMany()
+             .HasForeignKey(c => c.NotifiedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.QuotedBy).WithMany()
+             .HasForeignKey(c => c.QuotedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.DecisionBy).WithMany()
+             .HasForeignKey(c => c.DecisionById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(c => c.ImplementedBy).WithMany()
+             .HasForeignKey(c => c.ImplementedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         // ── Tenant isolation (PAFM F.1, ADR-0003) ────────────────────────
         // Global query filter on OrganisationId. Anonymous contexts
         // (null tenant) see nothing by design; pre-auth paths in
@@ -689,6 +710,7 @@ public class CimsDbContext(
         m.Entity<EvaluationScore>().HasQueryFilter(s => s.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<Contract>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<EarlyWarning>().HasQueryFilter(w => w.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<CompensationEvent>().HasQueryFilter(c => c.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -724,6 +746,7 @@ public class CimsDbContext(
             else if (e.Entity is EvaluationScore es) es.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is Contract con) con.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is EarlyWarning ew) ew.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is CompensationEvent ce) ce.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

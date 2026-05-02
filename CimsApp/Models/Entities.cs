@@ -1694,3 +1694,66 @@ public class EarlyWarning
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// Per-contract compensation event (T-S6-08, PAFM-SD F.7 fifth
+/// bullet — NEC4 clause 60.1 "Compensation Events"). Formal
+/// notice with cost / time impact. 5-state workflow Notified →
+/// Quoted → Accepted | Rejected → Implemented (with the
+/// Notified → Rejected branch for clause 61.4 "PM notifies it is
+/// not a CE"). State-machine enforcement in
+/// <see cref="CimsApp.Core.CompensationEventWorkflow"/>.
+/// Project-scoped sequential `CE-NNNN`. Tenant-scoped indirectly
+/// through Contract.Project.
+/// </summary>
+public class CompensationEvent
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Denormalised — equals Contract.ProjectId.</summary>
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid ContractId { get; set; }
+    public Contract Contract { get; set; } = null!;
+
+    /// <summary>Project-scoped sequential number, e.g. "CE-0001".
+    /// Unique within project; service auto-generates on Notify.</summary>
+    [Required, MaxLength(20)] public string Number { get; set; } = "";
+
+    [Required, MaxLength(300)] public string Title { get; set; } = "";
+    public string? Description { get; set; }
+
+    public CompensationEventState State { get; set; } = CompensationEventState.Notified;
+
+    public Guid NotifiedById { get; set; }
+    public User NotifiedBy { get; set; } = null!;
+    public DateTime NotifiedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>Quotation cost impact (decimal(18,2) nullable).
+    /// Recorded at Quote transition. Always null at Notified state.
+    /// Risk-allowance / disallowance rules deferred to v1.1 / B-050.</summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? EstimatedCostImpact { get; set; }
+    public int? EstimatedTimeImpactDays { get; set; }
+
+    public Guid? QuotedById { get; set; }
+    public User? QuotedBy { get; set; }
+    public DateTime? QuotedAt { get; set; }
+    /// <summary>Quotation rationale captured at Quote.</summary>
+    public string? QuotationNote { get; set; }
+
+    public Guid? DecisionById { get; set; }
+    public User? DecisionBy { get; set; }
+    public DateTime? DecisionAt { get; set; }
+    /// <summary>Approval / rejection rationale; required at the
+    /// accept / reject transition.</summary>
+    public string? DecisionNote { get; set; }
+
+    public DateTime? ImplementedAt { get; set; }
+    public Guid? ImplementedById { get; set; }
+    public User? ImplementedBy { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+

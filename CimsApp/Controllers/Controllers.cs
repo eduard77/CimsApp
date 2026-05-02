@@ -1485,6 +1485,88 @@ public class EarlyWarningsController(EarlyWarningsService svc, CimsDbContext db)
     }
 }
 
+// PAFM-SD F.7 fifth bullet — compensation events (NEC4 clause 60.1).
+[Route("api/v1/projects/{projectId:guid}/procurement/contracts/{contractId:guid}/compensation-events")]
+public class CompensationEventsController(CompensationEventsService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(
+        Guid projectId, Guid contractId,
+        [FromQuery] string? state = null, CancellationToken ct = default)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        CompensationEventState? s = Enum.TryParse<CompensationEventState>(state, true, out var p) ? p : null;
+        var rows = await svc.ListAsync(projectId, contractId, s, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpGet("{compensationEventId:guid}")]
+    public async Task<IActionResult> Get(
+        Guid projectId, Guid contractId, Guid compensationEventId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var ce = await svc.GetAsync(projectId, compensationEventId, ct);
+        return Ok(new { success = true, data = ce });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Notify(
+        Guid projectId, Guid contractId,
+        NotifyCompensationEventRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var ce = await svc.NotifyAsync(projectId, contractId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = ce });
+    }
+
+    [HttpPost("{compensationEventId:guid}/quote")]
+    public async Task<IActionResult> Quote(
+        Guid projectId, Guid contractId, Guid compensationEventId,
+        QuoteCompensationEventRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var ce = await svc.QuoteAsync(projectId, compensationEventId, req,
+            CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = ce });
+    }
+
+    [HttpPost("{compensationEventId:guid}/accept")]
+    public async Task<IActionResult> Accept(
+        Guid projectId, Guid contractId, Guid compensationEventId,
+        DecideCompensationEventRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var ce = await svc.AcceptAsync(projectId, compensationEventId, req,
+            CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = ce });
+    }
+
+    [HttpPost("{compensationEventId:guid}/reject")]
+    public async Task<IActionResult> Reject(
+        Guid projectId, Guid contractId, Guid compensationEventId,
+        DecideCompensationEventRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var ce = await svc.RejectAsync(projectId, compensationEventId, req,
+            CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = ce });
+    }
+
+    [HttpPost("{compensationEventId:guid}/implement")]
+    public async Task<IActionResult> Implement(
+        Guid projectId, Guid contractId, Guid compensationEventId,
+        ImplementCompensationEventRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        var ce = await svc.ImplementAsync(projectId, compensationEventId, req,
+            CurrentUserId, role, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = ce });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

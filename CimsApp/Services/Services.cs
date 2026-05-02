@@ -4704,6 +4704,225 @@ public class EarlyWarningsService(CimsDbContext db, AuditService audit)
             ?? throw new NotFoundException("EarlyWarning");
 }
 
+/// <summary>
+/// CompensationEventsService — NEC4 clause-60.1 5-state workflow
+/// per Contract (T-S6-08, PAFM-SD F.7 fifth bullet). State machine
+/// in <see cref="CimsApp.Core.CompensationEventWorkflow"/>; this
+/// service wraps with persistence + audit-twin emission. v1.0
+/// limitations explicitly deferred to v1.1 inline (B-048 PM 4-week
+/// notification deadline; B-049 contractor 3-week quotation
+/// deadline; B-050 risk-allowance pricing rules).
+/// </summary>
+public class CompensationEventsService(CimsDbContext db, AuditService audit)
+{
+    /// <summary>
+    /// Notify a new compensation event against an Active Contract.
+    /// Title required. Auto-generates `CE-NNNN` per project.
+    /// Initial state Notified. Audit:
+    /// compensation_event.notified.
+    /// </summary>
+    public async Task<CompensationEvent> NotifyAsync(
+        Guid projectId, Guid contractId, NotifyCompensationEventRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(["Title is required"]);
+
+        var contract = await db.Contracts
+            .FirstOrDefaultAsync(c => c.Id == contractId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Contract");
+        if (contract.State != ContractState.Active)
+            throw new ConflictException(
+                $"Contract is in state {contract.State}; CEs can only be notified against Active contracts");
+
+        // Concurrency note: same shape as Variation / ChangeRequest /
+        // TenderPackage — count + 1 racing produces duplicates that
+        // the unique (ProjectId, Number) index catches at SaveChanges.
+        var count = await db.CompensationEvents
+            .CountAsync(c => c.ProjectId == projectId, ct);
+
+        var ce = new CompensationEvent
+        {
+            ProjectId    = projectId,
+            ContractId   = contractId,
+            Number       = $"CE-{(count + 1):D4}",
+            Title        = req.Title.Trim(),
+            Description  = req.Description,
+            State        = CompensationEventState.Notified,
+            NotifiedById = actorId,
+            NotifiedAt   = DateTime.UtcNow,
+        };
+        db.CompensationEvents.Add(ce);
+
+        await audit.WriteAsync(actorId, "compensation_event.notified", "CompensationEvent",
+            ce.Id.ToString(), projectId,
+            detail: new
+            {
+                number         = ce.Number,
+                contractId,
+                contractNumber = contract.Number,
+                title          = ce.Title,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ce;
+    }
+
+    /// <summary>
+    /// Quote transition: Notified → Quoted. Records the contractor's
+    /// quotation (cost + time impact + rationale). State machine +
+    /// role gate via CompensationEventWorkflow.CanTransition
+    /// (TaskTeamMember+ — contractor-side input).
+    /// </summary>
+    public async Task<CompensationEvent> QuoteAsync(
+        Guid projectId, Guid compensationEventId, QuoteCompensationEventRequest req,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.QuotationNote))
+            throw new ValidationException(["QuotationNote is required"]);
+        if (req.EstimatedCostImpact < 0m)
+            throw new ValidationException(["EstimatedCostImpact cannot be negative"]);
+
+        var ce = await LoadAsync(projectId, compensationEventId, ct);
+        EnforceTransition(ce.State, CompensationEventState.Quoted, role);
+
+        ce.State                    = CompensationEventState.Quoted;
+        ce.EstimatedCostImpact      = req.EstimatedCostImpact;
+        ce.EstimatedTimeImpactDays  = req.EstimatedTimeImpactDays;
+        ce.QuotationNote            = req.QuotationNote.Trim();
+        ce.QuotedById               = actorId;
+        ce.QuotedAt                 = DateTime.UtcNow;
+
+        await audit.WriteAsync(actorId, "compensation_event.quoted", "CompensationEvent",
+            ce.Id.ToString(), projectId,
+            detail: new
+            {
+                number         = ce.Number,
+                costImpact     = req.EstimatedCostImpact,
+                timeImpactDays = req.EstimatedTimeImpactDays,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ce;
+    }
+
+    /// <summary>
+    /// Accept transition: Quoted → Accepted. DecisionNote required.
+    /// Role gate ProjectManager+.
+    /// </summary>
+    public async Task<CompensationEvent> AcceptAsync(
+        Guid projectId, Guid compensationEventId, DecideCompensationEventRequest req,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.DecisionNote))
+            throw new ValidationException(["DecisionNote is required"]);
+
+        var ce = await LoadAsync(projectId, compensationEventId, ct);
+        EnforceTransition(ce.State, CompensationEventState.Accepted, role);
+
+        ce.State        = CompensationEventState.Accepted;
+        ce.DecisionById = actorId;
+        ce.DecisionAt   = DateTime.UtcNow;
+        ce.DecisionNote = req.DecisionNote.Trim();
+
+        await audit.WriteAsync(actorId, "compensation_event.accepted", "CompensationEvent",
+            ce.Id.ToString(), projectId,
+            detail: new
+            {
+                number         = ce.Number,
+                costImpact     = ce.EstimatedCostImpact,
+                timeImpactDays = ce.EstimatedTimeImpactDays,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ce;
+    }
+
+    /// <summary>
+    /// Reject transition: Notified → Rejected (clause 61.4) OR
+    /// Quoted → Rejected. DecisionNote required. Role gate
+    /// ProjectManager+.
+    /// </summary>
+    public async Task<CompensationEvent> RejectAsync(
+        Guid projectId, Guid compensationEventId, DecideCompensationEventRequest req,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.DecisionNote))
+            throw new ValidationException(["DecisionNote is required"]);
+
+        var ce = await LoadAsync(projectId, compensationEventId, ct);
+        EnforceTransition(ce.State, CompensationEventState.Rejected, role);
+
+        ce.State        = CompensationEventState.Rejected;
+        ce.DecisionById = actorId;
+        ce.DecisionAt   = DateTime.UtcNow;
+        ce.DecisionNote = req.DecisionNote.Trim();
+
+        await audit.WriteAsync(actorId, "compensation_event.rejected", "CompensationEvent",
+            ce.Id.ToString(), projectId,
+            detail: new { number = ce.Number, decisionNote = req.DecisionNote },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ce;
+    }
+
+    /// <summary>
+    /// Implement transition: Accepted → Implemented. Optional note.
+    /// Terminal state.
+    /// </summary>
+    public async Task<CompensationEvent> ImplementAsync(
+        Guid projectId, Guid compensationEventId, ImplementCompensationEventRequest req,
+        Guid actorId, UserRole role,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var ce = await LoadAsync(projectId, compensationEventId, ct);
+        EnforceTransition(ce.State, CompensationEventState.Implemented, role);
+
+        ce.State           = CompensationEventState.Implemented;
+        ce.ImplementedById = actorId;
+        ce.ImplementedAt   = DateTime.UtcNow;
+
+        await audit.WriteAsync(actorId, "compensation_event.implemented", "CompensationEvent",
+            ce.Id.ToString(), projectId,
+            detail: new { number = ce.Number, note = req.Note },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ce;
+    }
+
+    public async Task<List<CompensationEvent>> ListAsync(
+        Guid projectId, Guid contractId, CompensationEventState? state, CancellationToken ct = default)
+    {
+        _ = await db.Contracts
+            .FirstOrDefaultAsync(c => c.Id == contractId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Contract");
+        var q = db.CompensationEvents.Where(c => c.ContractId == contractId);
+        if (state.HasValue) q = q.Where(c => c.State == state.Value);
+        return await q.OrderByDescending(c => c.NotifiedAt).ToListAsync(ct);
+    }
+
+    public Task<CompensationEvent> GetAsync(
+        Guid projectId, Guid compensationEventId, CancellationToken ct = default)
+        => LoadAsync(projectId, compensationEventId, ct);
+
+    private async Task<CompensationEvent> LoadAsync(
+        Guid projectId, Guid compensationEventId, CancellationToken ct)
+        => await db.CompensationEvents
+            .FirstOrDefaultAsync(c => c.Id == compensationEventId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CompensationEvent");
+
+    private static void EnforceTransition(
+        CompensationEventState from, CompensationEventState to, UserRole role)
+    {
+        if (!CimsApp.Core.CompensationEventWorkflow.IsValidTransition(from, to))
+            throw new ConflictException(
+                $"Cannot transition CompensationEvent from {from} to {to}");
+        if (!CimsApp.Core.CompensationEventWorkflow.CanTransition(from, to, role))
+            throw new ForbiddenException(
+                $"Role {role} cannot perform the {from} → {to} transition");
+    }
+}
+
 public class CdeService(CimsDbContext db, AuditService audit)
 {
     public async Task<List<CdeContainer>> ListContainersAsync(Guid projectId) =>

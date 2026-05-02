@@ -153,3 +153,15 @@ public enum ContractState { Active, Closed }
 // Linear 3-state: Raised → UnderReview → Closed. Inline state
 // guard in the service — too small to warrant a Core/<X>.cs file.
 public enum EarlyWarningState { Raised, UnderReview, Closed }
+// CompensationEvent workflow — F.7 fifth bullet (NEC4 clause 60.1).
+// 5-state: Notified → Quoted → Accepted | Rejected → Implemented.
+// Notified → Rejected branch covers NEC4 clause 61.4 ("PM notifies
+// it is not a CE"). v1.0 ships the bare workflow without the
+// deadline-driven automatic transitions (PM 4-week notification
+// → B-048, contractor 3-week quotation → B-049, risk-allowance
+// pricing → B-050; all in v1.1 backlog).
+// State-machine enforcement in Core/CompensationEventWorkflow.cs.
+public enum CompensationEventState
+{
+    Notified, Quoted, Accepted, Rejected, Implemented,
+}

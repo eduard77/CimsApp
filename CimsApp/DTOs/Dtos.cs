@@ -432,6 +432,21 @@ public record RaiseEarlyWarningRequest(
 public record ReviewEarlyWarningRequest(string ResponseNote);
 // Close: optional ClosureNote.
 public record CloseEarlyWarningRequest(string? ClosureNote);
+// T-S6-08 CompensationEvent DTOs (NEC4 clause 60.1).
+public record NotifyCompensationEventRequest(
+    string Title,
+    string? Description);
+// Quote: contractor submits the cost / time impact quotation.
+// Both impact fields required so the matrix has data to evaluate.
+public record QuoteCompensationEventRequest(
+    decimal EstimatedCostImpact,
+    int EstimatedTimeImpactDays,
+    string QuotationNote);
+// Decide (accept / reject): DecisionNote required so the trail
+// captures the rationale.
+public record DecideCompensationEventRequest(string DecisionNote);
+// Implement: optional note.
+public record ImplementCompensationEventRequest(string? Note);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

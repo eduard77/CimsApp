@@ -165,6 +165,7 @@ builder.Services.AddScoped<TenderPackagesService>();
 builder.Services.AddScoped<TendersService>();
 builder.Services.AddScoped<EvaluationService>();
 builder.Services.AddScoped<EarlyWarningsService>();
+builder.Services.AddScoped<CompensationEventsService>();
 builder.Services.AddScoped<CdeService>();
 builder.Services.AddScoped<DocumentsService>();
 builder.Services.AddScoped<RfiService>();
