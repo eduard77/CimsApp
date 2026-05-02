@@ -65,6 +65,8 @@ public class CimsDbContextTenantFilterTests
         typeof(Contract),
         typeof(EarlyWarning),
         typeof(CompensationEvent),
+        // S7 reporting-domain addition (T-S7-05).
+        typeof(CustomReportDefinition),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =
