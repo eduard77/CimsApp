@@ -201,3 +201,36 @@ public enum GatewayDecision { Approved, ApprovedWithConditions, Refused }
 // // BSA 2022 ref: Building Safety Act 2022 s.87 (mandatory
 // occurrence reporting).
 public enum MorSeverity { Low, Medium, High, Critical }
+
+// S11 UK GDPR module (PAFM-SD F.11).
+// ROPA lawful basis per UK GDPR Art. 6(1).
+// // GDPR ref: Art. 6(1)(a)..(f).
+public enum LawfulBasis
+{
+    Consent,
+    Contract,
+    LegalObligation,
+    VitalInterests,
+    PublicTask,
+    LegitimateInterest,
+}
+
+// 4-state DPIA workflow — F.11 second bullet. Drafting →
+// UnderReview → Approved | RequiresChanges; RequiresChanges
+// can transition back to Drafting for re-work. Approved is
+// terminal. State-machine enforcement in
+// Core/DpiaWorkflow.cs.
+// // GDPR ref: Art. 35 (DPIA).
+public enum DpiaState { Drafting, UnderReview, Approved, RequiresChanges }
+
+// SAR fulfilment workflow — F.11 third bullet. 30-day clock
+// per UK GDPR Art. 12(3) starts at RequestedAt; service
+// computes DueAt = RequestedAt + 30 days.
+// // GDPR ref: Art. 12, 15.
+public enum SarState { Received, InProgress, Fulfilled, Refused }
+
+// Data breach severity (T-S11-05). 72-hour ICO notification
+// clock per Art. 33 starts at DiscoveredAt for breaches
+// likely to result in risk to data subjects.
+// // GDPR ref: Art. 33.
+public enum BreachSeverity { Low, Medium, High, Critical }

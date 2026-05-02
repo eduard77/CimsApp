@@ -282,6 +282,46 @@ legal sign-off is a pre-pilot review step (PAFM-CIMS-001 PDF
 | GET    | `/api/v1/projects/{projectId}/golden-thread` | authenticated | membership | T-S10-06. Lists active GT-marked Documents, ordered by AddedToGoldenThreadAt desc. Audit-log query layer for compliance reports → v1.1 / B-074. |
 | POST   | `/api/v1/projects/{projectId}/golden-thread/documents/{documentId}` | authenticated | `ProjectManager+` | T-S10-06. Body `AddDocumentToGoldenThreadRequest(note?)`. Marks Document as in Golden Thread; one-way for v1.0 (un-mark workflow → v1.1 / B-075). Subsequent state-transitions on the Document are blocked at the service layer. Audit: `document.added_to_golden_thread`. // BSA 2022 ref: Schedule 5. |
 
+## UK GDPR
+
+PAFM-SD F.11. ROPA, DPIA, SAR, data breach log, retention
+schedules. **4 of 5 entity routes are org-scoped (no
+projectId in path)**; DPIA is project-scoped. Pre-pilot
+legal review of GDPR field shapes is a separate step
+(PAFM-CIMS-001 PDF + legal sign-off). // GDPR ref: Arts
+5(1)(e), 12, 15, 30, 33, 34, 35.
+
+| Method | Route | Global role | Project role | Comment |
+|---|---|---|---|---|
+| GET    | `/api/v1/gdpr/ropa` | authenticated | — | T-S11-02. Lists ROPA entries for caller's org. |
+| GET    | `/api/v1/gdpr/ropa/{id}` | authenticated | — | T-S11-02. Cross-tenant 404 via the query filter. |
+| POST   | `/api/v1/gdpr/ropa` | `OrgAdmin`, `SuperAdmin` | — | T-S11-02. Body `CreateRopaEntryRequest(purpose, lawfulBasis, dataCategoriesCsv?, recipients?, retentionPeriod?, securityMeasures?)`. // GDPR ref: Art. 30. Audit: `ropa_entry.created`. |
+| PUT    | `/api/v1/gdpr/ropa/{id}` | `OrgAdmin`, `SuperAdmin` | — | T-S11-02. Partial update; no-op rejected. Audit: `ropa_entry.updated` with `{ changedFields }`. |
+| DELETE | `/api/v1/gdpr/ropa/{id}` | `OrgAdmin`, `SuperAdmin` | — | T-S11-02. Soft delete (IsActive=false). Audit: `ropa_entry.deleted`. |
+| GET    | `/api/v1/projects/{projectId}/gdpr/dpias` | authenticated | membership | T-S11-03. Lists active DPIAs ordered by UpdatedAt desc. |
+| GET    | `/api/v1/projects/{projectId}/gdpr/dpias/{id}` | authenticated | membership | T-S11-03. |
+| POST   | `/api/v1/projects/{projectId}/gdpr/dpias` | authenticated | `TaskTeamMember+` | T-S11-03. Body `CreateDpiaRequest(title, description, highRiskProcessingDescription?, mitigationsDescription?)`. State Drafting. // GDPR ref: Art. 35. Audit: `dpia.created`. |
+| PUT    | `/api/v1/projects/{projectId}/gdpr/dpias/{id}` | authenticated | `TaskTeamMember+` | T-S11-03. Partial update; **rejected for Approved DPIAs** (Approved is terminal). Audit: `dpia.updated`. |
+| POST   | `/api/v1/projects/{projectId}/gdpr/dpias/{id}/submit` | authenticated | `TaskTeamMember+` | T-S11-03. State Drafting → UnderReview. Workflow guard via `Core/DpiaWorkflow`. Audit: `dpia.underreview`. |
+| POST   | `/api/v1/projects/{projectId}/gdpr/dpias/{id}/approve` | authenticated | `ProjectManager+` | T-S11-03. Body `DpiaDecisionRequest(decisionNote)`. State UnderReview → Approved. DecisionNote required; Approved is terminal. Audit: `dpia.approved`. |
+| POST   | `/api/v1/projects/{projectId}/gdpr/dpias/{id}/require-changes` | authenticated | `ProjectManager+` | T-S11-03. Body `DpiaDecisionRequest(decisionNote)`. State UnderReview → RequiresChanges. DecisionNote required. Audit: `dpia.requireschanges`. |
+| POST   | `/api/v1/projects/{projectId}/gdpr/dpias/{id}/return-to-drafting` | authenticated | `TaskTeamMember+` | T-S11-03. State RequiresChanges → Drafting (re-work). Audit: `dpia.drafting`. |
+| GET    | `/api/v1/gdpr/sars` | authenticated | — | T-S11-04. Lists SARs for caller's org, ordered by RequestedAt desc. |
+| GET    | `/api/v1/gdpr/sars/{id}` | authenticated | — | T-S11-04. |
+| POST   | `/api/v1/gdpr/sars` | `OrgAdmin`, `SuperAdmin` | — | T-S11-04. Body `CreateSarRequest(dataSubjectName, dataSubjectEmail?, requestDescription, requestedAt?)`. Auto-generates SAR-NNNN. **DueAt = RequestedAt + 30 days** per GDPR Art. 12(3). v1.0 manual fulfilment; auto-extraction → v1.1 / B-077. Audit: `sar.received`. |
+| POST   | `/api/v1/gdpr/sars/{id}/start` | `OrgAdmin`, `SuperAdmin` | — | T-S11-04. State Received → InProgress. Audit: `sar.in_progress`. |
+| POST   | `/api/v1/gdpr/sars/{id}/fulfil` | `OrgAdmin`, `SuperAdmin` | — | T-S11-04. Body `FulfilSarRequest(fulfilmentNote)`. State Received|InProgress → Fulfilled. FulfilmentNote required. Audit: `sar.fulfilled`. |
+| POST   | `/api/v1/gdpr/sars/{id}/refuse` | `OrgAdmin`, `SuperAdmin` | — | T-S11-04. Body `RefuseSarRequest(refusalReason)`. State Received|InProgress → Refused. RefusalReason required per Art. 12(4). Audit: `sar.refused`. |
+| GET    | `/api/v1/gdpr/data-breaches` | authenticated | — | T-S11-05. Lists breaches for caller's org, ordered by DiscoveredAt desc. |
+| GET    | `/api/v1/gdpr/data-breaches/{id}` | authenticated | — | T-S11-05. |
+| POST   | `/api/v1/gdpr/data-breaches` | `OrgAdmin`, `SuperAdmin` | — | T-S11-05. Body `CreateBreachRequest(title, description, severity, occurredAt, discoveredAt, dataCategoriesCsv?, affectedSubjectsCount?)`. Auto-generates BR-NNNN. **72-hour ICO clock** starts at DiscoveredAt per GDPR Art. 33. Audit: `data_breach.logged`. |
+| POST   | `/api/v1/gdpr/data-breaches/{id}/mark-reported-to-ico` | `OrgAdmin`, `SuperAdmin` | — | T-S11-05. Body `MarkBreachReportedToIcoRequest(icoReference?)`. v1.0 manual flag; programmatic ICO API push → v1.1 / B-076. Audit: `data_breach.reported_to_ico`. |
+| POST   | `/api/v1/gdpr/data-breaches/{id}/mark-subjects-notified` | `OrgAdmin`, `SuperAdmin` | — | T-S11-05. Records the Art. 34 notification to data subjects. Audit: `data_breach.subjects_notified`. |
+| GET    | `/api/v1/gdpr/retention-schedules` | authenticated | — | T-S11-06. Lists active retention schedules for caller's org. |
+| POST   | `/api/v1/gdpr/retention-schedules` | `OrgAdmin`, `SuperAdmin` | — | T-S11-06. Body `CreateRetentionScheduleRequest(dataCategory, retentionPeriodMonths, lawfulBasisForRetention, notes?)`. (OrganisationId, DataCategory) unique-when-active. v1.0 reference data; auto-enforcement → v1.1 / B-078. Audit: `retention_schedule.created`. // GDPR ref: Art. 5(1)(e). |
+| PUT    | `/api/v1/gdpr/retention-schedules/{id}` | `OrgAdmin`, `SuperAdmin` | — | T-S11-06. Partial update of months / basis / notes; no-op rejected. Audit: `retention_schedule.updated`. |
+| DELETE | `/api/v1/gdpr/retention-schedules/{id}` | `OrgAdmin`, `SuperAdmin` | — | T-S11-06. Soft delete; frees the DataCategory for reuse. Audit: `retention_schedule.deleted`. |
+
 ## Documents
 
 | Method | Route | Global role | Project role | Comment |
