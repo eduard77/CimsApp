@@ -2045,6 +2045,408 @@ public class RisksService(CimsDbContext db, AuditService audit)
     }
 }
 
+// ── Stakeholder & Communications ──────────────────────────────────────────────
+// PAFM-SD Appendix F.4 (S3 module). T-S3-03 ships the stakeholder
+// register lifecycle: Create / Update / Deactivate, each with audit-twin
+// events committed atomically with the entity write per the post-S1
+// PR #33 pattern.
+public class StakeholdersService(CimsDbContext db, AuditService audit)
+{
+    /// <summary>
+    /// Register a new Stakeholder. Validates Name + Power/Interest in
+    /// 1..5; computes Score = P×I and Mendelow quadrant
+    /// EngagementApproach (3-as-midpoint) unless the caller supplies
+    /// an explicit override.
+    /// </summary>
+    public async Task<Stakeholder> CreateAsync(
+        Guid projectId, CreateStakeholderRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Name))
+            throw new ValidationException(["Name is required"]);
+        ValidateMatrixInputs(req.Power, req.Interest);
+
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+
+        var stakeholder = new Stakeholder
+        {
+            ProjectId          = projectId,
+            Name               = req.Name.Trim(),
+            Organisation       = req.Organisation,
+            Role               = req.Role,
+            Email              = req.Email,
+            Phone              = req.Phone,
+            Power              = req.Power,
+            Interest           = req.Interest,
+            Score              = req.Power * req.Interest,
+            EngagementApproach = req.EngagementApproach
+                                  ?? ComputeApproach(req.Power, req.Interest),
+            EngagementNotes    = req.EngagementNotes,
+        };
+        db.Stakeholders.Add(stakeholder);
+        await audit.WriteAsync(actorId, "stakeholder.created", "Stakeholder",
+            stakeholder.Id.ToString(), projectId,
+            detail: new
+            {
+                name     = stakeholder.Name,
+                score    = stakeholder.Score,
+                approach = stakeholder.EngagementApproach.ToString(),
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return stakeholder;
+    }
+
+    /// <summary>
+    /// Partial update on an active Stakeholder. Null = "leave
+    /// unchanged" (same v1.0 limitation as RisksService.UpdateAsync).
+    /// Power/Interest change recomputes Score and, unless the caller
+    /// also sets EngagementApproach, recomputes the Mendelow quadrant.
+    /// Already-deactivated rows rejected with ConflictException so
+    /// callers explicitly reactivate via a future endpoint (deferred).
+    /// </summary>
+    public async Task<Stakeholder> UpdateAsync(
+        Guid projectId, Guid stakeholderId, UpdateStakeholderRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var s = await db.Stakeholders
+            .FirstOrDefaultAsync(x => x.Id == stakeholderId && x.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Stakeholder");
+
+        if (!s.IsActive)
+            throw new ConflictException("Stakeholder is deactivated; cannot update");
+
+        var changed = new List<string>();
+        var oldScore = s.Score;
+
+        if (req.Name is not null)
+        {
+            if (string.IsNullOrWhiteSpace(req.Name))
+                throw new ValidationException(["Name cannot be empty"]);
+            s.Name = req.Name.Trim();
+            changed.Add("Name");
+        }
+        if (req.Organisation is not null)    { s.Organisation = req.Organisation;       changed.Add("Organisation"); }
+        if (req.Role is not null)            { s.Role = req.Role;                       changed.Add("Role"); }
+        if (req.Email is not null)           { s.Email = req.Email;                     changed.Add("Email"); }
+        if (req.Phone is not null)           { s.Phone = req.Phone;                     changed.Add("Phone"); }
+        if (req.EngagementNotes is not null) { s.EngagementNotes = req.EngagementNotes; changed.Add("EngagementNotes"); }
+
+        var matrixChanged = req.Power.HasValue || req.Interest.HasValue;
+        if (matrixChanged)
+        {
+            var newP = req.Power    ?? s.Power;
+            var newI = req.Interest ?? s.Interest;
+            ValidateMatrixInputs(newP, newI);
+            if (req.Power.HasValue)    { s.Power = newP;    changed.Add("Power"); }
+            if (req.Interest.HasValue) { s.Interest = newI; changed.Add("Interest"); }
+            s.Score = newP * newI;
+            if (oldScore != s.Score) changed.Add("Score");
+        }
+
+        if (req.EngagementApproach.HasValue)
+        {
+            s.EngagementApproach = req.EngagementApproach.Value;
+            changed.Add("EngagementApproach");
+        }
+        else if (matrixChanged)
+        {
+            // Auto-recompute approach when matrix changed and the
+            // caller didn't explicitly set one.
+            var newApproach = ComputeApproach(s.Power, s.Interest);
+            if (newApproach != s.EngagementApproach)
+            {
+                s.EngagementApproach = newApproach;
+                changed.Add("EngagementApproach");
+            }
+        }
+
+        if (changed.Count == 0)
+            throw new ValidationException(["No updatable fields provided"]);
+
+        await audit.WriteAsync(actorId, "stakeholder.updated", "Stakeholder",
+            s.Id.ToString(), projectId,
+            detail: new
+            {
+                changedFields = changed,
+                scoreBefore   = oldScore,
+                scoreAfter    = s.Score,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return s;
+    }
+
+    /// <summary>Soft-delete: set IsActive = false. Idempotent
+    /// rejection on already-deactivated.</summary>
+    public async Task<Stakeholder> DeactivateAsync(
+        Guid projectId, Guid stakeholderId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var s = await db.Stakeholders
+            .FirstOrDefaultAsync(x => x.Id == stakeholderId && x.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("Stakeholder");
+
+        if (!s.IsActive)
+            throw new ConflictException("Stakeholder is already deactivated");
+
+        s.IsActive = false;
+        await audit.WriteAsync(actorId, "stakeholder.deactivated", "Stakeholder",
+            s.Id.ToString(), projectId,
+            detail: new { name = s.Name }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return s;
+    }
+
+    /// <summary>List active stakeholders on a project, ordered by
+    /// Score desc then Name asc — "highest priority first" listing.
+    /// </summary>
+    public async Task<List<Stakeholder>> ListAsync(Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        return await db.Stakeholders
+            .Where(s => s.ProjectId == projectId && s.IsActive)
+            .OrderByDescending(s => s.Score)
+            .ThenBy(s => s.Name)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Build the 25-cell 5×5 Power/Interest matrix for the project —
+    /// one cell per (Power, Interest) coordinate with StakeholderIds.
+    /// Excludes deactivated rows (matrix is a live-register view).
+    /// </summary>
+    public async Task<List<CimsApp.Core.StakeholderMatrixCell>> GetMatrixAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        var live = await db.Stakeholders
+            .Where(s => s.ProjectId == projectId && s.IsActive)
+            .ToListAsync(ct);
+        return CimsApp.Core.StakeholderMatrix.Build(live);
+    }
+
+    /// <summary>Mendelow quadrant from Power/Interest at fixed
+    /// 3-as-midpoint. v1.1 candidate: per-tenant threshold override
+    /// via S14 Admin Console.</summary>
+    public static EngagementApproach ComputeApproach(int power, int interest) =>
+        (power >= 3, interest >= 3) switch
+        {
+            (true,  true)  => EngagementApproach.ManageClosely,
+            (true,  false) => EngagementApproach.KeepSatisfied,
+            (false, true)  => EngagementApproach.KeepInformed,
+            (false, false) => EngagementApproach.Monitor,
+        };
+
+    private static void ValidateMatrixInputs(int power, int interest)
+    {
+        var errors = new List<string>();
+        if (power < 1 || power > 5)       errors.Add("Power must be 1..5");
+        if (interest < 1 || interest > 5) errors.Add("Interest must be 1..5");
+        if (errors.Count > 0) throw new ValidationException(errors);
+    }
+
+    /// <summary>
+    /// Record one interaction with a stakeholder (T-S3-06). Summary
+    /// required; ActionsAgreed optional. Cross-tenant /
+    /// wrong-project stakeholderIds 404 via the query filter.
+    /// </summary>
+    public async Task<EngagementLog> RecordEngagementAsync(
+        Guid projectId, Guid stakeholderId, RecordEngagementRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Summary))
+            throw new ValidationException(["Summary is required"]);
+
+        var stakeholderExists = await db.Stakeholders.AnyAsync(
+            s => s.Id == stakeholderId && s.ProjectId == projectId, ct);
+        if (!stakeholderExists) throw new NotFoundException("Stakeholder");
+
+        var entry = new EngagementLog
+        {
+            ProjectId     = projectId,
+            StakeholderId = stakeholderId,
+            Type          = req.Type,
+            OccurredAt    = req.OccurredAt,
+            Summary       = req.Summary.Trim(),
+            ActionsAgreed = req.ActionsAgreed,
+            RecordedById  = actorId,
+        };
+        db.EngagementLogs.Add(entry);
+
+        await audit.WriteAsync(actorId, "engagement.recorded", "EngagementLog",
+            entry.Id.ToString(), projectId,
+            detail: new
+            {
+                stakeholderId = stakeholderId,
+                type          = req.Type.ToString(),
+                occurredAt    = req.OccurredAt,
+                hasActions    = !string.IsNullOrWhiteSpace(req.ActionsAgreed),
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return entry;
+    }
+
+    /// <summary>List the most-recent engagements with a stakeholder,
+    /// newest first, capped at 200. Per the S3 kickoff Top-3 risks
+    /// throughput mitigation; full pagination is a v1.1 candidate.
+    /// Cross-tenant 404 via the query filter.</summary>
+    public async Task<List<EngagementLog>> ListEngagementsAsync(
+        Guid projectId, Guid stakeholderId, CancellationToken ct = default)
+    {
+        var stakeholderExists = await db.Stakeholders.AnyAsync(
+            s => s.Id == stakeholderId && s.ProjectId == projectId, ct);
+        if (!stakeholderExists) throw new NotFoundException("Stakeholder");
+
+        return await db.EngagementLogs
+            .Where(g => g.StakeholderId == stakeholderId)
+            .OrderByDescending(g => g.OccurredAt)
+            .ThenByDescending(g => g.CreatedAt)
+            .Take(200)
+            .ToListAsync(ct);
+    }
+}
+
+/// <summary>
+/// CommunicationsService — the project-level communications matrix
+/// (T-S3-07, PAFM-SD F.4 fourth bullet — "what / who / when / how").
+/// Mirrors StakeholdersService shape: Create / Update / Deactivate
+/// + List, audit-twin pattern, cross-tenant 404 via query filter.
+/// </summary>
+public class CommunicationsService(CimsDbContext db, AuditService audit)
+{
+    public async Task<CommunicationItem> CreateAsync(
+        Guid projectId, CreateCommunicationItemRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        ValidateCreate(req);
+        await EnsureOwnerIsProjectMemberAsync(projectId, req.OwnerId, ct);
+
+        var item = new CommunicationItem
+        {
+            ProjectId = projectId,
+            ItemType  = req.ItemType.Trim(),
+            Audience  = req.Audience.Trim(),
+            Frequency = req.Frequency,
+            Channel   = req.Channel,
+            OwnerId   = req.OwnerId,
+            Notes     = req.Notes,
+        };
+        db.CommunicationItems.Add(item);
+
+        await audit.WriteAsync(actorId, "communication.created", "CommunicationItem",
+            item.Id.ToString(), projectId,
+            detail: new
+            {
+                itemType  = item.ItemType,
+                audience  = item.Audience,
+                frequency = item.Frequency.ToString(),
+                channel   = item.Channel.ToString(),
+                ownerId   = item.OwnerId,
+            }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return item;
+    }
+
+    public async Task<CommunicationItem> UpdateAsync(
+        Guid projectId, Guid itemId, UpdateCommunicationItemRequest req, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var item = await db.CommunicationItems
+            .FirstOrDefaultAsync(c => c.Id == itemId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CommunicationItem");
+
+        if (!item.IsActive)
+            throw new ConflictException("Communication item is deactivated; cannot update");
+
+        var changed = new List<string>();
+
+        if (req.ItemType is not null)
+        {
+            if (string.IsNullOrWhiteSpace(req.ItemType))
+                throw new ValidationException(["ItemType cannot be empty"]);
+            item.ItemType = req.ItemType.Trim();
+            changed.Add("ItemType");
+        }
+        if (req.Audience is not null)
+        {
+            if (string.IsNullOrWhiteSpace(req.Audience))
+                throw new ValidationException(["Audience cannot be empty"]);
+            item.Audience = req.Audience.Trim();
+            changed.Add("Audience");
+        }
+        if (req.Frequency.HasValue) { item.Frequency = req.Frequency.Value; changed.Add("Frequency"); }
+        if (req.Channel.HasValue)   { item.Channel   = req.Channel.Value;   changed.Add("Channel"); }
+        if (req.OwnerId.HasValue && req.OwnerId.Value != item.OwnerId)
+        {
+            await EnsureOwnerIsProjectMemberAsync(projectId, req.OwnerId.Value, ct);
+            item.OwnerId = req.OwnerId.Value;
+            changed.Add("OwnerId");
+        }
+        if (req.Notes is not null) { item.Notes = req.Notes; changed.Add("Notes"); }
+
+        if (changed.Count == 0)
+            throw new ValidationException(["No updatable fields provided"]);
+
+        await audit.WriteAsync(actorId, "communication.updated", "CommunicationItem",
+            item.Id.ToString(), projectId,
+            detail: new { changedFields = changed }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return item;
+    }
+
+    public async Task<CommunicationItem> DeactivateAsync(
+        Guid projectId, Guid itemId, Guid actorId,
+        string? ip = null, string? ua = null, CancellationToken ct = default)
+    {
+        var item = await db.CommunicationItems
+            .FirstOrDefaultAsync(c => c.Id == itemId && c.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("CommunicationItem");
+
+        if (!item.IsActive)
+            throw new ConflictException("Communication item is already deactivated");
+
+        item.IsActive = false;
+        await audit.WriteAsync(actorId, "communication.deactivated", "CommunicationItem",
+            item.Id.ToString(), projectId,
+            detail: new { itemType = item.ItemType }, ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return item;
+    }
+
+    /// <summary>List active communications for the project, ordered
+    /// by ItemType then Frequency. The matrix is a planning view —
+    /// no soft-deleted rows.</summary>
+    public async Task<List<CommunicationItem>> ListAsync(Guid projectId, CancellationToken ct = default)
+    {
+        _ = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new NotFoundException("Project");
+        return await db.CommunicationItems
+            .Where(c => c.ProjectId == projectId && c.IsActive)
+            .OrderBy(c => c.ItemType)
+            .ThenBy(c => c.Frequency)
+            .ToListAsync(ct);
+    }
+
+    private static void ValidateCreate(CreateCommunicationItemRequest req)
+    {
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(req.ItemType)) errors.Add("ItemType is required");
+        if (string.IsNullOrWhiteSpace(req.Audience)) errors.Add("Audience is required");
+        if (req.OwnerId == Guid.Empty)               errors.Add("OwnerId is required");
+        if (errors.Count > 0) throw new ValidationException(errors);
+    }
+
+    private async Task EnsureOwnerIsProjectMemberAsync(Guid projectId, Guid ownerId, CancellationToken ct)
+    {
+        var isMember = await db.ProjectMembers.AnyAsync(
+            m => m.ProjectId == projectId && m.UserId == ownerId, ct);
+        if (!isMember)
+            throw new ValidationException(["Owner must be a member of the project"]);
+    }
+}
+
 // ── CDE ───────────────────────────────────────────────────────────────────────
 public class CdeService(CimsDbContext db, AuditService audit)
 {

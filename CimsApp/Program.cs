@@ -155,6 +155,8 @@ builder.Services.AddScoped<CostService>();
 builder.Services.AddScoped<VariationsService>();
 builder.Services.AddScoped<PaymentCertificatesService>();
 builder.Services.AddScoped<RisksService>();
+builder.Services.AddScoped<StakeholdersService>();
+builder.Services.AddScoped<CommunicationsService>();
 builder.Services.AddScoped<CdeService>();
 builder.Services.AddScoped<DocumentsService>();
 builder.Services.AddScoped<RfiService>();

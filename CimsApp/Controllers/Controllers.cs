@@ -657,6 +657,140 @@ public class RisksController(RisksService svc, CimsDbContext db) : CimsControlle
     }
 }
 
+// ── Stakeholder & Communications ──────────────────────────────────────────────
+// PAFM-SD F.4 (S3 module). T-S3-03 controller surface.
+[Route("api/v1/projects/{projectId:guid}/stakeholders")]
+public class StakeholdersController(StakeholdersService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListAsync(projectId, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpGet("matrix")]
+    public async Task<IActionResult> Matrix(Guid projectId, CancellationToken ct)
+    {
+        // Membership-only: heat-map is a read view.
+        await GetProjectRoleAsync(db, projectId);
+        var cells = await svc.GetMatrixAsync(projectId, ct);
+        return Ok(new { success = true, data = cells });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Create(
+        Guid projectId, CreateStakeholderRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var s = await svc.CreateAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = s });
+    }
+
+    [HttpPut("{stakeholderId:guid}")]
+    public async Task<IActionResult> Update(
+        Guid projectId, Guid stakeholderId,
+        UpdateStakeholderRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var s = await svc.UpdateAsync(projectId, stakeholderId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = s });
+    }
+
+    [HttpPost("{stakeholderId:guid}/deactivate")]
+    public async Task<IActionResult> Deactivate(
+        Guid projectId, Guid stakeholderId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var s = await svc.DeactivateAsync(projectId, stakeholderId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = s });
+    }
+
+    // T-S3-06 engagement log: record + list per stakeholder.
+    [HttpPost("{stakeholderId:guid}/engagements")]
+    public async Task<IActionResult> RecordEngagement(
+        Guid projectId, Guid stakeholderId,
+        RecordEngagementRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var entry = await svc.RecordEngagementAsync(projectId, stakeholderId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = entry });
+    }
+
+    [HttpGet("{stakeholderId:guid}/engagements")]
+    public async Task<IActionResult> ListEngagements(
+        Guid projectId, Guid stakeholderId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListEngagementsAsync(projectId, stakeholderId, ct);
+        return Ok(new { success = true, data = rows });
+    }
+}
+
+// PAFM-SD F.4 fourth bullet (T-S3-07). Project-level communications
+// matrix — what / who / when / how.
+[Route("api/v1/projects/{projectId:guid}/communications")]
+public class CommunicationsController(CommunicationsService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var rows = await svc.ListAsync(projectId, ct);
+        return Ok(new { success = true, data = rows });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Create(
+        Guid projectId, CreateCommunicationItemRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var item = await svc.CreateAsync(projectId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Created("", new { success = true, data = item });
+    }
+
+    [HttpPut("{itemId:guid}")]
+    public async Task<IActionResult> Update(
+        Guid projectId, Guid itemId,
+        UpdateCommunicationItemRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember))
+            throw new ForbiddenException();
+        var item = await svc.UpdateAsync(projectId, itemId, req,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = item });
+    }
+
+    [HttpPost("{itemId:guid}/deactivate")]
+    public async Task<IActionResult> Deactivate(
+        Guid projectId, Guid itemId, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager))
+            throw new ForbiddenException();
+        var item = await svc.DeactivateAsync(projectId, itemId,
+            CurrentUserId, ClientIp, ClientAgent, ct);
+        return Ok(new { success = true, data = item });
+    }
+}
+
 // ── Documents ─────────────────────────────────────────────────────────────────
 [Route("api/v1/projects/{projectId:guid}/documents")]
 public class DocumentsController(DocumentsService svc, CimsDbContext db) : CimsControllerBase

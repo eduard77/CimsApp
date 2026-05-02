@@ -5,15 +5,24 @@ non-trivial AI session so the model starts with the right scope anchor.
 
 ---
 
-**Status:** Between sprints — S2 closed (PR awaiting merge); S3 not
-yet kicked off.
+**Status:** Sprint S3 active — Stakeholder & Communications kickoff
+landed 2026-05-01.
 
-**Last sprint:** S2 — Risk & Opportunities. Branch
-`sprint/s2-risk-management` (PR awaiting merge); tag
-`v0.2-sprint-s2`. See `docs/sprint-log/s2.md` and
-`docs/retrospectives/s2.md`. 8 of 9 PAFM Appendix F.3 module-DoD
-bullets delivered; the 1 unticked is B-029 (opportunity register,
-deferred per CR-004).
+**Active sprint:** S3 — Stakeholder & Communications. PAFM-SD Ch
+6.4 / Appendix F.4. Branch `sprint/s3-stakeholder-communications`
+off master (`064cf4c`). 4-bullet F.4 module DoD (smallest
+appendix so far); decomposition T-S3-02..09 estimated at 30h ×
+1.5 = 45h, well under 72h formal capacity — first sprint since
+S0 with comfortable headroom and no CR.
+
+T-S3-02 (Stakeholder entity, mirroring S2 Risk shape with
+Power/Interest matrix substituting for P×I) is next.
+
+**Last sprint:** S2 — Risk & Opportunities. Merged at `064cf4c`
+(2026-05-01). Tag `v0.2-sprint-s2`. See `docs/sprint-log/s2.md`
+and `docs/retrospectives/s2.md`. 8 of 9 PAFM Appendix F.3
+module-DoD bullets delivered; the 1 unticked is B-029 (opportunity
+register, deferred per CR-004).
 
 CR-004 deferrals to v1.1 backlog: B-028 (schedule-side Monte
 Carlo — also blocked on S4 CPM data), B-029 (opportunity
@@ -25,11 +34,6 @@ register), B-030 (cross-module contingency drawdown link).
 10 PAFM Appendix F.2 module-DoD bullets delivered; the 2
 unticked are the CR-003 deferrals (B-014 Construction Act
 notices, B-015 final account schedule).
-
-**Next sprint:** S3 — Stakeholder & Communications. PAFM Appendix
-F.4. Estimated 60h over 3 weeks. Stakeholder register, power /
-interest matrix, engagement plan + log, communications matrix.
-Not yet kicked off.
 
 **Branch:** `master` (live work between sprints lands on
 short-lived feature branches off master, not a long-running
