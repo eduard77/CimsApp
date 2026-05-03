@@ -79,6 +79,7 @@ public class CimsDbContext(
     public DbSet<ImprovementRegisterEntry> ImprovementRegisterEntries => Set<ImprovementRegisterEntry>();
     public DbSet<LessonLearned>       LessonsLearned       => Set<LessonLearned>();
     public DbSet<OpportunityToImprove> OpportunitiesToImprove => Set<OpportunityToImprove>();
+    public DbSet<InspectionActivity>  InspectionActivities  => Set<InspectionActivity>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -728,6 +729,25 @@ public class CimsDbContext(
              .HasForeignKey(x => x.RaisedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<InspectionActivity>(e =>
+        {
+            e.HasIndex(x => new { x.ProjectId, x.Number }).IsUnique();
+            e.HasIndex(x => new { x.ProjectId, x.Status });
+            e.HasIndex(x => new { x.ProjectId, x.ScheduledAt });
+            e.HasOne(x => x.Project).WithMany()
+             .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.Assignee).WithMany()
+             .HasForeignKey(x => x.AssigneeId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.StartedBy).WithMany()
+             .HasForeignKey(x => x.StartedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.CompletedBy).WithMany()
+             .HasForeignKey(x => x.CompletedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.CancelledBy).WithMany()
+             .HasForeignKey(x => x.CancelledById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.CreatedBy).WithMany()
+             .HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         m.Entity<GatewayPackage>(e =>
         {
             // (ProjectId, Type, Number) unique-when-active gives
@@ -891,6 +911,7 @@ public class CimsDbContext(
         m.Entity<ImprovementRegisterEntry>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<LessonLearned>().HasQueryFilter(x => x.OrganisationId == _tenant.OrganisationId);
         m.Entity<OpportunityToImprove>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<InspectionActivity>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -940,6 +961,7 @@ public class CimsDbContext(
             else if (e.Entity is ImprovementRegisterEntry imp) imp.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is LessonLearned ll) ll.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is OpportunityToImprove oti) oti.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is InspectionActivity insp) insp.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

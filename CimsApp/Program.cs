@@ -182,6 +182,7 @@ builder.Services.AddScoped<RetentionScheduleService>();
 builder.Services.AddScoped<ImprovementRegisterService>();
 builder.Services.AddScoped<LessonsLearnedService>();
 builder.Services.AddScoped<OpportunityToImproveService>();
+builder.Services.AddScoped<InspectionActivityService>();
 builder.Services.AddScoped<CdeService>();
 builder.Services.AddScoped<DocumentsService>();
 builder.Services.AddScoped<RfiService>();

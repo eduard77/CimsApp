@@ -241,3 +241,10 @@ public enum BreachSeverity { Low, Medium, High, Critical }
 // Closed (terminal). State-machine enforcement in
 // Core/PdcaWorkflow.cs.
 public enum PdcaState { Plan, Do, Check, Act, Closed }
+
+// S13 InspectionActivity (PAFM-SD F.13 Option A scope cut).
+// 4-state linear workflow Scheduled → InProgress →
+// (Completed | Cancelled). Both end states are terminal.
+// State-machine enforcement in
+// Core/InspectionActivityWorkflow.cs.
+public enum InspectionActivityStatus { Scheduled, InProgress, Completed, Cancelled }

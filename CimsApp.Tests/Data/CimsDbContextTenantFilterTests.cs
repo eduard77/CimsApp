@@ -87,6 +87,9 @@ public class CimsDbContextTenantFilterTests
         typeof(ImprovementRegisterEntry),
         typeof(LessonLearned),
         typeof(OpportunityToImprove),
+        // S13 InspectionActivity (T-S13-02). Project-scoped.
+        // F.13 integration bullets deferred to v1.1 / B-086..089.
+        typeof(InspectionActivity),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =
