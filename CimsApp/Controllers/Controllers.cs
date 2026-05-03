@@ -2032,6 +2032,30 @@ public class AlertRulesController(AlertRuleService svc, CimsDbContext db) : Cims
     }
 }
 
+// ── Search & Discovery (T-S15-03) ────────────────────────────────────────────
+// PAFM-SD F.15. Single cross-entity search endpoint. Project
+// membership required; per-entity LIKE queries flow through the
+// existing tenant query filter (no IgnoreQueryFilters).
+[Route("api/v1/projects/{projectId:guid}/search")]
+public class SearchController(CimsApp.Services.Search.SearchAggregatorService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> Search(
+        Guid projectId,
+        [FromQuery] string q,
+        [FromQuery] string[]? types,
+        [FromQuery] int? take,
+        CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        var typesFilter = types is { Length: > 0 }
+            ? new HashSet<string>(types, StringComparer.OrdinalIgnoreCase)
+            : null;
+        var hits = await svc.SearchAsync(projectId, q, typesFilter, take, ct);
+        return Ok(new { success = true, data = hits });
+    }
+}
+
 // ── BSA 2022 Gateway packages (T-S10-03) ─────────────────────────────────────
 // PAFM-SD F.10 second bullet — Gateway 1/2/3 statutory submissions.
 [Route("api/v1/projects/{projectId:guid}/gateway-packages")]

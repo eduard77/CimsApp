@@ -236,6 +236,18 @@ builder.Services.AddHostedService<CimsApp.Services.Email.EmailDispatcherHostedSe
 builder.Services.AddScoped<AlertRuleService>();
 builder.Services.AddHostedService<CimsApp.Services.Alerts.ThresholdEvaluatorHostedService>();
 
+// T-S15-02 Search & Discovery. One ISearchProvider per
+// searchable entity type; SearchAggregatorService fans out
+// to all of them.
+builder.Services.AddScoped<CimsApp.Services.Search.ISearchProvider, CimsApp.Services.Search.DocumentSearchProvider>();
+builder.Services.AddScoped<CimsApp.Services.Search.ISearchProvider, CimsApp.Services.Search.RfiSearchProvider>();
+builder.Services.AddScoped<CimsApp.Services.Search.ISearchProvider, CimsApp.Services.Search.ActionSearchProvider>();
+builder.Services.AddScoped<CimsApp.Services.Search.ISearchProvider, CimsApp.Services.Search.RiskSearchProvider>();
+builder.Services.AddScoped<CimsApp.Services.Search.ISearchProvider, CimsApp.Services.Search.ChangeRequestSearchProvider>();
+builder.Services.AddScoped<CimsApp.Services.Search.ISearchProvider, CimsApp.Services.Search.EarlyWarningSearchProvider>();
+builder.Services.AddScoped<CimsApp.Services.Search.ISearchProvider, CimsApp.Services.Search.CompensationEventSearchProvider>();
+builder.Services.AddScoped<CimsApp.Services.Search.SearchAggregatorService>();
+
 // ── Blazor UI Services ────────────────────────────────────────────────────────
 builder.Services.AddScoped<UiStateService>();
 builder.Services.AddScoped<BlazorApiClient>();
