@@ -2456,3 +2456,57 @@ public class InspectionActivity
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// Threshold-based alert rule (T-S14-04, PAFM-SD F.14 fourth
+/// bullet). Project-scoped. The threshold evaluator
+/// background service iterates every active rule on a tick;
+/// when the configured metric crosses the threshold per the
+/// comparison operator, a Notification + email is fired to
+/// the recipient and <see cref="LastFiredAt"/> is bumped.
+/// Re-firing is suppressed within <see cref="CooldownMinutes"/>
+/// of the previous fire (default 60) to prevent alert storms.
+/// Rich rule DSL (boolean combinations, time-of-day windows,
+/// multi-recipient) → v1.1 / B-092.
+/// </summary>
+public class AlertRule
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    [Required, MaxLength(200)]
+    public string Title { get; set; } = "";
+
+    public AlertMetric Metric { get; set; }
+    public AlertComparison Comparison { get; set; }
+    public decimal Threshold { get; set; }
+
+    /// <summary>UserId notified when the rule fires. v1.1 will
+    /// support multi-recipient + role-based recipients
+    /// (B-092 / B-093).</summary>
+    public Guid RecipientUserId { get; set; }
+    public User RecipientUser { get; set; } = null!;
+
+    /// <summary>Minutes between consecutive fires. The evaluator
+    /// will not fire again until <c>now &gt; LastFiredAt + Cooldown</c>.
+    /// Default 60.</summary>
+    public int CooldownMinutes { get; set; } = 60;
+
+    /// <summary>Last time the rule fired (notification sent).
+    /// Null until the first fire.</summary>
+    public DateTime? LastFiredAt { get; set; }
+
+    /// <summary>Most recent observed metric value (for diagnostics
+    /// — visible in the UI rule list).</summary>
+    public decimal? LastObservedValue { get; set; }
+    public DateTime? LastObservedAt { get; set; }
+
+    public Guid CreatedById { get; set; }
+    public User CreatedBy { get; set; } = null!;
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+

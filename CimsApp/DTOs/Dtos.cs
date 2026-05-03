@@ -786,6 +786,19 @@ public record StartInspectionActivityRequest(string? Note);
 public record CompleteInspectionActivityRequest(
     string Outcome, string? CompletionNotes);
 public record CancelInspectionActivityRequest(string CancellationReason);
+// T-S14-04 AlertRule DTOs.
+public record AlertRuleDto(
+    Guid Id, Guid ProjectId, string Title,
+    AlertMetric Metric, AlertComparison Comparison, decimal Threshold,
+    Guid RecipientUserId, int CooldownMinutes,
+    DateTime? LastFiredAt, decimal? LastObservedValue, DateTime? LastObservedAt,
+    bool IsActive, DateTime CreatedAt, DateTime UpdatedAt);
+public record CreateAlertRuleRequest(
+    string Title, AlertMetric Metric, AlertComparison Comparison,
+    decimal Threshold, Guid RecipientUserId, int? CooldownMinutes);
+public record UpdateAlertRuleRequest(
+    string? Title, decimal? Threshold, AlertComparison? Comparison,
+    Guid? RecipientUserId, int? CooldownMinutes, bool? IsActive);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

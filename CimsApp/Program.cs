@@ -232,6 +232,10 @@ else
 }
 builder.Services.AddHostedService<CimsApp.Services.Email.EmailDispatcherHostedService>();
 
+// T-S14-04 AlertRule + threshold evaluator.
+builder.Services.AddScoped<AlertRuleService>();
+builder.Services.AddHostedService<CimsApp.Services.Alerts.ThresholdEvaluatorHostedService>();
+
 // ── Blazor UI Services ────────────────────────────────────────────────────────
 builder.Services.AddScoped<UiStateService>();
 builder.Services.AddScoped<BlazorApiClient>();
