@@ -6821,6 +6821,117 @@ public class InspectionActivityService(CimsDbContext db, AuditService audit)
             x.CreatedById, x.CreatedAt, x.UpdatedAt);
 }
 
+// T-S14-04 AlertRule service. PAFM-SD F.14 fourth bullet —
+// threshold-based alerts on cost / schedule / risk. CRUD on the
+// project-scoped rule entity; the actual evaluation (computing
+// the metric value + firing notifications) lives in
+// CimsApp.Services.Alerts.ThresholdEvaluator (pure logic) and
+// ThresholdEvaluatorHostedService (background loop).
+public class AlertRuleService(CimsDbContext db, AuditService audit)
+{
+    public async Task<List<AlertRuleDto>> ListAsync(Guid projectId, CancellationToken ct = default)
+    {
+        var rows = await db.AlertRules
+            .Where(x => x.ProjectId == projectId && x.IsActive)
+            .OrderBy(x => x.Title).ToListAsync(ct);
+        return rows.Select(ToDto).ToList();
+    }
+
+    public async Task<AlertRuleDto> GetAsync(Guid projectId, Guid id, CancellationToken ct = default)
+    {
+        var x = await db.AlertRules
+            .FirstOrDefaultAsync(r => r.Id == id && r.ProjectId == projectId && r.IsActive, ct)
+            ?? throw new NotFoundException("AlertRule");
+        return ToDto(x);
+    }
+
+    public async Task<AlertRuleDto> CreateAsync(
+        Guid projectId, CreateAlertRuleRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(new List<string> { "Title is required" });
+        if (req.Threshold < 0)
+            throw new ValidationException(new List<string> { "Threshold must be non-negative" });
+        if (!await db.Users.AnyAsync(u => u.Id == req.RecipientUserId, ct))
+            throw new NotFoundException("RecipientUser");
+
+        var rule = new AlertRule
+        {
+            ProjectId = projectId,
+            Title = req.Title.Trim(),
+            Metric = req.Metric,
+            Comparison = req.Comparison,
+            Threshold = req.Threshold,
+            RecipientUserId = req.RecipientUserId,
+            CooldownMinutes = req.CooldownMinutes is int c && c > 0 ? c : 60,
+            CreatedById = actorId,
+        };
+        db.AlertRules.Add(rule);
+        await audit.WriteAsync(actorId, "alertrule.created",
+            "AlertRule", rule.Id.ToString(), projectId,
+            detail: new { rule.Title, rule.Metric, rule.Comparison, rule.Threshold, rule.RecipientUserId, rule.CooldownMinutes },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(rule);
+    }
+
+    public async Task<AlertRuleDto> UpdateAsync(
+        Guid projectId, Guid id, UpdateAlertRuleRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var rule = await db.AlertRules
+            .FirstOrDefaultAsync(r => r.Id == id && r.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("AlertRule");
+        if (req.Title != null) rule.Title = req.Title.Trim();
+        if (req.Threshold is decimal t)
+        {
+            if (t < 0) throw new ValidationException(new List<string> { "Threshold must be non-negative" });
+            rule.Threshold = t;
+        }
+        if (req.Comparison.HasValue) rule.Comparison = req.Comparison.Value;
+        if (req.RecipientUserId.HasValue)
+        {
+            if (!await db.Users.AnyAsync(u => u.Id == req.RecipientUserId.Value, ct))
+                throw new NotFoundException("RecipientUser");
+            rule.RecipientUserId = req.RecipientUserId.Value;
+        }
+        if (req.CooldownMinutes is int cm && cm > 0) rule.CooldownMinutes = cm;
+        if (req.IsActive.HasValue) rule.IsActive = req.IsActive.Value;
+
+        await audit.WriteAsync(actorId, "alertrule.updated",
+            "AlertRule", rule.Id.ToString(), projectId,
+            detail: new { rule.Title, rule.Threshold, rule.Comparison, rule.RecipientUserId, rule.CooldownMinutes, rule.IsActive },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(rule);
+    }
+
+    public async Task DeleteAsync(
+        Guid projectId, Guid id,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var rule = await db.AlertRules
+            .FirstOrDefaultAsync(r => r.Id == id && r.ProjectId == projectId, ct)
+            ?? throw new NotFoundException("AlertRule");
+        rule.IsActive = false;
+        await audit.WriteAsync(actorId, "alertrule.deleted",
+            "AlertRule", rule.Id.ToString(), projectId,
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+    }
+
+    internal static AlertRuleDto ToDto(AlertRule x) =>
+        new(x.Id, x.ProjectId, x.Title,
+            x.Metric, x.Comparison, x.Threshold,
+            x.RecipientUserId, x.CooldownMinutes,
+            x.LastFiredAt, x.LastObservedValue, x.LastObservedAt,
+            x.IsActive, x.CreatedAt, x.UpdatedAt);
+}
+
 // T-S10-03 GatewayPackage service. PAFM-SD F.10 second bullet
 // (BSA 2022 Gateway 1/2/3 packages). 3-state state-machine via
 // Core/GatewayPackageWorkflow. Project-scoped sequential

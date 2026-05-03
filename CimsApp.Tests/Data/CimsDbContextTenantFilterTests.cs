@@ -90,6 +90,9 @@ public class CimsDbContextTenantFilterTests
         // S13 InspectionActivity (T-S13-02). Project-scoped.
         // F.13 integration bullets deferred to v1.1 / B-086..089.
         typeof(InspectionActivity),
+        // S14 Notifications & Alerts (T-S14-04). Project-scoped
+        // threshold rule. F.14 fourth bullet.
+        typeof(AlertRule),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =

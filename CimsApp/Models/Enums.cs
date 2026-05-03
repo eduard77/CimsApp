@@ -248,3 +248,32 @@ public enum PdcaState { Plan, Do, Check, Act, Closed }
 // State-machine enforcement in
 // Core/InspectionActivityWorkflow.cs.
 public enum InspectionActivityStatus { Scheduled, InProgress, Completed, Cancelled }
+
+// S14 Notifications & Alerts (PAFM-SD F.14 fourth bullet —
+// threshold-based alerts on cost / schedule / risk).
+// v1.0 ships three metrics; a richer DSL (boolean combinations,
+// per-project custom rules) is v1.1 / B-092. Each metric maps
+// to an aggregate over project-scoped entities; the evaluator
+// computes the value at every tick and compares against the
+// rule's threshold using the rule's comparison operator.
+public enum AlertMetric
+{
+    /// <summary>(committed + actuals) / budget * 100.</summary>
+    CostUtilizationPercent,
+    /// <summary>EarlyWarning where State != Closed.</summary>
+    OpenEarlyWarnings,
+    /// <summary>Risk where Status != Closed.</summary>
+    OpenRisks,
+}
+
+// Numeric comparison operator for AlertRule. Greater/less are
+// the dominant shapes ("alert me when X exceeds Y"); Equal is
+// included for exact-target rules (e.g. specific count).
+public enum AlertComparison
+{
+    GreaterThan,
+    GreaterThanOrEqual,
+    LessThan,
+    LessThanOrEqual,
+    Equal,
+}

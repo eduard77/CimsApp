@@ -80,6 +80,7 @@ public class CimsDbContext(
     public DbSet<LessonLearned>       LessonsLearned       => Set<LessonLearned>();
     public DbSet<OpportunityToImprove> OpportunitiesToImprove => Set<OpportunityToImprove>();
     public DbSet<InspectionActivity>  InspectionActivities  => Set<InspectionActivity>();
+    public DbSet<AlertRule>           AlertRules            => Set<AlertRule>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -748,6 +749,19 @@ public class CimsDbContext(
              .HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<AlertRule>(e =>
+        {
+            e.HasIndex(x => new { x.ProjectId, x.IsActive });
+            e.Property(x => x.Threshold).HasPrecision(18, 4);
+            e.Property(x => x.LastObservedValue).HasPrecision(18, 4);
+            e.HasOne(x => x.Project).WithMany()
+             .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.RecipientUser).WithMany()
+             .HasForeignKey(x => x.RecipientUserId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.CreatedBy).WithMany()
+             .HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
         m.Entity<GatewayPackage>(e =>
         {
             // (ProjectId, Type, Number) unique-when-active gives
@@ -912,6 +926,8 @@ public class CimsDbContext(
         m.Entity<LessonLearned>().HasQueryFilter(x => x.OrganisationId == _tenant.OrganisationId);
         m.Entity<OpportunityToImprove>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<InspectionActivity>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        // S14 Alerts: project-scoped threshold rule.
+        m.Entity<AlertRule>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -962,6 +978,7 @@ public class CimsDbContext(
             else if (e.Entity is LessonLearned ll) ll.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is OpportunityToImprove oti) oti.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is InspectionActivity insp) insp.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is AlertRule ar) ar.UpdatedAt = DateTime.UtcNow;
         }
     }
 }

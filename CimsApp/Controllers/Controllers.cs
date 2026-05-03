@@ -1985,6 +1985,53 @@ public class InspectionActivitiesController(InspectionActivityService svc, CimsD
     }
 }
 
+// ── Alert rules (T-S14-04) ───────────────────────────────────────────────────
+// PAFM-SD F.14 fourth bullet — threshold-based alerts on cost /
+// schedule / risk. CRUD; the firing happens from a background
+// hosted service (ThresholdEvaluatorHostedService).
+[Route("api/v1/projects/{projectId:guid}/alert-rules")]
+public class AlertRulesController(AlertRuleService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.ListAsync(projectId, ct) });
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> Get(Guid projectId, Guid id, CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.GetAsync(projectId, id, ct) });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Create(Guid projectId, CreateAlertRuleRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager)) throw new ForbiddenException();
+        return Created("", new { success = true, data = await svc.CreateAsync(projectId, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+    }
+
+    [HttpPatch("{id:guid}")]
+    public async Task<IActionResult> Update(Guid projectId, Guid id, UpdateAlertRuleRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager)) throw new ForbiddenException();
+        return Ok(new { success = true, data = await svc.UpdateAsync(projectId, id, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+    }
+
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid projectId, Guid id, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.ProjectManager)) throw new ForbiddenException();
+        await svc.DeleteAsync(projectId, id, CurrentUserId, ClientIp, ClientAgent, ct);
+        return NoContent();
+    }
+}
+
 // ── BSA 2022 Gateway packages (T-S10-03) ─────────────────────────────────────
 // PAFM-SD F.10 second bullet — Gateway 1/2/3 statutory submissions.
 [Route("api/v1/projects/{projectId:guid}/gateway-packages")]
