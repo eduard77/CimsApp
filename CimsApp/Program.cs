@@ -212,6 +212,26 @@ builder.Services.AddScoped<ActionsService>();
 builder.Services.AddScoped<CimsApp.Services.Notifications.INotificationPusher,
     CimsApp.Services.Notifications.NotificationPusher>();
 
+// T-S14-03 email pipeline. Singleton queue + scoped sender +
+// hosted dispatcher. Email:Enabled = false (default) routes
+// every send through NoopEmailSender — production deployments
+// flip the flag and populate Email:Smtp.
+builder.Services.Configure<CimsApp.Services.Email.EmailOptions>(
+    builder.Configuration.GetSection("Email"));
+builder.Services.AddSingleton<CimsApp.Services.Email.EmailQueue>();
+var emailEnabled = builder.Configuration.GetValue<bool>("Email:Enabled");
+if (emailEnabled)
+{
+    builder.Services.AddScoped<CimsApp.Services.Email.IEmailSender,
+        CimsApp.Services.Email.SmtpEmailSender>();
+}
+else
+{
+    builder.Services.AddScoped<CimsApp.Services.Email.IEmailSender,
+        CimsApp.Services.Email.NoopEmailSender>();
+}
+builder.Services.AddHostedService<CimsApp.Services.Email.EmailDispatcherHostedService>();
+
 // ── Blazor UI Services ────────────────────────────────────────────────────────
 builder.Services.AddScoped<UiStateService>();
 builder.Services.AddScoped<BlazorApiClient>();
