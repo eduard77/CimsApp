@@ -71,6 +71,11 @@ public class CimsDbContext(
     public DbSet<TidpEntry>           TidpEntries          => Set<TidpEntry>();
     public DbSet<GatewayPackage>      GatewayPackages      => Set<GatewayPackage>();
     public DbSet<MandatoryOccurrenceReport> MandatoryOccurrenceReports => Set<MandatoryOccurrenceReport>();
+    public DbSet<RopaEntry>           RopaEntries          => Set<RopaEntry>();
+    public DbSet<DataProtectionImpactAssessment> Dpias    => Set<DataProtectionImpactAssessment>();
+    public DbSet<SubjectAccessRequest>  SubjectAccessRequests => Set<SubjectAccessRequest>();
+    public DbSet<DataBreachLog>       DataBreachLogs       => Set<DataBreachLog>();
+    public DbSet<RetentionSchedule>   RetentionSchedules   => Set<RetentionSchedule>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -639,6 +644,54 @@ public class CimsDbContext(
              .HasForeignKey(w => w.ClosedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<RopaEntry>(e =>
+        {
+            e.HasIndex(x => new { x.OrganisationId, x.IsActive });
+            e.HasOne(x => x.Organisation).WithMany()
+             .HasForeignKey(x => x.OrganisationId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<DataProtectionImpactAssessment>(e =>
+        {
+            e.HasIndex(x => new { x.ProjectId, x.State });
+            e.HasOne(x => x.Project).WithMany()
+             .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.CreatedBy).WithMany()
+             .HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.ReviewedBy).WithMany()
+             .HasForeignKey(x => x.ReviewedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<SubjectAccessRequest>(e =>
+        {
+            e.HasIndex(x => new { x.OrganisationId, x.Number }).IsUnique();
+            e.HasIndex(x => new { x.OrganisationId, x.State });
+            e.HasOne(x => x.Organisation).WithMany()
+             .HasForeignKey(x => x.OrganisationId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.FulfilledBy).WithMany()
+             .HasForeignKey(x => x.FulfilledById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.RefusedBy).WithMany()
+             .HasForeignKey(x => x.RefusedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<DataBreachLog>(e =>
+        {
+            e.HasIndex(x => new { x.OrganisationId, x.Number }).IsUnique();
+            e.HasIndex(x => new { x.OrganisationId, x.DiscoveredAt });
+            e.HasOne(x => x.Organisation).WithMany()
+             .HasForeignKey(x => x.OrganisationId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.CreatedBy).WithMany()
+             .HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<RetentionSchedule>(e =>
+        {
+            e.HasIndex(x => new { x.OrganisationId, x.DataCategory }).IsUnique()
+             .HasFilter("[IsActive] = 1");
+            e.HasOne(x => x.Organisation).WithMany()
+             .HasForeignKey(x => x.OrganisationId).OnDelete(DeleteBehavior.NoAction);
+        });
+
         m.Entity<GatewayPackage>(e =>
         {
             // (ProjectId, Type, Number) unique-when-active gives
@@ -788,6 +841,15 @@ public class CimsDbContext(
         m.Entity<TidpEntry>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<GatewayPackage>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
         m.Entity<MandatoryOccurrenceReport>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        // T-S11: GDPR module — 4 of 5 entities are org-scoped (filter
+        // shape OrganisationId == _tenant.OrganisationId), 1
+        // (DataProtectionImpactAssessment) is project-scoped via
+        // Project.AppointingPartyId.
+        m.Entity<RopaEntry>().HasQueryFilter(x => x.OrganisationId == _tenant.OrganisationId);
+        m.Entity<DataProtectionImpactAssessment>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<SubjectAccessRequest>().HasQueryFilter(x => x.OrganisationId == _tenant.OrganisationId);
+        m.Entity<DataBreachLog>().HasQueryFilter(x => x.OrganisationId == _tenant.OrganisationId);
+        m.Entity<RetentionSchedule>().HasQueryFilter(x => x.OrganisationId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -829,6 +891,11 @@ public class CimsDbContext(
             else if (e.Entity is TidpEntry tidp) tidp.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is GatewayPackage gp) gp.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is MandatoryOccurrenceReport mor) mor.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is RopaEntry ropa) ropa.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is DataProtectionImpactAssessment dpia) dpia.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is SubjectAccessRequest sar) sar.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is DataBreachLog brk) brk.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is RetentionSchedule rs) rs.UpdatedAt = DateTime.UtcNow;
         }
     }
 }
