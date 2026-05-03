@@ -6669,6 +6669,158 @@ public class OpportunityToImproveService(CimsDbContext db, AuditService audit)
             x.CreatedAt, x.UpdatedAt);
 }
 
+// T-S13-02 InspectionActivity service. PAFM-SD F.13 fourth
+// bullet (CIMS quality record half). v1.0 manual workflow;
+// Genera bidirectional sync deferred to v1.1 / B-089.
+public class InspectionActivityService(CimsDbContext db, AuditService audit)
+{
+    public async Task<List<InspectionActivityDto>> ListAsync(
+        Guid projectId, InspectionActivityStatus? status = null,
+        CancellationToken ct = default)
+    {
+        var q = db.InspectionActivities
+            .Where(x => x.ProjectId == projectId && x.IsActive);
+        if (status.HasValue) q = q.Where(x => x.Status == status.Value);
+        var rows = await q.OrderBy(x => x.ScheduledAt).ToListAsync(ct);
+        return rows.Select(ToDto).ToList();
+    }
+
+    public async Task<InspectionActivityDto> GetAsync(Guid projectId, Guid id, CancellationToken ct = default)
+    {
+        var x = await db.InspectionActivities
+            .FirstOrDefaultAsync(e => e.Id == id && e.ProjectId == projectId && e.IsActive, ct)
+            ?? throw new NotFoundException("InspectionActivity");
+        return ToDto(x);
+    }
+
+    public async Task<InspectionActivityDto> CreateAsync(
+        Guid projectId, CreateInspectionActivityRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(new List<string> { "Title is required" });
+        if (req.AssigneeId is { } aid
+            && !await db.Users.AnyAsync(u => u.Id == aid, ct))
+            throw new NotFoundException("Assignee");
+
+        var existingCount = await db.InspectionActivities
+            .Where(e => e.ProjectId == projectId).CountAsync(ct);
+        var number = $"INSP-{(existingCount + 1):D4}";
+
+        var x = new InspectionActivity
+        {
+            ProjectId = projectId, Number = number,
+            Title = req.Title.Trim(), Description = req.Description,
+            InspectionType = req.InspectionType,
+            ScheduledAt = req.ScheduledAt,
+            AssigneeId = req.AssigneeId,
+            CreatedById = actorId,
+            Status = InspectionActivityStatus.Scheduled,
+        };
+        db.InspectionActivities.Add(x);
+        await audit.WriteAsync(actorId, "inspection.scheduled",
+            "InspectionActivity", x.Id.ToString(),
+            projectId: projectId,
+            detail: new { x.Number, x.Title, x.InspectionType, x.ScheduledAt, x.AssigneeId },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task<InspectionActivityDto> StartAsync(
+        Guid projectId, Guid id, StartInspectionActivityRequest req,
+        Guid actorId, UserRole role, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.InspectionActivities
+            .FirstOrDefaultAsync(e => e.Id == id && e.ProjectId == projectId && e.IsActive, ct)
+            ?? throw new NotFoundException("InspectionActivity");
+        if (!InspectionActivityWorkflow.IsValidTransition(x.Status, InspectionActivityStatus.InProgress))
+            throw new ConflictException($"Cannot start an inspection in state {x.Status}.");
+        if (!InspectionActivityWorkflow.CanTransition(x.Status, InspectionActivityStatus.InProgress, role))
+            throw new ForbiddenException($"Role {role} cannot start an inspection.");
+
+        x.Status = InspectionActivityStatus.InProgress;
+        x.StartedById = actorId;
+        x.StartedAt = DateTime.UtcNow;
+        await audit.WriteAsync(actorId, "inspection.started",
+            "InspectionActivity", x.Id.ToString(),
+            projectId: projectId,
+            detail: new { x.Number, req.Note },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task<InspectionActivityDto> CompleteAsync(
+        Guid projectId, Guid id, CompleteInspectionActivityRequest req,
+        Guid actorId, UserRole role, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Outcome))
+            throw new ValidationException(new List<string> { "Outcome is required" });
+
+        var x = await db.InspectionActivities
+            .FirstOrDefaultAsync(e => e.Id == id && e.ProjectId == projectId && e.IsActive, ct)
+            ?? throw new NotFoundException("InspectionActivity");
+        if (!InspectionActivityWorkflow.IsValidTransition(x.Status, InspectionActivityStatus.Completed))
+            throw new ConflictException($"Cannot complete an inspection in state {x.Status}.");
+        if (!InspectionActivityWorkflow.CanTransition(x.Status, InspectionActivityStatus.Completed, role))
+            throw new ForbiddenException($"Role {role} cannot complete an inspection.");
+
+        x.Status = InspectionActivityStatus.Completed;
+        x.CompletedById = actorId;
+        x.CompletedAt = DateTime.UtcNow;
+        x.Outcome = req.Outcome;
+        x.CompletionNotes = req.CompletionNotes;
+        await audit.WriteAsync(actorId, "inspection.completed",
+            "InspectionActivity", x.Id.ToString(),
+            projectId: projectId,
+            detail: new { x.Number, x.Outcome },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task<InspectionActivityDto> CancelAsync(
+        Guid projectId, Guid id, CancelInspectionActivityRequest req,
+        Guid actorId, UserRole role, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.CancellationReason))
+            throw new ValidationException(new List<string> { "CancellationReason is required" });
+
+        var x = await db.InspectionActivities
+            .FirstOrDefaultAsync(e => e.Id == id && e.ProjectId == projectId && e.IsActive, ct)
+            ?? throw new NotFoundException("InspectionActivity");
+        if (!InspectionActivityWorkflow.IsValidTransition(x.Status, InspectionActivityStatus.Cancelled))
+            throw new ConflictException($"Cannot cancel an inspection in state {x.Status}.");
+        if (!InspectionActivityWorkflow.CanTransition(x.Status, InspectionActivityStatus.Cancelled, role))
+            throw new ForbiddenException($"Role {role} cannot cancel an inspection.");
+
+        x.Status = InspectionActivityStatus.Cancelled;
+        x.CancelledById = actorId;
+        x.CancelledAt = DateTime.UtcNow;
+        x.CancellationReason = req.CancellationReason;
+        await audit.WriteAsync(actorId, "inspection.cancelled",
+            "InspectionActivity", x.Id.ToString(),
+            projectId: projectId,
+            detail: new { x.Number, x.CancellationReason },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    private static InspectionActivityDto ToDto(InspectionActivity x) =>
+        new(x.Id, x.ProjectId, x.Number, x.Title, x.Description, x.InspectionType,
+            x.Status, x.ScheduledAt, x.AssigneeId,
+            x.StartedById, x.StartedAt,
+            x.CompletedById, x.CompletedAt, x.Outcome, x.CompletionNotes,
+            x.CancelledById, x.CancelledAt, x.CancellationReason,
+            x.CreatedById, x.CreatedAt, x.UpdatedAt);
+}
+
 // T-S10-03 GatewayPackage service. PAFM-SD F.10 second bullet
 // (BSA 2022 Gateway 1/2/3 packages). 3-state state-machine via
 // Core/GatewayPackageWorkflow. Project-scoped sequential

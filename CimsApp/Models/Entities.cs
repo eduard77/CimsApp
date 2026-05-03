@@ -2391,3 +2391,68 @@ public class OpportunityToImprove
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// Inspection activity (T-S13-02, PAFM-SD F.13 fourth bullet,
+/// CIMS-quality-record half). Project-scoped. v1.0 ships the
+/// data shape + manual-entry workflow; bidirectional sync
+/// with Genera Systems QA / HSE → v1.1 / B-089 once PAFM Ch 47
+/// + Genera API spec are reconciled. Per-project sequential
+/// INSP-NNNN. State-machine enforcement in
+/// <see cref="CimsApp.Core.InspectionActivityWorkflow"/>.
+/// </summary>
+public class InspectionActivity
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Project-scoped sequential, e.g. "INSP-0001".
+    /// Service auto-generates on Create.</summary>
+    [Required, MaxLength(20)] public string Number { get; set; } = "";
+
+    [Required, MaxLength(300)] public string Title { get; set; } = "";
+    public string? Description { get; set; }
+
+    /// <summary>Free-text inspection type in v1.0 (e.g. "QA",
+    /// "HSE", "Pre-pour", "Snagging"). Structured taxonomy
+    /// arrives with PAFM Ch 47 reconciliation in v1.1 / B-086;
+    /// Genera-side type list will drive the enum / lookup.</summary>
+    [MaxLength(100)] public string? InspectionType { get; set; }
+
+    public InspectionActivityStatus Status { get; set; }
+        = InspectionActivityStatus.Scheduled;
+
+    /// <summary>UTC date/time the inspection is scheduled
+    /// for. Distinct from CreatedAt (row-write time).</summary>
+    public DateTime ScheduledAt { get; set; }
+
+    public Guid? AssigneeId { get; set; }
+    public User? Assignee { get; set; }
+
+    public Guid? StartedById { get; set; }
+    public User? StartedBy { get; set; }
+    public DateTime? StartedAt { get; set; }
+
+    public Guid? CompletedById { get; set; }
+    public User? CompletedBy { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    /// <summary>Outcome captured at Complete (free-text in
+    /// v1.0; structured pass/fail/conditional + per-Genera
+    /// outcome enum lands with B-086).</summary>
+    public string? Outcome { get; set; }
+    public string? CompletionNotes { get; set; }
+
+    public Guid? CancelledById { get; set; }
+    public User? CancelledBy { get; set; }
+    public DateTime? CancelledAt { get; set; }
+    public string? CancellationReason { get; set; }
+
+    public Guid CreatedById { get; set; }
+    public User CreatedBy { get; set; } = null!;
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+

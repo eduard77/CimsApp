@@ -350,6 +350,22 @@ First non-statutory module since S6. Mixed scoping:
 | POST   | `/api/v1/projects/{projectId}/opportunities-to-improve` | authenticated | membership | T-S12-04. Body `CreateOpportunityToImproveRequest(title, description, sourceEntityType?, sourceEntityId?)`. Both Source* fields travel as a pair. Service normalises SourceEntityType to PascalCase. Auto-generates OFI-NNNN. Polymorphic FK → v1.1 / B-083. Audit: `opportunity.raised`. |
 | POST   | `/api/v1/projects/{projectId}/opportunities-to-improve/{id}/action` | authenticated | `TaskTeamMember+` | T-S12-04. Body `ActionOpportunityToImproveRequest(note?)`. One-way; sets IsActioned + ActionedAt + ActionedById. Audit: `opportunity.actioned`. |
 
+## Inspection Activities (F.13 Option A)
+
+PAFM-SD F.13 fourth bullet (CIMS quality record half).
+**Genera Systems QA / HSE bidirectional sync deferred** to
+v1.1 / B-086..089 (REST API per PAFM Ch 47 + webhook + SSO +
+sync). v1.0 ships manual workflow only.
+
+| Method | Route | Global role | Project role | Comment |
+|---|---|---|---|---|
+| GET    | `/api/v1/projects/{projectId}/inspection-activities?status=` | authenticated | membership | T-S13-02. Lists active inspections; optional status filter. Ordered by ScheduledAt. |
+| GET    | `/api/v1/projects/{projectId}/inspection-activities/{id}` | authenticated | membership | T-S13-02. |
+| POST   | `/api/v1/projects/{projectId}/inspection-activities` | authenticated | `TaskTeamMember+` | T-S13-02. Body `CreateInspectionActivityRequest(title, description?, inspectionType?, scheduledAt, assigneeId?)`. Auto-generates INSP-NNNN. Initial state Scheduled. Audit: `inspection.scheduled`. |
+| POST   | `/api/v1/projects/{projectId}/inspection-activities/{id}/start` | authenticated | `TaskTeamMember+` | T-S13-02. State Scheduled → InProgress. Body `StartInspectionActivityRequest(note?)`. Records StartedById + StartedAt. Audit: `inspection.started`. |
+| POST   | `/api/v1/projects/{projectId}/inspection-activities/{id}/complete` | authenticated | `TaskTeamMember+` | T-S13-02. State InProgress → Completed. Body `CompleteInspectionActivityRequest(outcome, completionNotes?)`. Outcome required (free-text v1.0; structured pass/fail enum → v1.1 / B-086). Audit: `inspection.completed`. |
+| POST   | `/api/v1/projects/{projectId}/inspection-activities/{id}/cancel` | authenticated | `ProjectManager+` | T-S13-02. State {Scheduled, InProgress} → Cancelled. Body `CancelInspectionActivityRequest(cancellationReason)`. Reason required. PM+ — cancellation is a formal decision. Audit: `inspection.cancelled`. |
+
 ## Documents
 
 | Method | Route | Global role | Project role | Comment |

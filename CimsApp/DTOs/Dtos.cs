@@ -767,6 +767,25 @@ public record CreateOpportunityToImproveRequest(
     string Title, string Description,
     string? SourceEntityType, Guid? SourceEntityId);
 public record ActionOpportunityToImproveRequest(string? Note);
+// T-S13-02 InspectionActivity DTOs.
+public record InspectionActivityDto(
+    Guid Id, Guid ProjectId, string Number,
+    string Title, string? Description, string? InspectionType,
+    InspectionActivityStatus Status,
+    DateTime ScheduledAt,
+    Guid? AssigneeId,
+    Guid? StartedById, DateTime? StartedAt,
+    Guid? CompletedById, DateTime? CompletedAt, string? Outcome, string? CompletionNotes,
+    Guid? CancelledById, DateTime? CancelledAt, string? CancellationReason,
+    Guid CreatedById,
+    DateTime CreatedAt, DateTime UpdatedAt);
+public record CreateInspectionActivityRequest(
+    string Title, string? Description, string? InspectionType,
+    DateTime ScheduledAt, Guid? AssigneeId);
+public record StartInspectionActivityRequest(string? Note);
+public record CompleteInspectionActivityRequest(
+    string Outcome, string? CompletionNotes);
+public record CancelInspectionActivityRequest(string CancellationReason);
 // T-S1-09. CumulativeValuation / CumulativeMaterialsOnSite are PWDD-style:
 // the assessor states the running total each period, not the increment.
 // RetentionPercent is 0..100 (3.00 = 3%). NEC4 default per ADR-0013.

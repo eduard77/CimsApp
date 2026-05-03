@@ -1934,6 +1934,57 @@ public class OpportunityToImproveController(OpportunityToImproveService svc, Cim
     }
 }
 
+// ── Inspection Activities (T-S13-02) ─────────────────────────────────────────
+// PAFM-SD F.13 fourth bullet (CIMS quality record half).
+// Genera Systems QA / HSE bidirectional sync deferred to v1.1
+// / B-089 once PAFM Ch 47 + Genera API spec are reconciled.
+[Route("api/v1/projects/{projectId:guid}/inspection-activities")]
+public class InspectionActivitiesController(InspectionActivityService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(
+        Guid projectId,
+        [FromQuery] InspectionActivityStatus? status,
+        CancellationToken ct)
+    {
+        await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.ListAsync(projectId, status, ct) });
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> Get(Guid projectId, Guid id, CancellationToken ct)
+    { await GetProjectRoleAsync(db, projectId); return Ok(new { success = true, data = await svc.GetAsync(projectId, id, ct) }); }
+
+    [HttpPost]
+    public async Task<IActionResult> Create(Guid projectId, CreateInspectionActivityRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember)) throw new ForbiddenException();
+        return Created("", new { success = true, data = await svc.CreateAsync(projectId, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+    }
+
+    [HttpPost("{id:guid}/start")]
+    public async Task<IActionResult> Start(Guid projectId, Guid id, StartInspectionActivityRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.StartAsync(projectId, id, req, CurrentUserId, role, ClientIp, ClientAgent, ct) });
+    }
+
+    [HttpPost("{id:guid}/complete")]
+    public async Task<IActionResult> Complete(Guid projectId, Guid id, CompleteInspectionActivityRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.CompleteAsync(projectId, id, req, CurrentUserId, role, ClientIp, ClientAgent, ct) });
+    }
+
+    [HttpPost("{id:guid}/cancel")]
+    public async Task<IActionResult> Cancel(Guid projectId, Guid id, CancelInspectionActivityRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.CancelAsync(projectId, id, req, CurrentUserId, role, ClientIp, ClientAgent, ct) });
+    }
+}
+
 // ── BSA 2022 Gateway packages (T-S10-03) ─────────────────────────────────────
 // PAFM-SD F.10 second bullet — Gateway 1/2/3 statutory submissions.
 [Route("api/v1/projects/{projectId:guid}/gateway-packages")]
