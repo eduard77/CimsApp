@@ -82,6 +82,11 @@ public class CimsDbContextTenantFilterTests
         typeof(SubjectAccessRequest),
         typeof(DataBreachLog),
         typeof(RetentionSchedule),
+        // S12 Kaizen / Lessons Learned additions (T-S12-02..04).
+        // Mixed: 2 project-scoped, 1 org-scoped (LessonLearned).
+        typeof(ImprovementRegisterEntry),
+        typeof(LessonLearned),
+        typeof(OpportunityToImprove),
     ];
 
     private static readonly Type[] IntentionallyUnfiltered =

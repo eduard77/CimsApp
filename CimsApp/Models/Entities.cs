@@ -2249,3 +2249,145 @@ public class RetentionSchedule
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// Improvement register entry (T-S12-02, PAFM-SD F.12 first
+/// bullet — Plan-Do-Check-Act continuous improvement).
+/// Project-scoped. Per-project sequential IMP-NNNN. State
+/// machine via <see cref="CimsApp.Core.PdcaWorkflow"/>:
+/// Plan → Do → Check → Act → (Plan for next cycle | Closed).
+/// CycleNumber increments at every Act → Plan cycle-back; per-
+/// cycle history (separate row per cycle iteration) is v1.1
+/// territory (B-081).
+/// </summary>
+public class ImprovementRegisterEntry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Project-scoped sequential, e.g. "IMP-0001".
+    /// Service auto-generates on Create.</summary>
+    [Required, MaxLength(20)] public string Number { get; set; } = "";
+
+    [Required, MaxLength(300)] public string Title { get; set; } = "";
+    [Required] public string Description { get; set; } = "";
+
+    public PdcaState State { get; set; } = PdcaState.Plan;
+
+    /// <summary>Iteration counter — starts at 1, increments on
+    /// every Act → Plan cycle-back. Helps a future report show
+    /// "this improvement has gone through 3 PDCA cycles".</summary>
+    public int CycleNumber { get; set; } = 1;
+
+    /// <summary>Per-stage rolling notes — overwritten on each
+    /// cycle in v1.0. Per-cycle history → v1.1 / B-081.</summary>
+    public string? PlanNotes { get; set; }
+    public string? DoNotes { get; set; }
+    public string? CheckNotes { get; set; }
+    public string? ActNotes { get; set; }
+
+    public Guid OwnerId { get; set; }
+    public User Owner { get; set; } = null!;
+
+    public Guid CreatedById { get; set; }
+    public User CreatedBy { get; set; } = null!;
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Lessons learned library entry (T-S12-03, PAFM-SD F.12 second
+/// bullet — cross-project knowledge base). Org-scoped: any
+/// authenticated user in the tenant can read. OptionalSourceProjectId
+/// records the project the lesson was first observed on (when
+/// known); the lesson is then accessible to other projects in
+/// the same org. Tagging / search → v1.1 / B-082.
+/// </summary>
+public class LessonLearned
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Org-scoped: tenant filter shape is
+    /// `OrganisationId == _tenant.OrganisationId`. Cross-project
+    /// visibility within the tenant is the F.12 second bullet's
+    /// whole point.</summary>
+    public Guid OrganisationId { get; set; }
+    public Organisation Organisation { get; set; } = null!;
+
+    [Required, MaxLength(300)] public string Title { get; set; } = "";
+    [Required] public string Description { get; set; } = "";
+
+    /// <summary>Free-text category (e.g. "Procurement",
+    /// "Schedule", "Site safety"). Structured taxonomy → v1.1
+    /// / B-082.</summary>
+    [MaxLength(100)] public string? Category { get; set; }
+
+    /// <summary>Optional FK to the project the lesson was first
+    /// observed on. Null = the lesson is not tied to a specific
+    /// project (e.g. an org-wide observation).</summary>
+    public Guid? SourceProjectId { get; set; }
+    public Project? SourceProject { get; set; }
+
+    /// <summary>Comma-separated tags. v1.1 / B-082 introduces
+    /// structured tagging + full-text search.</summary>
+    public string TagsCsv { get; set; } = "";
+
+    public Guid RecordedById { get; set; }
+    public User RecordedBy { get; set; } = null!;
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Opportunity to improve (T-S12-04, PAFM-SD F.12 third bullet
+/// — "linked from any module"). Project-scoped. SourceEntityType
+/// + SourceEntityId is a JSON metadata pointer that lets the
+/// Opportunity reference any other entity in the system without
+/// per-domain join tables. Polymorphic FK → v1.1 / B-083 once a
+/// real workflow demands navigability. v1.0 is enough to record
+/// + surface "X was raised against this Risk / RFI / etc.".
+/// </summary>
+public class OpportunityToImprove
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Project-scoped sequential OFI-NNNN.</summary>
+    [Required, MaxLength(20)] public string Number { get; set; } = "";
+
+    [Required, MaxLength(300)] public string Title { get; set; } = "";
+    [Required] public string Description { get; set; } = "";
+
+    /// <summary>Optional source-entity reference. When set, both
+    /// fields must be populated; service-layer guard enforces.
+    /// SourceEntityType is service-normalised to PascalCase
+    /// (e.g. "Risk", "Rfi", "Variation") to mitigate the kickoff
+    /// Top-3 risk #1 (free-text type drift).</summary>
+    [MaxLength(50)] public string? SourceEntityType { get; set; }
+    public Guid? SourceEntityId { get; set; }
+
+    public Guid RaisedById { get; set; }
+    public User RaisedBy { get; set; } = null!;
+
+    /// <summary>Whether the opportunity has been actioned
+    /// (linked through to an ImprovementRegisterEntry, addressed
+    /// inline, or formally closed without action). v1.0 simple
+    /// boolean; v1.1 may introduce a state machine if pilot need
+    /// surfaces.</summary>
+    public bool IsActioned { get; set; }
+    public DateTime? ActionedAt { get; set; }
+    public Guid? ActionedById { get; set; }
+    public string? ActionNote { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+

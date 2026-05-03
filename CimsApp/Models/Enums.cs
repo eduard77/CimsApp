@@ -234,3 +234,10 @@ public enum SarState { Received, InProgress, Fulfilled, Refused }
 // likely to result in risk to data subjects.
 // // GDPR ref: Art. 33.
 public enum BreachSeverity { Low, Medium, High, Critical }
+
+// S12 Kaizen / Lessons Learned module (PAFM-SD F.12).
+// 5-state PDCA workflow (Plan-Do-Check-Act + Closed). Act
+// transitions to either Plan (next iteration / cycle-back) or
+// Closed (terminal). State-machine enforcement in
+// Core/PdcaWorkflow.cs.
+public enum PdcaState { Plan, Do, Check, Act, Closed }
