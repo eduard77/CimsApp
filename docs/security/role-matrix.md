@@ -382,6 +382,19 @@ v1.1 / B-091; rich AlertRule DSL to v1.1 / B-092.
 | PATCH  | `/api/v1/projects/{projectId}/alert-rules/{id}` | authenticated | `ProjectManager+` | T-S14-04. Body `UpdateAlertRuleRequest` — all fields optional. Audit: `alertrule.updated`. |
 | DELETE | `/api/v1/projects/{projectId}/alert-rules/{id}` | authenticated | `ProjectManager+` | T-S14-04. Soft-delete (sets `IsActive = false`). Audit: `alertrule.deleted`. |
 
+## Search & Discovery (F.15)
+
+PAFM-SD F.15. v1.0 ships a single cross-entity search endpoint
+covering Documents / RFIs / Actions / Risks / ChangeRequests /
+EarlyWarnings / CompensationEvents. Per-entity LIKE queries
+flow through the existing project-scoped tenant query filter
+(no `IgnoreQueryFilters`) so cross-tenant data never leaks.
+Saved searches → v1.1 / B-096; FTS upgrade → v1.1 / B-095.
+
+| Method | Route | Global role | Project role | Comment |
+|---|---|---|---|---|
+| GET | `/api/v1/projects/{projectId}/search?q=&types[]=&take=` | authenticated | membership | T-S15-03. `q` minimum length 2; `types[]` optional allow-list (`document`, `rfi`, `action`, `risk`, `change-request`, `early-warning`, `compensation-event`); `take` overall cap (default 50, per-provider cap 10). Returns `[{ entityType, id, title, snippet, score }]`. No write side effects. |
+
 ## Documents
 
 | Method | Route | Global role | Project role | Comment |
