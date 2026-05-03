@@ -366,6 +366,22 @@ sync). v1.0 ships manual workflow only.
 | POST   | `/api/v1/projects/{projectId}/inspection-activities/{id}/complete` | authenticated | `TaskTeamMember+` | T-S13-02. State InProgress → Completed. Body `CompleteInspectionActivityRequest(outcome, completionNotes?)`. Outcome required (free-text v1.0; structured pass/fail enum → v1.1 / B-086). Audit: `inspection.completed`. |
 | POST   | `/api/v1/projects/{projectId}/inspection-activities/{id}/cancel` | authenticated | `ProjectManager+` | T-S13-02. State {Scheduled, InProgress} → Cancelled. Body `CancelInspectionActivityRequest(cancellationReason)`. Reason required. PM+ — cancellation is a formal decision. Audit: `inspection.cancelled`. |
 
+## Notifications & Alerts (F.14)
+
+PAFM-SD F.14. v1.0 ships in-app notifications via SignalR, email
+via SMTP, and threshold-based alerts on cost / open EW / open
+risk. SMS deferred to v1.1 / B-090; persistent email queue to
+v1.1 / B-091; rich AlertRule DSL to v1.1 / B-092.
+
+| Method | Route | Global role | Project role | Comment |
+|---|---|---|---|---|
+| WS     | `/hubs/notifications` | authenticated | n/a (per-user) | T-S14-02. SignalR hub. Bearer JWT via `Authorization` or `?access_token=` query param (WebSocket transport). Connection joins group `user:{UserId}`; server pushes `notification` events to that group when a Notification row is written. |
+| GET    | `/api/v1/projects/{projectId}/alert-rules` | authenticated | membership | T-S14-04. Lists active rules ordered by Title. |
+| GET    | `/api/v1/projects/{projectId}/alert-rules/{id}` | authenticated | membership | T-S14-04. |
+| POST   | `/api/v1/projects/{projectId}/alert-rules` | authenticated | `ProjectManager+` | T-S14-04. Body `CreateAlertRuleRequest(title, metric, comparison, threshold, recipientUserId, cooldownMinutes?)`. CooldownMinutes default 60. Audit: `alertrule.created`. |
+| PATCH  | `/api/v1/projects/{projectId}/alert-rules/{id}` | authenticated | `ProjectManager+` | T-S14-04. Body `UpdateAlertRuleRequest` — all fields optional. Audit: `alertrule.updated`. |
+| DELETE | `/api/v1/projects/{projectId}/alert-rules/{id}` | authenticated | `ProjectManager+` | T-S14-04. Soft-delete (sets `IsActive = false`). Audit: `alertrule.deleted`. |
+
 ## Documents
 
 | Method | Route | Global role | Project role | Comment |
