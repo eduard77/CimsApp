@@ -56,6 +56,22 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         // for unit testing.
         o.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
         {
+            // T-S14-02: SignalR over WebSocket / SSE cannot send a
+            // bearer header — clients pass the access token as the
+            // ?access_token=... query param when negotiating /hubs/*.
+            // Move it onto ctx.Token before the rest of the JWT
+            // pipeline runs. Standard HTTP requests are unaffected.
+            OnMessageReceived = ctx =>
+            {
+                var accessToken = ctx.Request.Query["access_token"];
+                var path = ctx.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken)
+                    && path.StartsWithSegments("/hubs"))
+                {
+                    ctx.Token = accessToken;
+                }
+                return Task.CompletedTask;
+            },
             OnTokenValidated = async ctx =>
             {
                 var sub = ctx.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
@@ -125,6 +141,11 @@ builder.Services.AddControllers()
         o.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
     });
 
+// ── SignalR (T-S14-02) ────────────────────────────────────────────────────────
+// In-app notifications hub. Auth: JWT bearer; query-param token
+// fallback wired via JwtBearerEvents.OnMessageReceived above.
+builder.Services.AddSignalR();
+
 // ── Blazor Server ─────────────────────────────────────────────────────────────
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -187,6 +208,9 @@ builder.Services.AddScoped<CdeService>();
 builder.Services.AddScoped<DocumentsService>();
 builder.Services.AddScoped<RfiService>();
 builder.Services.AddScoped<ActionsService>();
+// T-S14-02 in-app notifications.
+builder.Services.AddScoped<CimsApp.Services.Notifications.INotificationPusher,
+    CimsApp.Services.Notifications.NotificationPusher>();
 
 // ── Blazor UI Services ────────────────────────────────────────────────────────
 builder.Services.AddScoped<UiStateService>();
@@ -220,6 +244,10 @@ app.UseAuthorization();
 app.UseRateLimiter();    // B-002 — must follow Authentication so policies
                          // can partition on IP after the connection is set.
 app.MapControllers();
+// T-S14-02 SignalR hub for in-app notifications. Auth-required;
+// route prefix /hubs is what JwtBearerEvents.OnMessageReceived
+// looks at to allow query-param tokens.
+app.MapHub<CimsApp.Services.Notifications.NotificationsHub>("/hubs/notifications");
 app.MapRazorComponents<CimsApp.Components.App>()
    .AddInteractiveServerRenderMode();
 
