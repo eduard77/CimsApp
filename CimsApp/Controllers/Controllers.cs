@@ -1661,6 +1661,181 @@ public class ReportingController(ReportingService svc, CimsDbContext db) : CimsC
     }
 }
 
+// ── UK GDPR ROPA (T-S11-02) ──────────────────────────────────────────────────
+// PAFM-SD F.11 first bullet — UK GDPR Art. 30. Org-scoped.
+[Route("api/v1/gdpr/ropa")]
+public class RopaController(RopaService svc) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(CancellationToken ct) =>
+        Ok(new { success = true, data = await svc.ListAsync(ct) });
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> Get(Guid id, CancellationToken ct) =>
+        Ok(new { success = true, data = await svc.GetAsync(id, ct) });
+
+    [HttpPost]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
+    public async Task<IActionResult> Create(CreateRopaEntryRequest req, CancellationToken ct) =>
+        Created("", new { success = true, data = await svc.CreateAsync(req, CurrentUserId, ClientIp, ClientAgent, ct) });
+
+    [HttpPut("{id:guid}")]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
+    public async Task<IActionResult> Update(Guid id, UpdateRopaEntryRequest req, CancellationToken ct) =>
+        Ok(new { success = true, data = await svc.UpdateAsync(id, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+
+    [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    { await svc.DeleteAsync(id, CurrentUserId, ClientIp, ClientAgent, ct); return NoContent(); }
+}
+
+// ── UK GDPR DPIA (T-S11-03) ──────────────────────────────────────────────────
+// PAFM-SD F.11 second bullet — UK GDPR Art. 35. Project-scoped.
+[Route("api/v1/projects/{projectId:guid}/gdpr/dpias")]
+public class DpiaController(DpiaService svc, CimsDbContext db) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
+    { await GetProjectRoleAsync(db, projectId); return Ok(new { success = true, data = await svc.ListAsync(projectId, ct) }); }
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> Get(Guid projectId, Guid id, CancellationToken ct)
+    { await GetProjectRoleAsync(db, projectId); return Ok(new { success = true, data = await svc.GetAsync(projectId, id, ct) }); }
+
+    [HttpPost]
+    public async Task<IActionResult> Create(Guid projectId, CreateDpiaRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember)) throw new ForbiddenException();
+        return Created("", new { success = true, data = await svc.CreateAsync(projectId, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+    }
+
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid projectId, Guid id, UpdateDpiaRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        if (!CdeStateMachine.HasMinimumRole(role, UserRole.TaskTeamMember)) throw new ForbiddenException();
+        return Ok(new { success = true, data = await svc.UpdateAsync(projectId, id, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+    }
+
+    [HttpPost("{id:guid}/submit")]
+    public async Task<IActionResult> Submit(Guid projectId, Guid id, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.TransitionAsync(projectId, id, DpiaState.UnderReview, decisionNote: null, CurrentUserId, role, ClientIp, ClientAgent, ct) });
+    }
+
+    [HttpPost("{id:guid}/approve")]
+    public async Task<IActionResult> Approve(Guid projectId, Guid id, DpiaDecisionRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.TransitionAsync(projectId, id, DpiaState.Approved, req.DecisionNote, CurrentUserId, role, ClientIp, ClientAgent, ct) });
+    }
+
+    [HttpPost("{id:guid}/require-changes")]
+    public async Task<IActionResult> RequireChanges(Guid projectId, Guid id, DpiaDecisionRequest req, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.TransitionAsync(projectId, id, DpiaState.RequiresChanges, req.DecisionNote, CurrentUserId, role, ClientIp, ClientAgent, ct) });
+    }
+
+    [HttpPost("{id:guid}/return-to-drafting")]
+    public async Task<IActionResult> ReturnToDrafting(Guid projectId, Guid id, CancellationToken ct)
+    {
+        var role = await GetProjectRoleAsync(db, projectId);
+        return Ok(new { success = true, data = await svc.TransitionAsync(projectId, id, DpiaState.Drafting, decisionNote: null, CurrentUserId, role, ClientIp, ClientAgent, ct) });
+    }
+}
+
+// ── UK GDPR SAR (T-S11-04) ───────────────────────────────────────────────────
+// PAFM-SD F.11 third bullet — UK GDPR Art. 12, 15. Org-scoped.
+[Route("api/v1/gdpr/sars")]
+public class SarController(SarService svc) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(CancellationToken ct) =>
+        Ok(new { success = true, data = await svc.ListAsync(ct) });
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> Get(Guid id, CancellationToken ct) =>
+        Ok(new { success = true, data = await svc.GetAsync(id, ct) });
+
+    [HttpPost]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
+    public async Task<IActionResult> Create(CreateSarRequest req, CancellationToken ct) =>
+        Created("", new { success = true, data = await svc.CreateAsync(req, CurrentUserId, ClientIp, ClientAgent, ct) });
+
+    [HttpPost("{id:guid}/start")]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
+    public async Task<IActionResult> Start(Guid id, StartSarFulfilmentRequest req, CancellationToken ct) =>
+        Ok(new { success = true, data = await svc.StartFulfilmentAsync(id, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+
+    [HttpPost("{id:guid}/fulfil")]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
+    public async Task<IActionResult> Fulfil(Guid id, FulfilSarRequest req, CancellationToken ct) =>
+        Ok(new { success = true, data = await svc.FulfilAsync(id, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+
+    [HttpPost("{id:guid}/refuse")]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
+    public async Task<IActionResult> Refuse(Guid id, RefuseSarRequest req, CancellationToken ct) =>
+        Ok(new { success = true, data = await svc.RefuseAsync(id, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+}
+
+// ── UK GDPR Data Breach Log (T-S11-05) ───────────────────────────────────────
+// PAFM-SD F.11 fourth bullet — UK GDPR Art. 33-34. Org-scoped.
+[Route("api/v1/gdpr/data-breaches")]
+public class DataBreachController(DataBreachService svc) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(CancellationToken ct) =>
+        Ok(new { success = true, data = await svc.ListAsync(ct) });
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> Get(Guid id, CancellationToken ct) =>
+        Ok(new { success = true, data = await svc.GetAsync(id, ct) });
+
+    [HttpPost]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
+    public async Task<IActionResult> Create(CreateBreachRequest req, CancellationToken ct) =>
+        Created("", new { success = true, data = await svc.CreateAsync(req, CurrentUserId, ClientIp, ClientAgent, ct) });
+
+    [HttpPost("{id:guid}/mark-reported-to-ico")]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
+    public async Task<IActionResult> MarkReportedToIco(Guid id, MarkBreachReportedToIcoRequest req, CancellationToken ct) =>
+        Ok(new { success = true, data = await svc.MarkReportedToIcoAsync(id, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+
+    [HttpPost("{id:guid}/mark-subjects-notified")]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
+    public async Task<IActionResult> MarkSubjectsNotified(Guid id, MarkBreachNotifiedDataSubjectsRequest req, CancellationToken ct) =>
+        Ok(new { success = true, data = await svc.MarkNotifiedDataSubjectsAsync(id, CurrentUserId, ClientIp, ClientAgent, ct) });
+}
+
+// ── UK GDPR Retention Schedules (T-S11-06) ───────────────────────────────────
+// PAFM-SD F.11 fifth bullet — UK GDPR Art. 5(1)(e). Org-scoped.
+[Route("api/v1/gdpr/retention-schedules")]
+public class RetentionSchedulesController(RetentionScheduleService svc) : CimsControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> List(CancellationToken ct) =>
+        Ok(new { success = true, data = await svc.ListAsync(ct) });
+
+    [HttpPost]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
+    public async Task<IActionResult> Create(CreateRetentionScheduleRequest req, CancellationToken ct) =>
+        Created("", new { success = true, data = await svc.CreateAsync(req, CurrentUserId, ClientIp, ClientAgent, ct) });
+
+    [HttpPut("{id:guid}")]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
+    public async Task<IActionResult> Update(Guid id, UpdateRetentionScheduleRequest req, CancellationToken ct) =>
+        Ok(new { success = true, data = await svc.UpdateAsync(id, req, CurrentUserId, ClientIp, ClientAgent, ct) });
+
+    [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "OrgAdmin,SuperAdmin")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    { await svc.DeleteAsync(id, CurrentUserId, ClientIp, ClientAgent, ct); return NoContent(); }
+}
+
 // ── Improvement Register (T-S12-02) ──────────────────────────────────────────
 // PAFM-SD F.12 first bullet — PDCA continuous improvement.
 [Route("api/v1/projects/{projectId:guid}/improvements")]

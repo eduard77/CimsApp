@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CimsApp.Migrations
 {
     [DbContext(typeof(CimsDbContext))]
-    [Migration("20260502200923_AddKaizenLessons")]
+    [Migration("20260503074202_AddKaizenLessons")]
     partial class AddKaizenLessons
     {
         /// <inheritdoc />
@@ -862,6 +862,141 @@ namespace CimsApp.Migrations
                         .HasFilter("[IsActive] = 1");
 
                     b.ToTable("CustomReportDefinitions");
+                });
+
+            modelBuilder.Entity("CimsApp.Models.DataBreachLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("AffectedSubjectsCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DataCategoriesCsv")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("DiscoveredAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("IcoReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("NotifiedDataSubjects")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("NotifiedDataSubjectsAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("ReportedToIco")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("ReportedToIcoAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Severity")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedById");
+
+                    b.HasIndex("OrganisationId", "DiscoveredAt");
+
+                    b.HasIndex("OrganisationId", "Number")
+                        .IsUnique();
+
+                    b.ToTable("DataBreachLogs");
+                });
+
+            modelBuilder.Entity("CimsApp.Models.DataProtectionImpactAssessment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DecisionNote")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("HighRiskProcessingDescription")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("MitigationsDescription")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ReviewedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("State")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedById");
+
+                    b.HasIndex("ReviewedById");
+
+                    b.HasIndex("ProjectId", "State");
+
+                    b.ToTable("Dpias");
                 });
 
             modelBuilder.Entity("CimsApp.Models.Dependency", b =>
@@ -2176,6 +2311,48 @@ namespace CimsApp.Migrations
                     b.ToTable("RefreshTokens");
                 });
 
+            modelBuilder.Entity("CimsApp.Models.RetentionSchedule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DataCategory")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("LawfulBasisForRetention")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("RetentionPeriodMonths")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganisationId", "DataCategory")
+                        .IsUnique()
+                        .HasFilter("[IsActive] = 1");
+
+                    b.ToTable("RetentionSchedules");
+                });
+
             modelBuilder.Entity("CimsApp.Models.Rfi", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2437,6 +2614,55 @@ namespace CimsApp.Migrations
                     b.ToTable("RiskDrawdowns");
                 });
 
+            modelBuilder.Entity("CimsApp.Models.RopaEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DataCategoriesCsv")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("LawfulBasis")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Recipients")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("RetentionPeriod")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("SecurityMeasures")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganisationId", "IsActive");
+
+                    b.ToTable("RopaEntries");
+                });
+
             modelBuilder.Entity("CimsApp.Models.ScheduleBaseline", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2579,6 +2805,80 @@ namespace CimsApp.Migrations
                     b.HasIndex("ProjectId", "Score");
 
                     b.ToTable("Stakeholders");
+                });
+
+            modelBuilder.Entity("CimsApp.Models.SubjectAccessRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DataSubjectEmail")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("DataSubjectName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("DueAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("FulfilledAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("FulfilledById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FulfilmentNote")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RefusalReason")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("RefusedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RefusedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RequestDescription")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("RequestedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("State")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FulfilledById");
+
+                    b.HasIndex("RefusedById");
+
+                    b.HasIndex("OrganisationId", "Number")
+                        .IsUnique();
+
+                    b.HasIndex("OrganisationId", "State");
+
+                    b.ToTable("SubjectAccessRequests");
                 });
 
             modelBuilder.Entity("CimsApp.Models.Tender", b =>
@@ -3302,6 +3602,51 @@ namespace CimsApp.Migrations
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("CimsApp.Models.DataBreachLog", b =>
+                {
+                    b.HasOne("CimsApp.Models.User", "CreatedBy")
+                        .WithMany()
+                        .HasForeignKey("CreatedById")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("CimsApp.Models.Organisation", "Organisation")
+                        .WithMany()
+                        .HasForeignKey("OrganisationId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("CreatedBy");
+
+                    b.Navigation("Organisation");
+                });
+
+            modelBuilder.Entity("CimsApp.Models.DataProtectionImpactAssessment", b =>
+                {
+                    b.HasOne("CimsApp.Models.User", "CreatedBy")
+                        .WithMany()
+                        .HasForeignKey("CreatedById")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("CimsApp.Models.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("CimsApp.Models.User", "ReviewedBy")
+                        .WithMany()
+                        .HasForeignKey("ReviewedById")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.Navigation("CreatedBy");
+
+                    b.Navigation("Project");
+
+                    b.Navigation("ReviewedBy");
+                });
+
             modelBuilder.Entity("CimsApp.Models.Dependency", b =>
                 {
                     b.HasOne("CimsApp.Models.Activity", "Predecessor")
@@ -3824,6 +4169,17 @@ namespace CimsApp.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("CimsApp.Models.RetentionSchedule", b =>
+                {
+                    b.HasOne("CimsApp.Models.Organisation", "Organisation")
+                        .WithMany()
+                        .HasForeignKey("OrganisationId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("Organisation");
+                });
+
             modelBuilder.Entity("CimsApp.Models.Rfi", b =>
                 {
                     b.HasOne("CimsApp.Models.Project", "Project")
@@ -3931,6 +4287,17 @@ namespace CimsApp.Migrations
                     b.Navigation("Risk");
                 });
 
+            modelBuilder.Entity("CimsApp.Models.RopaEntry", b =>
+                {
+                    b.HasOne("CimsApp.Models.Organisation", "Organisation")
+                        .WithMany()
+                        .HasForeignKey("OrganisationId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("Organisation");
+                });
+
             modelBuilder.Entity("CimsApp.Models.ScheduleBaseline", b =>
                 {
                     b.HasOne("CimsApp.Models.User", "CapturedBy")
@@ -3978,6 +4345,31 @@ namespace CimsApp.Migrations
                         .IsRequired();
 
                     b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("CimsApp.Models.SubjectAccessRequest", b =>
+                {
+                    b.HasOne("CimsApp.Models.User", "FulfilledBy")
+                        .WithMany()
+                        .HasForeignKey("FulfilledById")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("CimsApp.Models.Organisation", "Organisation")
+                        .WithMany()
+                        .HasForeignKey("OrganisationId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("CimsApp.Models.User", "RefusedBy")
+                        .WithMany()
+                        .HasForeignKey("RefusedById")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.Navigation("FulfilledBy");
+
+                    b.Navigation("Organisation");
+
+                    b.Navigation("RefusedBy");
                 });
 
             modelBuilder.Entity("CimsApp.Models.Tender", b =>

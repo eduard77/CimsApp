@@ -2017,6 +2017,239 @@ public class MandatoryOccurrenceReport
 }
 
 /// <summary>
+/// Record of Processing Activities entry (T-S11-02, PAFM-SD
+/// F.11 first bullet — UK GDPR Art. 30). Per-organisation; each
+/// row describes one processing activity. v1.0 free-text
+/// DataCategoriesCsv + Recipients + RetentionPeriod fields;
+/// fully-structured normalisation (Categories as a join-table,
+/// retention linked to RetentionSchedule) is v1.1 territory.
+/// // GDPR ref: Art. 30 (records of processing activities).
+/// </summary>
+public class RopaEntry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Org-scoped: ROPA is per controller / processor.
+    /// Tenant filter shape: OrganisationId == _tenant.OrganisationId.
+    /// Distinct from project-scoped entities like DPIA.</summary>
+    public Guid OrganisationId { get; set; }
+    public Organisation Organisation { get; set; } = null!;
+
+    [Required, MaxLength(300)] public string Purpose { get; set; } = "";
+    public LawfulBasis LawfulBasis { get; set; }
+
+    /// <summary>Comma-separated list of personal-data categories
+    /// processed (e.g. "name,email,address"). v1.0 free text;
+    /// structured Categories join-table is v1.1.</summary>
+    public string DataCategoriesCsv { get; set; } = "";
+
+    /// <summary>Free-text list of recipients / categories of
+    /// recipients per Art. 30(1)(d).</summary>
+    public string Recipients { get; set; } = "";
+
+    /// <summary>Free-text retention envisaged per Art. 30(1)(f).
+    /// v1.1 / B-077 may link this to a structured RetentionSchedule
+    /// row.</summary>
+    public string RetentionPeriod { get; set; } = "";
+
+    /// <summary>Free-text general description of technical and
+    /// organisational security measures per Art. 30(1)(g).</summary>
+    public string SecurityMeasures { get; set; } = "";
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Data Protection Impact Assessment (T-S11-03, PAFM-SD F.11
+/// second bullet — UK GDPR Art. 35). Per-project; a project may
+/// carry multiple DPIAs for different processing activities.
+/// 4-state workflow Drafting → UnderReview → Approved |
+/// RequiresChanges; RequiresChanges → Drafting (re-work).
+/// State-machine enforcement in
+/// <see cref="CimsApp.Core.DpiaWorkflow"/>. v1.0 ships free-text
+/// description + structured Risk fields; canonical ICO DPIA
+/// questionnaire schema → v1.1 / B-079.
+/// // GDPR ref: Art. 35 (Data Protection Impact Assessment).
+/// </summary>
+public class DataProtectionImpactAssessment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    [Required, MaxLength(300)] public string Title { get; set; } = "";
+    [Required] public string Description { get; set; } = "";
+
+    /// <summary>Free-text description of the high-risk processing
+    /// activity that triggers the DPIA. Per Art. 35(7)(a).</summary>
+    public string? HighRiskProcessingDescription { get; set; }
+
+    /// <summary>Free-text mitigations per Art. 35(7)(d).</summary>
+    public string? MitigationsDescription { get; set; }
+
+    public DpiaState State { get; set; } = DpiaState.Drafting;
+
+    public Guid CreatedById { get; set; }
+    public User CreatedBy { get; set; } = null!;
+
+    public Guid? ReviewedById { get; set; }
+    public User? ReviewedBy { get; set; }
+    public DateTime? ReviewedAt { get; set; }
+    /// <summary>Required when transitioning to Approved or
+    /// RequiresChanges — captures the reviewer's rationale.</summary>
+    public string? DecisionNote { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Subject Access Request (T-S11-04, PAFM-SD F.11 third bullet
+/// — UK GDPR Art. 12, 15). Per-organisation. 30-day clock
+/// per Art. 12(3) starts at RequestedAt; service computes DueAt
+/// = RequestedAt + 30 days. v1.0 captures the intake +
+/// manual-fulfilment workflow; per-domain auto-extraction →
+/// v1.1 / B-077. Inline state guard in service (no Core/<X>.cs
+/// state-machine file — workflow simpler than DPIA).
+/// // GDPR ref: Art. 12, 15.
+/// </summary>
+public class SubjectAccessRequest
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid OrganisationId { get; set; }
+    public Organisation Organisation { get; set; } = null!;
+
+    /// <summary>Org-scoped sequential SAR-NNNN. Auto-generated
+    /// on Create.</summary>
+    [Required, MaxLength(20)] public string Number { get; set; } = "";
+
+    [Required, MaxLength(200)] public string DataSubjectName { get; set; } = "";
+    [MaxLength(200)] public string? DataSubjectEmail { get; set; }
+    [Required] public string RequestDescription { get; set; } = "";
+
+    public SarState State { get; set; } = SarState.Received;
+
+    /// <summary>UTC timestamp the request was received.</summary>
+    public DateTime RequestedAt { get; set; }
+
+    /// <summary>Statutory deadline = RequestedAt + 30 days per
+    /// Art. 12(3). v1.0 stores; auto-flagging overdue → v1.1.</summary>
+    public DateTime DueAt { get; set; }
+
+    public Guid? FulfilledById { get; set; }
+    public User? FulfilledBy { get; set; }
+    public DateTime? FulfilledAt { get; set; }
+    public string? FulfilmentNote { get; set; }
+
+    public Guid? RefusedById { get; set; }
+    public User? RefusedBy { get; set; }
+    public DateTime? RefusedAt { get; set; }
+    /// <summary>Required when refusing per Art. 12(4).</summary>
+    public string? RefusalReason { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Data breach log (T-S11-05, PAFM-SD F.11 fourth bullet — UK
+/// GDPR Art. 33-34). Per-organisation; 72-hour ICO notification
+/// clock per Art. 33 starts at DiscoveredAt for breaches likely
+/// to result in risk to data subjects. v1.0 captures data +
+/// manual-push flag pair (same shape as S10 MOR / B-070);
+/// programmatic ICO API push → v1.1 / B-076 when available.
+/// // GDPR ref: Art. 33 (notification to ICO), Art. 34
+/// (notification to data subjects).
+/// </summary>
+public class DataBreachLog
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid OrganisationId { get; set; }
+    public Organisation Organisation { get; set; } = null!;
+
+    /// <summary>Org-scoped sequential BR-NNNN.</summary>
+    [Required, MaxLength(20)] public string Number { get; set; } = "";
+
+    [Required, MaxLength(500)] public string Title { get; set; } = "";
+    [Required] public string Description { get; set; } = "";
+
+    public BreachSeverity Severity { get; set; }
+
+    /// <summary>UTC date / time the breach is believed to have
+    /// occurred.</summary>
+    public DateTime OccurredAt { get; set; }
+    /// <summary>UTC date / time the breach was discovered. The
+    /// 72-hour clock starts here per Art. 33(1).</summary>
+    public DateTime DiscoveredAt { get; set; }
+
+    /// <summary>Comma-separated personal-data categories
+    /// affected.</summary>
+    public string DataCategoriesCsv { get; set; } = "";
+
+    /// <summary>Approximate count of affected data subjects.
+    /// Optional at first record (often unknown immediately).</summary>
+    public int? AffectedSubjectsCount { get; set; }
+
+    /// <summary>Whether the breach has been reported to the
+    /// Information Commissioner's Office. v1.0 manual flag;
+    /// programmatic ICO API push → v1.1 / B-076.</summary>
+    public bool ReportedToIco { get; set; }
+    public DateTime? ReportedToIcoAt { get; set; }
+    [MaxLength(100)] public string? IcoReference { get; set; }
+
+    /// <summary>Whether affected data subjects have been notified
+    /// per Art. 34. Required for high-risk breaches.</summary>
+    public bool NotifiedDataSubjects { get; set; }
+    public DateTime? NotifiedDataSubjectsAt { get; set; }
+
+    public Guid CreatedById { get; set; }
+    public User CreatedBy { get; set; } = null!;
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Retention schedule (T-S11-06, PAFM-SD F.11 fifth bullet —
+/// UK GDPR Art. 5(1)(e)). Per-organisation; each row defines
+/// the retention period for one personal-data category. v1.0
+/// stores the policy as reference data only — automatic
+/// deletion enforcement → v1.1 / B-078 (touches every domain;
+/// cross-domain deletion ordering needs an ADR).
+/// // GDPR ref: Art. 5(1)(e) (storage limitation).
+/// </summary>
+public class RetentionSchedule
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid OrganisationId { get; set; }
+    public Organisation Organisation { get; set; } = null!;
+
+    [Required, MaxLength(200)] public string DataCategory { get; set; } = "";
+
+    /// <summary>Retention period in months. Decimal months not
+    /// supported in v1.0; days/weeks granularity → v1.1 if pilot
+    /// need surfaces.</summary>
+    public int RetentionPeriodMonths { get; set; }
+
+    /// <summary>Free-text rationale per Art. 5(1)(e). Pre-baked
+    /// per-tenant templates → v1.1 / B-080.</summary>
+    [Required] public string LawfulBasisForRetention { get; set; } = "";
+
+    public string? Notes { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
 /// Improvement register entry (T-S12-02, PAFM-SD F.12 first
 /// bullet — Plan-Do-Check-Act continuous improvement).
 /// Project-scoped. Per-project sequential IMP-NNNN. State

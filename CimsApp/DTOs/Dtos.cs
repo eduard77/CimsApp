@@ -652,6 +652,85 @@ public record GoldenThreadDocumentDto(
     Guid Id, string DocumentNumber, string Title,
     CdeState CurrentState,
     DateTime AddedToGoldenThreadAt, Guid AddedToGoldenThreadById);
+// T-S11-02 ROPA DTOs. // GDPR ref: Art. 30.
+public record RopaEntryDto(
+    Guid Id, Guid OrganisationId,
+    string Purpose, LawfulBasis LawfulBasis,
+    string DataCategoriesCsv, string Recipients,
+    string RetentionPeriod, string SecurityMeasures,
+    DateTime CreatedAt, DateTime UpdatedAt);
+public record CreateRopaEntryRequest(
+    string Purpose, LawfulBasis LawfulBasis,
+    string? DataCategoriesCsv, string? Recipients,
+    string? RetentionPeriod, string? SecurityMeasures);
+public record UpdateRopaEntryRequest(
+    string? Purpose, LawfulBasis? LawfulBasis,
+    string? DataCategoriesCsv, string? Recipients,
+    string? RetentionPeriod, string? SecurityMeasures);
+// T-S11-03 DPIA DTOs. // GDPR ref: Art. 35.
+public record DpiaDto(
+    Guid Id, Guid ProjectId,
+    string Title, string Description,
+    string? HighRiskProcessingDescription, string? MitigationsDescription,
+    DpiaState State,
+    Guid CreatedById, Guid? ReviewedById, DateTime? ReviewedAt, string? DecisionNote,
+    DateTime CreatedAt, DateTime UpdatedAt);
+public record CreateDpiaRequest(
+    string Title, string Description,
+    string? HighRiskProcessingDescription,
+    string? MitigationsDescription);
+public record UpdateDpiaRequest(
+    string? Title, string? Description,
+    string? HighRiskProcessingDescription,
+    string? MitigationsDescription);
+public record DpiaDecisionRequest(string DecisionNote);
+// T-S11-04 SAR DTOs. // GDPR ref: Art. 12, 15.
+public record SarDto(
+    Guid Id, Guid OrganisationId,
+    string Number,
+    string DataSubjectName, string? DataSubjectEmail, string RequestDescription,
+    SarState State,
+    DateTime RequestedAt, DateTime DueAt,
+    Guid? FulfilledById, DateTime? FulfilledAt, string? FulfilmentNote,
+    Guid? RefusedById, DateTime? RefusedAt, string? RefusalReason,
+    DateTime CreatedAt, DateTime UpdatedAt);
+public record CreateSarRequest(
+    string DataSubjectName, string? DataSubjectEmail, string RequestDescription,
+    DateTime? RequestedAt);
+public record StartSarFulfilmentRequest(string? Note);
+public record FulfilSarRequest(string FulfilmentNote);
+public record RefuseSarRequest(string RefusalReason);
+// T-S11-05 Data Breach Log DTOs. // GDPR ref: Art. 33-34.
+public record DataBreachLogDto(
+    Guid Id, Guid OrganisationId,
+    string Number, string Title, string Description,
+    BreachSeverity Severity,
+    DateTime OccurredAt, DateTime DiscoveredAt,
+    string DataCategoriesCsv, int? AffectedSubjectsCount,
+    bool ReportedToIco, DateTime? ReportedToIcoAt, string? IcoReference,
+    bool NotifiedDataSubjects, DateTime? NotifiedDataSubjectsAt,
+    Guid CreatedById,
+    DateTime CreatedAt, DateTime UpdatedAt);
+public record CreateBreachRequest(
+    string Title, string Description,
+    BreachSeverity Severity,
+    DateTime OccurredAt, DateTime DiscoveredAt,
+    string? DataCategoriesCsv, int? AffectedSubjectsCount);
+public record MarkBreachReportedToIcoRequest(string? IcoReference);
+public record MarkBreachNotifiedDataSubjectsRequest();
+// T-S11-06 Retention Schedule DTOs. // GDPR ref: Art. 5(1)(e).
+public record RetentionScheduleDto(
+    Guid Id, Guid OrganisationId,
+    string DataCategory, int RetentionPeriodMonths,
+    string LawfulBasisForRetention, string? Notes,
+    DateTime CreatedAt, DateTime UpdatedAt);
+public record CreateRetentionScheduleRequest(
+    string DataCategory, int RetentionPeriodMonths,
+    string LawfulBasisForRetention, string? Notes);
+public record UpdateRetentionScheduleRequest(
+    int? RetentionPeriodMonths,
+    string? LawfulBasisForRetention,
+    string? Notes);
 // T-S12-02 Improvement Register DTOs.
 public record ImprovementEntryDto(
     Guid Id, Guid ProjectId, string Number,

@@ -5759,6 +5759,604 @@ public class TidpService(CimsDbContext db, AuditService audit)
             x.CreatedAt, x.UpdatedAt);
 }
 
+// T-S11-02 ROPA service. PAFM-SD F.11 first bullet (UK GDPR
+// Art. 30). Per-organisation; tenant-resolved via ITenantContext
+// since this entity has no Project FK.
+// // GDPR ref: Art. 30.
+public class RopaService(CimsDbContext db, AuditService audit, CimsApp.Services.Tenancy.ITenantContext tenant)
+{
+    private Guid OrgId =>
+        tenant.OrganisationId ?? throw new ForbiddenException("No tenant context");
+
+    public async Task<List<RopaEntryDto>> ListAsync(CancellationToken ct = default)
+    {
+        var rows = await db.RopaEntries
+            .Where(x => x.OrganisationId == OrgId && x.IsActive)
+            .OrderBy(x => x.Purpose).ToListAsync(ct);
+        return rows.Select(ToDto).ToList();
+    }
+
+    public async Task<RopaEntryDto> GetAsync(Guid id, CancellationToken ct = default)
+    {
+        var x = await db.RopaEntries
+            .FirstOrDefaultAsync(e => e.Id == id && e.OrganisationId == OrgId && e.IsActive, ct)
+            ?? throw new NotFoundException("RopaEntry");
+        return ToDto(x);
+    }
+
+    public async Task<RopaEntryDto> CreateAsync(
+        CreateRopaEntryRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Purpose))
+            throw new ValidationException(new List<string> { "Purpose is required" });
+
+        var x = new RopaEntry
+        {
+            OrganisationId = OrgId,
+            Purpose = req.Purpose.Trim(),
+            LawfulBasis = req.LawfulBasis,
+            DataCategoriesCsv = req.DataCategoriesCsv ?? "",
+            Recipients = req.Recipients ?? "",
+            RetentionPeriod = req.RetentionPeriod ?? "",
+            SecurityMeasures = req.SecurityMeasures ?? "",
+        };
+        db.RopaEntries.Add(x);
+        await audit.WriteAsync(actorId, "ropa_entry.created",
+            "RopaEntry", x.Id.ToString(),
+            detail: new { x.Purpose, LawfulBasis = x.LawfulBasis.ToString() },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task<RopaEntryDto> UpdateAsync(
+        Guid id, UpdateRopaEntryRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.RopaEntries
+            .FirstOrDefaultAsync(e => e.Id == id && e.OrganisationId == OrgId && e.IsActive, ct)
+            ?? throw new NotFoundException("RopaEntry");
+        var changed = new List<string>();
+        if (req.Purpose is not null && req.Purpose != x.Purpose)
+        {
+            if (string.IsNullOrWhiteSpace(req.Purpose))
+                throw new ValidationException(new List<string> { "Purpose cannot be empty" });
+            x.Purpose = req.Purpose.Trim(); changed.Add(nameof(x.Purpose));
+        }
+        if (req.LawfulBasis is { } lb && lb != x.LawfulBasis)
+        { x.LawfulBasis = lb; changed.Add(nameof(x.LawfulBasis)); }
+        if (req.DataCategoriesCsv is not null && req.DataCategoriesCsv != x.DataCategoriesCsv)
+        { x.DataCategoriesCsv = req.DataCategoriesCsv; changed.Add(nameof(x.DataCategoriesCsv)); }
+        if (req.Recipients is not null && req.Recipients != x.Recipients)
+        { x.Recipients = req.Recipients; changed.Add(nameof(x.Recipients)); }
+        if (req.RetentionPeriod is not null && req.RetentionPeriod != x.RetentionPeriod)
+        { x.RetentionPeriod = req.RetentionPeriod; changed.Add(nameof(x.RetentionPeriod)); }
+        if (req.SecurityMeasures is not null && req.SecurityMeasures != x.SecurityMeasures)
+        { x.SecurityMeasures = req.SecurityMeasures; changed.Add(nameof(x.SecurityMeasures)); }
+        if (changed.Count == 0) throw new ConflictException("No changes specified.");
+
+        await audit.WriteAsync(actorId, "ropa_entry.updated",
+            "RopaEntry", x.Id.ToString(),
+            detail: new { changedFields = changed },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task DeleteAsync(
+        Guid id, Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.RopaEntries
+            .FirstOrDefaultAsync(e => e.Id == id && e.OrganisationId == OrgId && e.IsActive, ct)
+            ?? throw new NotFoundException("RopaEntry");
+        x.IsActive = false;
+        await audit.WriteAsync(actorId, "ropa_entry.deleted",
+            "RopaEntry", x.Id.ToString(),
+            detail: new { x.Purpose },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static RopaEntryDto ToDto(RopaEntry x) =>
+        new(x.Id, x.OrganisationId, x.Purpose, x.LawfulBasis,
+            x.DataCategoriesCsv, x.Recipients, x.RetentionPeriod,
+            x.SecurityMeasures, x.CreatedAt, x.UpdatedAt);
+}
+
+// T-S11-03 DPIA service. PAFM-SD F.11 second bullet (UK GDPR
+// Art. 35). Project-scoped; 4-state state machine via
+// Core/DpiaWorkflow.
+// // GDPR ref: Art. 35.
+public class DpiaService(CimsDbContext db, AuditService audit)
+{
+    public async Task<List<DpiaDto>> ListAsync(Guid projectId, CancellationToken ct = default)
+    {
+        var rows = await db.Dpias
+            .Where(x => x.ProjectId == projectId && x.IsActive)
+            .OrderByDescending(x => x.UpdatedAt)
+            .ToListAsync(ct);
+        return rows.Select(ToDto).ToList();
+    }
+
+    public async Task<DpiaDto> GetAsync(Guid projectId, Guid id, CancellationToken ct = default)
+    {
+        var x = await db.Dpias
+            .FirstOrDefaultAsync(d => d.Id == id && d.ProjectId == projectId && d.IsActive, ct)
+            ?? throw new NotFoundException("DPIA");
+        return ToDto(x);
+    }
+
+    public async Task<DpiaDto> CreateAsync(
+        Guid projectId, CreateDpiaRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(new List<string> { "Title is required" });
+        if (string.IsNullOrWhiteSpace(req.Description))
+            throw new ValidationException(new List<string> { "Description is required" });
+
+        var x = new DataProtectionImpactAssessment
+        {
+            ProjectId = projectId,
+            Title = req.Title.Trim(),
+            Description = req.Description,
+            HighRiskProcessingDescription = req.HighRiskProcessingDescription,
+            MitigationsDescription = req.MitigationsDescription,
+            CreatedById = actorId,
+            State = DpiaState.Drafting,
+        };
+        db.Dpias.Add(x);
+        await audit.WriteAsync(actorId, "dpia.created",
+            "DPIA", x.Id.ToString(),
+            projectId: projectId,
+            detail: new { x.Title },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task<DpiaDto> UpdateAsync(
+        Guid projectId, Guid id, UpdateDpiaRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.Dpias
+            .FirstOrDefaultAsync(d => d.Id == id && d.ProjectId == projectId && d.IsActive, ct)
+            ?? throw new NotFoundException("DPIA");
+        if (x.State == DpiaState.Approved)
+            throw new ConflictException("Cannot edit an Approved DPIA.");
+        var changed = new List<string>();
+        if (req.Title is not null && req.Title != x.Title)
+        {
+            if (string.IsNullOrWhiteSpace(req.Title))
+                throw new ValidationException(new List<string> { "Title cannot be empty" });
+            x.Title = req.Title.Trim(); changed.Add(nameof(x.Title));
+        }
+        if (req.Description is not null && req.Description != x.Description)
+        { x.Description = req.Description; changed.Add(nameof(x.Description)); }
+        if (req.HighRiskProcessingDescription is not null && req.HighRiskProcessingDescription != x.HighRiskProcessingDescription)
+        { x.HighRiskProcessingDescription = req.HighRiskProcessingDescription; changed.Add(nameof(x.HighRiskProcessingDescription)); }
+        if (req.MitigationsDescription is not null && req.MitigationsDescription != x.MitigationsDescription)
+        { x.MitigationsDescription = req.MitigationsDescription; changed.Add(nameof(x.MitigationsDescription)); }
+        if (changed.Count == 0) throw new ConflictException("No changes specified.");
+
+        await audit.WriteAsync(actorId, "dpia.updated",
+            "DPIA", x.Id.ToString(),
+            projectId: projectId,
+            detail: new { changedFields = changed },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task<DpiaDto> TransitionAsync(
+        Guid projectId, Guid id, DpiaState toState,
+        string? decisionNote,
+        Guid actorId, UserRole role, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.Dpias
+            .FirstOrDefaultAsync(d => d.Id == id && d.ProjectId == projectId && d.IsActive, ct)
+            ?? throw new NotFoundException("DPIA");
+        if (!DpiaWorkflow.IsValidTransition(x.State, toState))
+            throw new ConflictException($"Invalid DPIA transition: {x.State} → {toState}.");
+        if (!DpiaWorkflow.CanTransition(x.State, toState, role))
+            throw new ForbiddenException($"Role {role} cannot transition DPIA {x.State} → {toState}.");
+        // Approved + RequiresChanges require a decision note.
+        if ((toState == DpiaState.Approved || toState == DpiaState.RequiresChanges)
+            && string.IsNullOrWhiteSpace(decisionNote))
+            throw new ValidationException(new List<string> { "DecisionNote is required for this transition" });
+
+        var from = x.State;
+        x.State = toState;
+        if (toState == DpiaState.Approved || toState == DpiaState.RequiresChanges)
+        {
+            x.ReviewedById = actorId;
+            x.ReviewedAt = DateTime.UtcNow;
+            x.DecisionNote = decisionNote;
+        }
+        await audit.WriteAsync(actorId, $"dpia.{toState.ToString().ToLowerInvariant()}",
+            "DPIA", x.Id.ToString(),
+            projectId: projectId,
+            detail: new { from = from.ToString(), to = toState.ToString() },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    private static DpiaDto ToDto(DataProtectionImpactAssessment x) =>
+        new(x.Id, x.ProjectId, x.Title, x.Description,
+            x.HighRiskProcessingDescription, x.MitigationsDescription,
+            x.State, x.CreatedById, x.ReviewedById, x.ReviewedAt, x.DecisionNote,
+            x.CreatedAt, x.UpdatedAt);
+}
+
+// T-S11-04 SAR service. PAFM-SD F.11 third bullet (UK GDPR
+// Art. 12, 15). Per-organisation; 30-day clock per Art. 12(3)
+// computed at create time.
+// // GDPR ref: Art. 12, 15.
+public class SarService(CimsDbContext db, AuditService audit, CimsApp.Services.Tenancy.ITenantContext tenant)
+{
+    private Guid OrgId =>
+        tenant.OrganisationId ?? throw new ForbiddenException("No tenant context");
+
+    public async Task<List<SarDto>> ListAsync(CancellationToken ct = default)
+    {
+        var rows = await db.SubjectAccessRequests
+            .Where(x => x.OrganisationId == OrgId)
+            .OrderByDescending(x => x.RequestedAt)
+            .ToListAsync(ct);
+        return rows.Select(ToDto).ToList();
+    }
+
+    public async Task<SarDto> GetAsync(Guid id, CancellationToken ct = default)
+    {
+        var x = await db.SubjectAccessRequests
+            .FirstOrDefaultAsync(s => s.Id == id && s.OrganisationId == OrgId, ct)
+            ?? throw new NotFoundException("SubjectAccessRequest");
+        return ToDto(x);
+    }
+
+    public async Task<SarDto> CreateAsync(
+        CreateSarRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.DataSubjectName))
+            throw new ValidationException(new List<string> { "DataSubjectName is required" });
+        if (string.IsNullOrWhiteSpace(req.RequestDescription))
+            throw new ValidationException(new List<string> { "RequestDescription is required" });
+
+        var existingCount = await db.SubjectAccessRequests
+            .Where(s => s.OrganisationId == OrgId).CountAsync(ct);
+        var number = $"SAR-{(existingCount + 1):D4}";
+
+        var requested = req.RequestedAt ?? DateTime.UtcNow;
+        var x = new SubjectAccessRequest
+        {
+            OrganisationId = OrgId,
+            Number = number,
+            DataSubjectName = req.DataSubjectName.Trim(),
+            DataSubjectEmail = req.DataSubjectEmail,
+            RequestDescription = req.RequestDescription,
+            State = SarState.Received,
+            RequestedAt = requested,
+            DueAt = requested.AddDays(30),
+        };
+        db.SubjectAccessRequests.Add(x);
+        await audit.WriteAsync(actorId, "sar.received",
+            "SubjectAccessRequest", x.Id.ToString(),
+            detail: new { x.Number, x.DataSubjectName, x.DueAt },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task<SarDto> StartFulfilmentAsync(
+        Guid id, StartSarFulfilmentRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.SubjectAccessRequests
+            .FirstOrDefaultAsync(s => s.Id == id && s.OrganisationId == OrgId, ct)
+            ?? throw new NotFoundException("SubjectAccessRequest");
+        if (x.State != SarState.Received)
+            throw new ConflictException($"Cannot start fulfilment from state {x.State}.");
+
+        x.State = SarState.InProgress;
+        await audit.WriteAsync(actorId, "sar.in_progress",
+            "SubjectAccessRequest", x.Id.ToString(),
+            detail: new { x.Number, req.Note },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task<SarDto> FulfilAsync(
+        Guid id, FulfilSarRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.FulfilmentNote))
+            throw new ValidationException(new List<string> { "FulfilmentNote is required" });
+
+        var x = await db.SubjectAccessRequests
+            .FirstOrDefaultAsync(s => s.Id == id && s.OrganisationId == OrgId, ct)
+            ?? throw new NotFoundException("SubjectAccessRequest");
+        if (x.State != SarState.Received && x.State != SarState.InProgress)
+            throw new ConflictException($"Cannot fulfil from state {x.State}.");
+
+        x.State = SarState.Fulfilled;
+        x.FulfilledById = actorId;
+        x.FulfilledAt = DateTime.UtcNow;
+        x.FulfilmentNote = req.FulfilmentNote;
+        await audit.WriteAsync(actorId, "sar.fulfilled",
+            "SubjectAccessRequest", x.Id.ToString(),
+            detail: new { x.Number },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task<SarDto> RefuseAsync(
+        Guid id, RefuseSarRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.RefusalReason))
+            throw new ValidationException(new List<string> { "RefusalReason is required" });
+
+        var x = await db.SubjectAccessRequests
+            .FirstOrDefaultAsync(s => s.Id == id && s.OrganisationId == OrgId, ct)
+            ?? throw new NotFoundException("SubjectAccessRequest");
+        if (x.State != SarState.Received && x.State != SarState.InProgress)
+            throw new ConflictException($"Cannot refuse from state {x.State}.");
+
+        x.State = SarState.Refused;
+        x.RefusedById = actorId;
+        x.RefusedAt = DateTime.UtcNow;
+        x.RefusalReason = req.RefusalReason;
+        await audit.WriteAsync(actorId, "sar.refused",
+            "SubjectAccessRequest", x.Id.ToString(),
+            detail: new { x.Number },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    private static SarDto ToDto(SubjectAccessRequest x) =>
+        new(x.Id, x.OrganisationId, x.Number, x.DataSubjectName, x.DataSubjectEmail,
+            x.RequestDescription, x.State, x.RequestedAt, x.DueAt,
+            x.FulfilledById, x.FulfilledAt, x.FulfilmentNote,
+            x.RefusedById, x.RefusedAt, x.RefusalReason,
+            x.CreatedAt, x.UpdatedAt);
+}
+
+// T-S11-05 Data breach log service. PAFM-SD F.11 fourth bullet
+// (UK GDPR Art. 33-34). Per-organisation. v1.0 captures data +
+// manual flag pairs; programmatic ICO API push → v1.1 / B-076.
+// // GDPR ref: Art. 33, 34.
+public class DataBreachService(CimsDbContext db, AuditService audit, CimsApp.Services.Tenancy.ITenantContext tenant)
+{
+    private Guid OrgId =>
+        tenant.OrganisationId ?? throw new ForbiddenException("No tenant context");
+
+    public async Task<List<DataBreachLogDto>> ListAsync(CancellationToken ct = default)
+    {
+        var rows = await db.DataBreachLogs
+            .Where(x => x.OrganisationId == OrgId)
+            .OrderByDescending(x => x.DiscoveredAt)
+            .ToListAsync(ct);
+        return rows.Select(ToDto).ToList();
+    }
+
+    public async Task<DataBreachLogDto> GetAsync(Guid id, CancellationToken ct = default)
+    {
+        var x = await db.DataBreachLogs
+            .FirstOrDefaultAsync(b => b.Id == id && b.OrganisationId == OrgId, ct)
+            ?? throw new NotFoundException("DataBreachLog");
+        return ToDto(x);
+    }
+
+    public async Task<DataBreachLogDto> CreateAsync(
+        CreateBreachRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title))
+            throw new ValidationException(new List<string> { "Title is required" });
+
+        var existingCount = await db.DataBreachLogs
+            .Where(b => b.OrganisationId == OrgId).CountAsync(ct);
+        var number = $"BR-{(existingCount + 1):D4}";
+
+        var x = new DataBreachLog
+        {
+            OrganisationId = OrgId,
+            Number = number,
+            Title = req.Title.Trim(),
+            Description = req.Description,
+            Severity = req.Severity,
+            OccurredAt = req.OccurredAt,
+            DiscoveredAt = req.DiscoveredAt,
+            DataCategoriesCsv = req.DataCategoriesCsv ?? "",
+            AffectedSubjectsCount = req.AffectedSubjectsCount,
+            CreatedById = actorId,
+        };
+        db.DataBreachLogs.Add(x);
+        await audit.WriteAsync(actorId, "data_breach.logged",
+            "DataBreachLog", x.Id.ToString(),
+            detail: new { x.Number, Severity = x.Severity.ToString(), x.DiscoveredAt },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task<DataBreachLogDto> MarkReportedToIcoAsync(
+        Guid id, MarkBreachReportedToIcoRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.DataBreachLogs
+            .FirstOrDefaultAsync(b => b.Id == id && b.OrganisationId == OrgId, ct)
+            ?? throw new NotFoundException("DataBreachLog");
+        if (x.ReportedToIco)
+            throw new ConflictException("Breach is already marked as reported to ICO.");
+
+        x.ReportedToIco = true;
+        x.ReportedToIcoAt = DateTime.UtcNow;
+        x.IcoReference = req.IcoReference;
+        await audit.WriteAsync(actorId, "data_breach.reported_to_ico",
+            "DataBreachLog", x.Id.ToString(),
+            detail: new { x.Number, x.IcoReference },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task<DataBreachLogDto> MarkNotifiedDataSubjectsAsync(
+        Guid id,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.DataBreachLogs
+            .FirstOrDefaultAsync(b => b.Id == id && b.OrganisationId == OrgId, ct)
+            ?? throw new NotFoundException("DataBreachLog");
+        if (x.NotifiedDataSubjects)
+            throw new ConflictException("Data subjects already marked as notified.");
+
+        x.NotifiedDataSubjects = true;
+        x.NotifiedDataSubjectsAt = DateTime.UtcNow;
+        await audit.WriteAsync(actorId, "data_breach.subjects_notified",
+            "DataBreachLog", x.Id.ToString(),
+            detail: new { x.Number },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    private static DataBreachLogDto ToDto(DataBreachLog x) =>
+        new(x.Id, x.OrganisationId, x.Number, x.Title, x.Description,
+            x.Severity, x.OccurredAt, x.DiscoveredAt,
+            x.DataCategoriesCsv, x.AffectedSubjectsCount,
+            x.ReportedToIco, x.ReportedToIcoAt, x.IcoReference,
+            x.NotifiedDataSubjects, x.NotifiedDataSubjectsAt,
+            x.CreatedById, x.CreatedAt, x.UpdatedAt);
+}
+
+// T-S11-06 Retention schedule service. PAFM-SD F.11 fifth
+// bullet (UK GDPR Art. 5(1)(e)). Per-organisation; v1.0 stores
+// the policy as reference data. Auto-enforcement → v1.1 /
+// B-078.
+// // GDPR ref: Art. 5(1)(e).
+public class RetentionScheduleService(CimsDbContext db, AuditService audit, CimsApp.Services.Tenancy.ITenantContext tenant)
+{
+    private Guid OrgId =>
+        tenant.OrganisationId ?? throw new ForbiddenException("No tenant context");
+
+    public async Task<List<RetentionScheduleDto>> ListAsync(CancellationToken ct = default)
+    {
+        var rows = await db.RetentionSchedules
+            .Where(x => x.OrganisationId == OrgId && x.IsActive)
+            .OrderBy(x => x.DataCategory)
+            .ToListAsync(ct);
+        return rows.Select(ToDto).ToList();
+    }
+
+    public async Task<RetentionScheduleDto> CreateAsync(
+        CreateRetentionScheduleRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.DataCategory))
+            throw new ValidationException(new List<string> { "DataCategory is required" });
+        if (req.RetentionPeriodMonths <= 0)
+            throw new ValidationException(new List<string> { "RetentionPeriodMonths must be > 0" });
+        if (string.IsNullOrWhiteSpace(req.LawfulBasisForRetention))
+            throw new ValidationException(new List<string> { "LawfulBasisForRetention is required" });
+        if (await db.RetentionSchedules.AnyAsync(
+                s => s.OrganisationId == OrgId
+                  && s.IsActive
+                  && s.DataCategory == req.DataCategory, ct))
+            throw new ConflictException(
+                $"A retention schedule for category '{req.DataCategory}' already exists.");
+
+        var x = new RetentionSchedule
+        {
+            OrganisationId = OrgId,
+            DataCategory = req.DataCategory.Trim(),
+            RetentionPeriodMonths = req.RetentionPeriodMonths,
+            LawfulBasisForRetention = req.LawfulBasisForRetention,
+            Notes = req.Notes,
+        };
+        db.RetentionSchedules.Add(x);
+        await audit.WriteAsync(actorId, "retention_schedule.created",
+            "RetentionSchedule", x.Id.ToString(),
+            detail: new { x.DataCategory, x.RetentionPeriodMonths },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task<RetentionScheduleDto> UpdateAsync(
+        Guid id, UpdateRetentionScheduleRequest req,
+        Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.RetentionSchedules
+            .FirstOrDefaultAsync(s => s.Id == id && s.OrganisationId == OrgId && s.IsActive, ct)
+            ?? throw new NotFoundException("RetentionSchedule");
+        var changed = new List<string>();
+        if (req.RetentionPeriodMonths is { } m && m != x.RetentionPeriodMonths)
+        {
+            if (m <= 0) throw new ValidationException(new List<string>
+            { "RetentionPeriodMonths must be > 0" });
+            x.RetentionPeriodMonths = m; changed.Add(nameof(x.RetentionPeriodMonths));
+        }
+        if (req.LawfulBasisForRetention is not null && req.LawfulBasisForRetention != x.LawfulBasisForRetention)
+        {
+            if (string.IsNullOrWhiteSpace(req.LawfulBasisForRetention))
+                throw new ValidationException(new List<string>
+                { "LawfulBasisForRetention cannot be empty" });
+            x.LawfulBasisForRetention = req.LawfulBasisForRetention; changed.Add(nameof(x.LawfulBasisForRetention));
+        }
+        if (req.Notes is not null && req.Notes != x.Notes)
+        { x.Notes = req.Notes; changed.Add(nameof(x.Notes)); }
+        if (changed.Count == 0) throw new ConflictException("No changes specified.");
+
+        await audit.WriteAsync(actorId, "retention_schedule.updated",
+            "RetentionSchedule", x.Id.ToString(),
+            detail: new { x.DataCategory, changedFields = changed },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+        return ToDto(x);
+    }
+
+    public async Task DeleteAsync(
+        Guid id, Guid actorId, string? ip, string? ua,
+        CancellationToken ct = default)
+    {
+        var x = await db.RetentionSchedules
+            .FirstOrDefaultAsync(s => s.Id == id && s.OrganisationId == OrgId && s.IsActive, ct)
+            ?? throw new NotFoundException("RetentionSchedule");
+        x.IsActive = false;
+        await audit.WriteAsync(actorId, "retention_schedule.deleted",
+            "RetentionSchedule", x.Id.ToString(),
+            detail: new { x.DataCategory },
+            ip: ip, ua: ua);
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static RetentionScheduleDto ToDto(RetentionSchedule x) =>
+        new(x.Id, x.OrganisationId, x.DataCategory, x.RetentionPeriodMonths,
+            x.LawfulBasisForRetention, x.Notes, x.CreatedAt, x.UpdatedAt);
+}
+
 // T-S12-02 Improvement Register service. PAFM-SD F.12 first
 // bullet (PDCA continuous improvement). Project-scoped.
 // 5-state state machine via Core/PdcaWorkflow with cycle-back
@@ -5829,9 +6427,6 @@ public class ImprovementRegisterService(CimsDbContext db, AuditService audit)
             throw new ForbiddenException($"Role {role} cannot transition PDCA {x.State} → {toState}.");
 
         var from = x.State;
-        // Capture per-stage notes on the OUTGOING stage transition,
-        // i.e. the notes describe what happened during the stage you
-        // are leaving.
         if (!string.IsNullOrWhiteSpace(stageNotes))
         {
             switch (from)
@@ -5842,8 +6437,6 @@ public class ImprovementRegisterService(CimsDbContext db, AuditService audit)
                 case PdcaState.Act:   x.ActNotes   = stageNotes; break;
             }
         }
-        // Cycle-back: Act → Plan increments CycleNumber. Per-cycle
-        // history (snapshot prior cycle's notes) → v1.1 / B-081.
         if (from == PdcaState.Act && toState == PdcaState.Plan)
         {
             x.CycleNumber++;

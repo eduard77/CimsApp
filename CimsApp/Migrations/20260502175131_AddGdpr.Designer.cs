@@ -4,6 +4,7 @@ using CimsApp.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CimsApp.Migrations
 {
     [DbContext(typeof(CimsDbContext))]
-    partial class CimsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260502175131_AddGdpr")]
+    partial class AddGdpr
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1473,76 +1476,6 @@ namespace CimsApp.Migrations
                     b.ToTable("GatewayPackages");
                 });
 
-            modelBuilder.Entity("CimsApp.Models.ImprovementRegisterEntry", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ActNotes")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("CheckNotes")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("CycleNumber")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("DoNotes")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Number")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<Guid>("OwnerId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("PlanNotes")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("State")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CreatedById");
-
-                    b.HasIndex("OwnerId");
-
-                    b.HasIndex("ProjectId", "Number")
-                        .IsUnique();
-
-                    b.HasIndex("ProjectId", "State");
-
-                    b.ToTable("ImprovementRegisterEntries");
-                });
-
             modelBuilder.Entity("CimsApp.Models.Invitation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1591,58 +1524,6 @@ namespace CimsApp.Migrations
                     b.HasIndex("OrganisationId", "ConsumedAt");
 
                     b.ToTable("Invitations");
-                });
-
-            modelBuilder.Entity("CimsApp.Models.LessonLearned", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Category")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid>("OrganisationId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("RecordedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("SourceProjectId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("TagsCsv")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("RecordedById");
-
-                    b.HasIndex("SourceProjectId");
-
-                    b.HasIndex("OrganisationId", "Category");
-
-                    b.ToTable("LessonsLearned");
                 });
 
             modelBuilder.Entity("CimsApp.Models.LookaheadEntry", b =>
@@ -1840,72 +1721,6 @@ namespace CimsApp.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("Notifications");
-                });
-
-            modelBuilder.Entity("CimsApp.Models.OpportunityToImprove", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ActionNote")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("ActionedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("ActionedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsActioned")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Number")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("RaisedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("SourceEntityId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("SourceEntityType")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("RaisedById");
-
-                    b.HasIndex("ProjectId", "IsActioned");
-
-                    b.HasIndex("ProjectId", "Number")
-                        .IsUnique();
-
-                    b.ToTable("OpportunitiesToImprove");
                 });
 
             modelBuilder.Entity("CimsApp.Models.Organisation", b =>
@@ -3871,33 +3686,6 @@ namespace CimsApp.Migrations
                     b.Navigation("SubmittedBy");
                 });
 
-            modelBuilder.Entity("CimsApp.Models.ImprovementRegisterEntry", b =>
-                {
-                    b.HasOne("CimsApp.Models.User", "CreatedBy")
-                        .WithMany()
-                        .HasForeignKey("CreatedById")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.User", "Owner")
-                        .WithMany()
-                        .HasForeignKey("OwnerId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.Project", "Project")
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.Navigation("CreatedBy");
-
-                    b.Navigation("Owner");
-
-                    b.Navigation("Project");
-                });
-
             modelBuilder.Entity("CimsApp.Models.Invitation", b =>
                 {
                     b.HasOne("CimsApp.Models.User", "ConsumedByUser")
@@ -3921,32 +3709,6 @@ namespace CimsApp.Migrations
                     b.Navigation("CreatedBy");
 
                     b.Navigation("Organisation");
-                });
-
-            modelBuilder.Entity("CimsApp.Models.LessonLearned", b =>
-                {
-                    b.HasOne("CimsApp.Models.Organisation", "Organisation")
-                        .WithMany()
-                        .HasForeignKey("OrganisationId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.User", "RecordedBy")
-                        .WithMany()
-                        .HasForeignKey("RecordedById")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.Project", "SourceProject")
-                        .WithMany()
-                        .HasForeignKey("SourceProjectId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.Navigation("Organisation");
-
-                    b.Navigation("RecordedBy");
-
-                    b.Navigation("SourceProject");
                 });
 
             modelBuilder.Entity("CimsApp.Models.LookaheadEntry", b =>
@@ -4030,25 +3792,6 @@ namespace CimsApp.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("CimsApp.Models.OpportunityToImprove", b =>
-                {
-                    b.HasOne("CimsApp.Models.Project", "Project")
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("CimsApp.Models.User", "RaisedBy")
-                        .WithMany()
-                        .HasForeignKey("RaisedById")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.Navigation("Project");
-
-                    b.Navigation("RaisedBy");
                 });
 
             modelBuilder.Entity("CimsApp.Models.PaymentCertificate", b =>

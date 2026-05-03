@@ -73,6 +73,15 @@ public class CimsDbContextTenantFilterTests
         // S10 BSA 2022 / Golden Thread additions (T-S10-03 / T-S10-04).
         typeof(GatewayPackage),
         typeof(MandatoryOccurrenceReport),
+        // S11 UK GDPR additions (T-S11-02..06). 4 of 5 are
+        // org-scoped (filter shape OrganisationId ==
+        // _tenant.OrganisationId); DataProtectionImpactAssessment
+        // is project-scoped via Project.AppointingPartyId.
+        typeof(RopaEntry),
+        typeof(DataProtectionImpactAssessment),
+        typeof(SubjectAccessRequest),
+        typeof(DataBreachLog),
+        typeof(RetentionSchedule),
         // S12 Kaizen / Lessons Learned additions (T-S12-02..04).
         // Mixed: 2 project-scoped, 1 org-scoped (LessonLearned).
         typeof(ImprovementRegisterEntry),
