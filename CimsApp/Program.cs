@@ -248,6 +248,15 @@ builder.Services.AddScoped<CimsApp.Services.Search.ISearchProvider, CimsApp.Serv
 builder.Services.AddScoped<CimsApp.Services.Search.ISearchProvider, CimsApp.Services.Search.CompensationEventSearchProvider>();
 builder.Services.AddScoped<CimsApp.Services.Search.SearchAggregatorService>();
 
+// T-S16-02 Admin Console services. Four small read-mostly services
+// backing the /admin/* surface. Reuse AuthService / InvitationService /
+// AuditService rather than re-implementing the revoke / mint / write
+// primitives.
+builder.Services.AddScoped<CimsApp.Services.Admin.UserAdminService>();
+builder.Services.AddScoped<CimsApp.Services.Admin.OrganisationAdminService>();
+builder.Services.AddScoped<CimsApp.Services.Admin.InvitationAdminService>();
+builder.Services.AddScoped<CimsApp.Services.Admin.AuditAdminService>();
+
 // ── Blazor UI Services ────────────────────────────────────────────────────────
 builder.Services.AddScoped<UiStateService>();
 builder.Services.AddScoped<BlazorApiClient>();
