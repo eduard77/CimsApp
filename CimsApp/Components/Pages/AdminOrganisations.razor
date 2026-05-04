@@ -1,0 +1,111 @@
+@page "/admin/organisations"
+@using CimsApp.Services.Admin
+@inject BlazorApiClient Api
+@inject ISnackbar Snackbar
+
+<PageHeader Title="Organisations" Subtitle="Tenant administration" ShowButton="false" />
+
+<MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;padding:16px;margin-bottom:16px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+        <MudTextField @bind-Value="_search" Placeholder="Search by name or code" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search"
+                      OnAdornmentClick="LoadAsync" OnKeyUp="OnSearchKey" />
+        <MudSwitch T="bool" @bind-Value="_includeInactive" Label="Include inactive" Color="Color.Primary" />
+    </div>
+</MudCard>
+
+@if (_loading) { <Loading /> }
+else if (_page == null)
+{
+    <EmptyState Icon="@Icons.Material.Filled.Lock" Text="Insufficient permissions or service unavailable." />
+}
+else
+{
+    <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;">
+        <MudTable Items="_page.Items" Hover="true" Elevation="0" Dense="true">
+            <HeaderContent>
+                <MudTh>Name</MudTh>
+                <MudTh>Code</MudTh>
+                <MudTh>Country</MudTh>
+                <MudTh Style="text-align:right;">Users</MudTh>
+                <MudTh Style="text-align:right;">Projects</MudTh>
+                <MudTh>Active</MudTh>
+                <MudTh Style="text-align:right;">Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.Name</MudTd>
+                <MudTd><span style="font-family:monospace;font-size:12px;">@context.Code</span></MudTd>
+                <MudTd>@(context.Country ?? "—")</MudTd>
+                <MudTd Style="text-align:right;">@context.UserCount</MudTd>
+                <MudTd Style="text-align:right;">@context.ProjectCount</MudTd>
+                <MudTd>
+                    @if (context.IsActive) { <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">active</MudChip> }
+                    else { <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Text">disabled</MudChip> }
+                </MudTd>
+                <MudTd Style="text-align:right;">
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => Edit(context)" Style="text-transform:none;">Edit</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" Disabled="!context.IsActive" OnClick="() => Deactivate(context)" Style="text-transform:none;">Deactivate</MudButton>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+        <div style="padding:12px 16px;color:#64748B;font-size:12px;">@_page.Items.Count of @_page.Total</div>
+    </MudCard>
+}
+
+<MudDialog @bind-Visible="_showEdit">
+    <TitleContent><MudText Typo="Typo.h6">Edit organisation</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_editName" Label="Name" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudTextField @bind-Value="_editCountry" Label="Country" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" />
+        <p style="color:#94A3B8;font-size:11px;margin-top:8px;">Code is immutable; renaming would orphan template storage paths.</p>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showEdit = false" Style="text-transform:none;">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveEdit" Style="text-transform:none;">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    AdminPagedResult<AdminOrgListItem>? _page;
+    bool _loading = true;
+    string _search = "";
+    bool _includeInactive = false;
+
+    bool _showEdit;
+    Guid _editId;
+    string _editName = "";
+    string _editCountry = "";
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    async Task LoadAsync()
+    {
+        _loading = true;
+        _page = await Api.AdminListOrgsAsync(
+            string.IsNullOrWhiteSpace(_search) ? null : _search,
+            includeInactive: _includeInactive);
+        _loading = false;
+    }
+
+    async Task OnSearchKey(KeyboardEventArgs e) { if (e.Key == "Enter") await LoadAsync(); }
+
+    void Edit(AdminOrgListItem o)
+    {
+        _editId = o.Id; _editName = o.Name; _editCountry = o.Country ?? "";
+        _showEdit = true;
+    }
+
+    async Task SaveEdit()
+    {
+        var (ok, err) = await Api.AdminUpdateOrgAsync(_editId, _editName, string.IsNullOrWhiteSpace(_editCountry) ? null : _editCountry);
+        if (ok) { Snackbar.Add("Organisation updated", Severity.Success); _showEdit = false; await LoadAsync(); }
+        else    { Snackbar.Add($"Cannot update: {err}", Severity.Error); }
+    }
+
+    async Task Deactivate(AdminOrgListItem o)
+    {
+        var (ok, err) = await Api.AdminDeactivateOrgAsync(o.Id);
+        if (ok) { Snackbar.Add($"Deactivated {o.Name}", Severity.Success); await LoadAsync(); }
+        else    { Snackbar.Add($"Cannot deactivate: {err}", Severity.Error); }
+    }
+}
