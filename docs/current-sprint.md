@@ -5,211 +5,176 @@ non-trivial AI session so the model starts with the right scope anchor.
 
 ---
 
-**Status:** Sprint S3 active — Stakeholder & Communications kickoff
-landed 2026-05-01.
+**Status:** Between sprints — S15 closed 2026-05-03; **S16 not yet
+kicked off** (scope decision pending).
 
-**Active sprint:** S3 — Stakeholder & Communications. PAFM-SD Ch
-6.4 / Appendix F.4. Branch `sprint/s3-stakeholder-communications`
-off master (`064cf4c`). 4-bullet F.4 module DoD (smallest
-appendix so far); decomposition T-S3-02..09 estimated at 30h ×
-1.5 = 45h, well under 72h formal capacity — first sprint since
-S0 with comfortable headroom and no CR.
+**Active sprint:** none.
 
-T-S3-02 (Stakeholder entity, mirroring S2 Risk shape with
-Power/Interest matrix substituting for P×I) is next.
+**Next sprint (S16):** scope to be picked. Per S15 retrospective, two
+reasonable candidates for the next default-lean F-section:
 
-**Last sprint:** S2 — Risk & Opportunities. Merged at `064cf4c`
-(2026-05-01). Tag `v0.2-sprint-s2`. See `docs/sprint-log/s2.md`
-and `docs/retrospectives/s2.md`. 8 of 9 PAFM Appendix F.3
-module-DoD bullets delivered; the 1 unticked is B-029 (opportunity
-register, deferred per CR-004).
+- **F.16 Mobile / Responsive Views** (per pre-renumber S0..S7 retros).
+- **F.16 Admin Console** (per S3 enum-comment hints).
 
-CR-004 deferrals to v1.1 backlog: B-028 (schedule-side Monte
-Carlo — also blocked on S4 CPM data), B-029 (opportunity
-register), B-030 (cross-module contingency drawdown link).
+Authoritative resolution needs the PAFM-SD `.docx` Appendix F.16 paste
+(or F.16..F.19 in one go — would unblock the next 4-5 sprints'
+kickoffs at once). Until pasted, S16 kickoff should follow the **S15
+scope-spec caveat pattern**: surface the predicted bullets, ask the
+user once with a concrete proposal, proceed under their answer, and
+commit to reconcile on first .docx paste.
 
-**Previously closed:** S1 — Cost & Commercial. Merged at `330a09c`
-(2026-04-27). Tag `v0.1-sprint-s1`. See
-`docs/sprint-log/s1.md` and `docs/retrospectives/s1.md`. 8 of
-10 PAFM Appendix F.2 module-DoD bullets delivered; the 2
-unticked are the CR-003 deferrals (B-014 Construction Act
-notices, B-015 final account schedule).
+**Last sprint:** S15 — Search & Discovery (PAFM-SD F.15). Merged at
+`190fa87` (2026-05-03). See `docs/sprint-log/s15.md` and
+`docs/retrospectives/s15.md`. 3 of 4 predicted F.15 module-DoD
+bullets delivered at v1.0; saved-searches explicitly deferred to v1.1
+/ B-096. Sixteenth consecutive single-session sprint, twelfth
+consecutive sprint without a CR.
 
-**Branch:** `master` (live work between sprints lands on
-short-lived feature branches off master, not a long-running
-sprint branch).
+**Branch:** `master` (live work between sprints lands on short-lived
+feature branches off master, not a long-running sprint branch).
 
-**Active work:** post-S1 hardening passes. Each lands as a
-small focused PR off master with full test coverage and the
-relevant docs (role-matrix, ADRs, v1.1 backlog) updated in
-the same commit. No active sprint scope at the moment.
+**Tests:** 930 / 930 green. Build clean (0 warnings, 0 errors).
+Backlog at B-001..B-098.
 
-**Hardening retired since S1 close (2026-04-27 → 2026-04-29):**
-- B-001 Access-token revocation (primitive + ADR-0014 +
-  endpoints; full close).
-- B-002 Rate limit + progressive back-off (full close;
-  CAPTCHA / email-verification stay v1.1).
-- B-003 Constant-time register (obsolete via T-S0-11).
-- B-005 / B-006 Action / RFI ownership checks.
-- B-007 `/organisations` admin scoping (real org-enumeration
-  leak found in role-matrix audit).
-- B-013 MudBlazor 6 → 9 upgrade.
-- B-017 Per-CBS-line schedule + progress + EVM/valuation/cashflow
-  wire-ups (full close).
-- B-019 Refresh-token bulk-revoke (closed an ADR-0014 §3
-  reasoning gap).
-- B-021 Auth-domain structured audit events.
-- B-023 (promoted from SR-S0-05) AddMember org-match check.
-- SR-S0-03 RoleClaimType comment fix.
-- ADR-0007 SuperAdmin filter-bypass written (was being cited
-  but didn't exist).
-- README.md filled in (was empty since first commit).
-- Sprint log ADR-001 → ADR-0008 annotation fix.
-- Pagination types removed (`PaginationParams` /
-  `PagedResult<T>` were dead code).
-- CdeService / CdeStateMachine / DocumentNaming /
-  AuditInterceptor pure-function and behavioural test gaps
-  closed.
-- `Document.DocumentNumber` unique index scope fix
-  (global → per-project — real cross-tenant correctness
-  bug).
-- AuditInterceptor `SkippedFieldNames` (PasswordHash and
-  TokenHash now never appear in audit JSON — defense-in-depth).
-- `project.member_added` and `invitation.created` /
-  `invitation.consumed` structured audit events
-  (audit-twin pattern extended).
-- RegisterAsync transaction wrap (User insert + invitation
-  consume now atomic — closes a "one-invitation-two-users"
-  crash window; PR #29).
-- Variation-omission test: payment-cert valuation correctly
-  nets a negative EstimatedCostImpact against approved
-  additions (PR #32 — pinned a documented-but-untested
-  contract).
-- **Audit-twin atomicity refactor (PR #33).** Every
-  business mutation used to produce two transactions
-  (entity save + audit save). `AuditService.WriteAsync` now
-  adds the AuditLog row to the change tracker without
-  saving; 28 call sites flipped so a single SaveChanges
-  commits both halves of the audit-twin atomically. Closes
-  the "structured event lost on crash between two saves"
-  discoverability gap.
-- Document.TransitionAsync transaction wrap (PR #34) —
-  same shape as the RegisterAsync wrap, covers the
-  ExecuteUpdateAsync (revision publish) + SaveChanges (doc
-  state) pair.
-- OrganisationsController.Create transaction wrap (PR #35)
-  — same shape, covers the org save + bootstrap-invitation
-  save pair. Closes a "Code reserved but no bootstrap
-  invitation, retry impossible" stuck-state.
-- Audit-twin coverage tests (PR #36) for
-  payment_certificate.draft_updated /
-  payment_certificate.issued / document.state_transition.
-- Dormant entity scaffolds documented as B-025 (Notification
-  feature) and B-026 (ProjectAppointment / B2B contractor
-  membership) — surfaced during dead-code sweep, kept in
-  schema rather than deleted to avoid migration churn when
-  features land (PR #38).
-- Audit-twin coverage completion (PR #39) — six more action
-  names tested: project.created, document.created,
-  rfi.created, rfi.responded, action.created,
-  action.updated. Every structured audit-twin event now
-  pinned by at least one explicit assertion.
-- **AuditLog.UserId nullable (PR #41) — real, latent
-  production bug caught by SQL Server smoke test.** The
-  bootstrap-invitation path (POST /api/v1/organisations,
-  anon flow) wrote Guid.Empty to AuditLog.UserId as a "no
-  actor" sentinel; SQL Server rejected the INSERT with FK
-  violation. Broken in production since T-S0-11 (~one week).
-  EF in-memory ignores FKs, which is why every unit test
-  passed. Column is now `Guid?`, the audit log records null
-  honestly, the query filter handles `User == null`. New
-  migration `AuditLogUserIdNullable`. Promoted **B-027**:
-  add SQL Server smoke test to CI to catch this class of
-  bug pre-merge.
-- **AuthController body binding + 3 secret leaks (PR #42) —
-  two more real, latent production bugs from continuing the
-  smoke test.** (a) AuthController extends ControllerBase
-  directly to bypass [Authorize] but lost [ApiController]
-  in the process; without it the model binder doesn't infer
-  [FromBody] and every auth endpoint received an empty DTO,
-  so register / login / refresh were all silently broken
-  100% of the time in production. (b) Project responses
-  serialised Members[].User including User.PasswordHash;
-  any authenticated member could read every other member's
-  bcrypt hash. Fix: [ApiController] on AuthController +
-  [JsonIgnore] on User.PasswordHash, RefreshToken.Token,
-  Invitation.TokenHash. Three new EntitySerializationTests
-  pin the contract.
-- **RefreshAsync opaque-token validation (PR #43) — third
-  real, latent production bug from the smoke test.**
-  CreateRefreshAsync mints opaque hex (Guid×2 = 64 chars),
-  but RefreshAsync was JWT-validating tokens via
-  `Validate(token, RefreshSecret)`. Opaque hex is not a JWT,
-  so /auth/refresh threw 401 INVALID_REFRESH on every call
-  since the initial commit. 100% latent because no unit
-  test exercised RefreshAsync. Fix: drop the JWT validate;
-  use the DB lookup as the authentication (rows rotate on
-  every refresh); pull stored.UserId for the user lookup.
-  Five new RefreshTokenAuthTests cover happy path + unknown
-  / revoked / expired / null-empty edges.
+---
 
-- **AuthController [AllowAnonymous] scope (PR #44) — fourth
-  smoke-test bug.** Class-level [AllowAnonymous] overrides
-  every action-level [Authorize] (per ASP.NET Core docs), so
-  /me and /logout-everywhere were silently anonymous-allowed.
-  Calling /me without auth (or with a post-revoke access
-  token) threw ArgumentNullException at
-  Guid.Parse(NameIdentifier!) → HTTP 500 instead of 401.
-  Fix: scope [AllowAnonymous] per-action (register / login /
-  refresh / logout); Me + LogoutEverywhere keep their
-  [Authorize] and now auth middleware short-circuits with
-  401 before the action runs.
+## Sprints closed in the S2 → S15 sweep (2026-05-01 → 2026-05-03)
 
-**Four consecutive smoke-test PRs (#41-#44) found real,
-latent production bugs. The full bootstrap → register →
-login → project → downstream-domain smoke walk is now green
-end-to-end against real SQL Server. Cross-tenant isolation
-verified live (read + write both correctly blocked).
-B-027 (SQL Server smoke test in CI) is concretely justified
-four times over — the unit-test-only gap is real.**
+Twelve sprints, zero CRs raised, single-session cadence throughout.
+Each ships a feature module + behavioural tests + tenant-filter sweep
++ role-matrix entry + retrospective + v1.1 backlog entries with
+explicit unblock conditions. Per-sprint scope:
 
-**Post-S1 audits landed (all clean / dormant findings only
-beyond the items above):**
+- **S2 — Risk & Opportunities** (PAFM F.3). Tag `v0.2-sprint-s2`.
+  8 of 9 module-DoD bullets; CR-004 deferrals B-028 (Monte Carlo,
+  also blocked on S4 CPM data), B-029 (opportunity register),
+  B-030 (cross-module contingency drawdown link).
+- **S3 — Stakeholder & Communications** (PAFM F.4).
+- **S4 — Schedule & Time** (PAFM F.5).
+- **S5 — Document & Drawing Control** (PAFM F.6).
+- **S6 — Quality & HSE** (PAFM F.7).
+- **S7 — Reporting & Dashboards** (PAFM F.8). Tag `v0.7-s7`.
+- **S8 — CI Hardening / branch-protection groundwork.** Tag
+  `v0.8-s8`. T-S8-05 follow-up: scheduled agent
+  `trig_01BJG8zcU9WBEh3hbM6RRtEN` armed for **2026-05-18 09:00 UTC**
+  to enable `master` branch protection.
+- **S9 — ISO 19650 / MIDP / TIDP** (PAFM F.9). Tag `v0.9-s9`.
+  Backlog B-065..B-069.
+- **S10 — Golden Thread / BSA 2022** (PAFM F.10). Tag `v0.10-s10`.
+  Gateway / MOR / SafetyCase / GoldenThread + HRB project metadata.
+  Backlog B-070..B-075.
+- **S11 — UK GDPR** (PAFM F.11). Tag `v0.11-s11`. Backlog B-076..B-080.
+- **S12 — Kaizen & Lessons Learned** (PAFM F.12). Tag `v0.12-s12`.
+  Backlog B-081..B-085.
+- **S13 — Inspection & Activities** (PAFM F.13, Option A scope cut).
+  Tag `v0.13-s13`. Backlog B-086..B-089. **PAFM Ch 47 paste**
+  outstanding for any future Genera REST integration work.
+- **S14 — Notifications & Alerts** (PAFM F.14). SignalR
+  NotificationsHub + IEmailSender + AlertRule + threshold evaluator.
+  Backlog B-090..B-094. (No version tag landed.)
+- **S15 — Search & Discovery** (PAFM F.15). EF.Functions.Like-based
+  cross-entity search aggregator over 7 entity types; types[] filter;
+  LIKE wildcard escape. Backlog B-095..B-098. (No version tag landed.)
+
+Detail: `docs/sprint-log/s<N>.md` + `docs/retrospectives/s<N>.md`
+per sprint. Git: `git log --oneline c0cfd53..190fa87`.
+
+---
+
+## Earlier (S0 → S1 + post-S1 hardening, kept for reference)
+
+S0 — Foundations (auth, multi-tenancy, audit). S1 — Cost & Commercial
+(NEC4 payment certs, EVM, cashflow). Tag `v0.1-sprint-s1` at
+`330a09c` (2026-04-27).
+
+Post-S1 hardening (2026-04-27 → 2026-04-30) retired ~30 items:
+B-001 token revocation, B-002 rate limit + back-off, B-005/B-006
+ownership checks, B-007 org-enumeration leak, B-013 MudBlazor 6 → 9,
+B-017 EVM/cashflow wire-ups, B-019 refresh-token bulk-revoke,
+B-021 audit-domain structured events, B-023 AddMember org-match,
+ADR-0007 written, README populated, transaction wraps for
+RegisterAsync / Document.TransitionAsync / OrganisationsController.Create
+(PR #29 / #34 / #35), audit-twin atomicity refactor (PR #33),
+audit-twin coverage completion (PR #36 + #39).
+
+**The four real, latent production bugs caught by the SQL Server
+smoke walk (PRs #41-#44):** AuditLog.UserId FK violation;
+AuthController missing [ApiController] (auth surface 100% broken in
+prod) + Project response leaking PasswordHash; RefreshAsync
+JWT-validating opaque tokens (refresh 100% broken); class-level
+[AllowAnonymous] silently overriding action-level [Authorize] on /me
++ /logout-everywhere. All four were 100% latent under unit tests
+because EF in-memory ignores FK constraints, model binding, and JWT
+parsing edges. **B-027 (SQL Server smoke test in CI)** is concretely
+justified four times over — promotion is in the v1.1 backlog.
+
+Post-S1 audit docs (still load-bearing as checklists when touching
+the relevant surface):
+
 - `docs/security/post-s1-auth-mutation-audit-2026-04-28.md`
-  — User mutation surface; the only present site
-  (DeactivateUserAsync) is correct. Two follow-on findings
-  delivered (PasswordHash leak, RegisterAsync transaction
-  wrap). Two refinements promoted (B-021 closed, B-022 open).
 - `docs/security/post-s1-role-matrix-audit-2026-04-28.md`
-  — Every role-matrix row verified. RM-01 (logout missing
-  rate limit) closed in same commit.
 - `docs/security/post-s1-secondary-mutation-audit-2026-04-29.md`
-  — Organisation / Project / ProjectMember mutation surfaces.
-  All gaps dormant pending future endpoints; one refinement
-  (B-024 optimistic concurrency) promoted to backlog.
 
-**Inherited from S0 / S1 (must NOT regress):**
-- `ITenantContext` + global query filters on every
-  tenant-scoped entity (ADR-0003).
+---
+
+## Inherited invariants (must NOT regress)
+
+From S0 / S1 / post-S1 hardening:
+- `ITenantContext` + global query filters on every tenant-scoped
+  entity (ADR-0003).
 - Two-tier role authorization model (ADR-0010).
-- Audit interceptor populates Action / Entity / Before /
-  After / UserId on every tenant-scoped write (audit-twin
-  pattern from S1 cost domain extended to auth domain at
-  B-021).
-- Invitation-token registration flow (ADR-0011) — every new
-  User comes through a token.
-- Project AppointingPartyId locked to caller's org with
-  SuperAdmin bypass (ADR-0012).
-- NEC4 cumulative semantics for payment certificates
-  (ADR-0013).
-- Access-token residual-authority SLA: cutoff bump + refresh
-  sweep on revoke / deactivate (ADR-0014, §3 amended for
-  refresh tokens).
+- Audit interceptor populates Action / Entity / Before / After /
+  UserId on every tenant-scoped write; `SkippedFieldNames` excludes
+  PasswordHash / TokenHash from audit JSON.
+- Invitation-token registration flow (ADR-0011) — every new User
+  comes through a token.
+- Project AppointingPartyId locked to caller's org with SuperAdmin
+  bypass (ADR-0012).
+- NEC4 cumulative semantics for payment certificates (ADR-0013).
+- Access-token residual-authority SLA: cutoff bump + refresh sweep
+  on revoke / deactivate (ADR-0014, §3 amended for refresh tokens).
+- Audit-twin atomicity (PR #33): `AuditService.WriteAsync` adds the
+  AuditLog row to the change tracker; a single SaveChanges commits
+  both the entity write and the structured event in one transaction.
+- `[JsonIgnore]` on `User.PasswordHash`, `RefreshToken.Token`,
+  `Invitation.TokenHash` (PR #42); `EntitySerializationTests` pin
+  the contract.
+- `AuditLog.UserId` is `Guid?` (PR #41) — anonymous-actor audit
+  rows record null honestly; query filter handles `User == null`.
+- `[AllowAnonymous]` is scoped per-action on `AuthController`, never
+  class-level (PR #44).
+- Refresh tokens are opaque hex (Guid×2 = 64 chars); RefreshAsync
+  authenticates by DB lookup, NOT by JWT validate (PR #43).
 
-**Out of scope between sprints:**
-- ISO 19650 / MIDP — Sprint 8, parked per ADR-0008 / CR-001.
-- Risk module (S2), Stakeholder (S3), Schedule (S4), etc.
-  Open in their own sprint kickoffs.
+From S2 → S15 sprints:
+- Every new tenant-scoped entity gets a global query filter and a
+  tenant-isolation behavioural test (verified by per-sprint tenant
+  filter sweep, e.g. `chore(s11): T-S11-07 tenant filter sweep`).
+- Every new endpoint gets a row in the role matrix.
+- EF DbContext is NOT thread-safe under `Task.WhenAll` over a
+  single scoped context. Fan-out across providers is **sequential
+  await**, not parallel (S15 aggregator pattern).
+
+---
+
+## Pending obligations (carry-forward)
+
+- **`master` branch protection** scheduled to land 2026-05-18 09:00 UTC
+  via agent `trig_01BJG8zcU9WBEh3hbM6RRtEN` (T-S8-05 follow-up;
+  verified armed at S15 kickoff).
+- **PAFM-SD F.16..F.19 .docx paste** would unblock the next 4-5
+  sprint kickoffs in one go. Standing request.
+- **PAFM Ch 47 paste** for any future F.13 / Genera Systems REST
+  integration work (B-086..B-089 unblock condition).
+- **Pre-pilot legal review** carry-forward unchanged (UK GDPR + BSA
+  2022 field shapes).
+- **B-027 — SQL Server smoke test in CI.** Concretely justified by
+  PRs #41-#44; remains v1.1 until prioritised.
+
+---
+
+## Out of scope between sprints
+
 - Everything in PAFM-SD Ch 3 anti-scope.
 - v1.1-tagged hardening that's sprint-bound:
   - B-014 Construction Act notices (CR-003 deferral).
@@ -220,18 +185,24 @@ beyond the items above):**
   - B-022 OnTokenValidated DB lookup cache (alongside B-018).
   - B-024 Optimistic concurrency control on mutable entities
     (rowversion / ETag / 409 mapping; ~12-16h sprint-shaped).
+  - B-027 SQL Server smoke test in CI.
+  - B-028..B-030 (S2 CR-004 deferrals).
+  - B-095..B-098 (S15 deferrals).
+  - All other v1.1 backlog entries — see `docs/v1.1-backlog.md`.
 
-**Working rules (PAFM-SD):**
-- Ch 27 git: conventional commits, short-lived feature
-  branches off master between sprints, sprint branches during
-  sprints.
-- Ch 9.3 commit cadence: at least once per day; at task
-  completion; before ending a session.
-- Ch 17 change control: scope additions require a written
-  change record in `docs/change-register.md`. v1.1 backlog
-  promotions / closures count as scope decisions and are
-  documented inline in the backlog entries.
-- Ch 24 architecture: no new libraries / patterns without
-  ADR. ADR amendments (§3 of ADR-0014) record changes to a
-  shipped decision via an Amendment log on the ADR itself.
+---
+
+## Working rules (PAFM-SD)
+
+- Ch 27 git: conventional commits, short-lived feature branches off
+  master between sprints, sprint branches during sprints.
+- Ch 9.3 commit cadence: at least once per day; at task completion;
+  before ending a session.
+- Ch 17 change control: scope additions require a written change
+  record in `docs/change-register.md`. v1.1 backlog promotions /
+  closures count as scope decisions and are documented inline in the
+  backlog entries.
+- Ch 24 architecture: no new libraries / patterns without ADR. ADR
+  amendments (§3 of ADR-0014) record changes to a shipped decision
+  via an Amendment log on the ADR itself.
 - Ch 4 C-11: at least one full day off per week.
