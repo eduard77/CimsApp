@@ -5,36 +5,43 @@ non-trivial AI session so the model starts with the right scope anchor.
 
 ---
 
-**Status:** Between sprints — S15 closed 2026-05-03; **S16 not yet
+**Status:** Between sprints — S16 closed 2026-05-04; **S17 not yet
 kicked off** (scope decision pending).
 
 **Active sprint:** none.
 
-**Next sprint (S16):** scope to be picked. Per S15 retrospective, two
-reasonable candidates for the next default-lean F-section:
+**Next sprint (S17):** scope to be picked. Per S15 retro, the two
+candidates for the F.16/F.17 default-lean were Mobile/Responsive
+Views and Admin Console. With S16 having taken the Admin Console
+option, **F.17 Mobile / Responsive Views** is the obvious next
+default-lean. Authoritative resolution still needs the PAFM-SD
+`.docx` Appendix F.17 paste (or F.17..F.19 in one go — would
+unblock the next 3-4 sprints' kickoffs at once). Until pasted,
+S17 kickoff should follow the **S15/S16 scope-spec caveat
+pattern**: surface the predicted bullets, ask the user once with
+a concrete proposal, proceed under their answer, commit to
+reconcile on first .docx paste.
 
-- **F.16 Mobile / Responsive Views** (per pre-renumber S0..S7 retros).
-- **F.16 Admin Console** (per S3 enum-comment hints).
+**Last sprint:** S16 — Admin Console (PAFM-SD F.16, predicted).
+Squash-merged at `dd62441` (2026-05-04, PR #60). See
+`docs/sprint-log/s16.md` and `docs/retrospectives/s16.md`. 4 of
+4 predicted F.16 module-DoD bullets delivered at v1.0 — user /
+org / invitation admin + tenant audit viewer. Seventeenth
+consecutive single-session sprint, thirteenth consecutive sprint
+without a CR. CI caught one latent existence-leak bug in
+`OrganisationAdminService.UpdateAsync` (cross-tenant attempt
+returned 403 vs 404, confirming row existence) — fixed pre-merge.
 
-Authoritative resolution needs the PAFM-SD `.docx` Appendix F.16 paste
-(or F.16..F.19 in one go — would unblock the next 4-5 sprints'
-kickoffs at once). Until pasted, S16 kickoff should follow the **S15
-scope-spec caveat pattern**: surface the predicted bullets, ask the
-user once with a concrete proposal, proceed under their answer, and
-commit to reconcile on first .docx paste.
-
-**Last sprint:** S15 — Search & Discovery (PAFM-SD F.15). Merged at
-`190fa87` (2026-05-03). See `docs/sprint-log/s15.md` and
-`docs/retrospectives/s15.md`. 3 of 4 predicted F.15 module-DoD
-bullets delivered at v1.0; saved-searches explicitly deferred to v1.1
-/ B-096. Sixteenth consecutive single-session sprint, twelfth
-consecutive sprint without a CR.
+**Previously closed:** S15 — Search & Discovery (PAFM-SD F.15).
+Merged at `190fa87` (2026-05-03). 3 of 4 predicted F.15 module-DoD
+bullets delivered; saved-searches explicitly deferred to v1.1 /
+B-096.
 
 **Branch:** `master` (live work between sprints lands on short-lived
 feature branches off master, not a long-running sprint branch).
 
-**Tests:** 930 / 930 green. Build clean (0 warnings, 0 errors).
-Backlog at B-001..B-098.
+**Tests:** 957 / 957 green (CI). Build clean (0 warnings, 0 errors).
+Backlog at B-001..B-101.
 
 ---
 
@@ -75,9 +82,14 @@ explicit unblock conditions. Per-sprint scope:
 - **S15 — Search & Discovery** (PAFM F.15). EF.Functions.Like-based
   cross-entity search aggregator over 7 entity types; types[] filter;
   LIKE wildcard escape. Backlog B-095..B-098. (No version tag landed.)
+- **S16 — Admin Console** (PAFM F.16, predicted). 4 services + 4
+  controllers + 4 MudBlazor pages under `/admin/*` (users / orgs /
+  invitations / tenant audit). Closes the laptop-pickup ritual that
+  previously needed PowerShell + raw SQL UPDATE for SuperAdmin
+  promotion. Backlog B-099..B-101. (No version tag landed.)
 
 Detail: `docs/sprint-log/s<N>.md` + `docs/retrospectives/s<N>.md`
-per sprint. Git: `git log --oneline c0cfd53..190fa87`.
+per sprint. Git: `git log --oneline c0cfd53..dd62441`.
 
 ---
 
@@ -162,14 +174,21 @@ From S2 → S15 sprints:
 - **`master` branch protection** scheduled to land 2026-05-18 09:00 UTC
   via agent `trig_01BJG8zcU9WBEh3hbM6RRtEN` (T-S8-05 follow-up;
   verified armed at S15 kickoff).
-- **PAFM-SD F.16..F.19 .docx paste** would unblock the next 4-5
-  sprint kickoffs in one go. Standing request.
+- **PAFM-SD F.17..F.19 .docx paste** would unblock the next 3-4
+  sprint kickoffs in one go. Standing request. (F.16 was kicked
+  off without the paste using the S15 caveat pattern; reconciliation
+  on first F.16 paste.)
 - **PAFM Ch 47 paste** for any future F.13 / Genera Systems REST
   integration work (B-086..B-089 unblock condition).
 - **Pre-pilot legal review** carry-forward unchanged (UK GDPR + BSA
   2022 field shapes).
-- **B-027 — SQL Server smoke test in CI.** Concretely justified by
-  PRs #41-#44; remains v1.1 until prioritised.
+- **Laptop WDAC** blocks rebuilt `CimsApp.dll` from `dotnet test`
+  discovery (error `0x800711C7`, kernel-level, hash-based). First
+  hit S16. Resolution options at the policy layer (WDAC rule for
+  `C:\Code\CimsApp\**\*.dll`, Smart App Control toggle, signed
+  assemblies); until then, test verification on the laptop happens
+  via push-to-CI rather than locally. See
+  `memory/project_laptop_wdac.md`.
 
 ---
 
@@ -185,9 +204,10 @@ From S2 → S15 sprints:
   - B-022 OnTokenValidated DB lookup cache (alongside B-018).
   - B-024 Optimistic concurrency control on mutable entities
     (rowversion / ETag / 409 mapping; ~12-16h sprint-shaped).
-  - B-027 SQL Server smoke test in CI.
   - B-028..B-030 (S2 CR-004 deferrals).
   - B-095..B-098 (S15 deferrals).
+  - B-099..B-101 (S16 deferrals — Admin Console v2, audit viewer
+    optimisation, bulk admin operations).
   - All other v1.1 backlog entries — see `docs/v1.1-backlog.md`.
 
 ---
