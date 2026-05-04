@@ -13,7 +13,26 @@
 else
 {
     <MudLayout>
-        <MudDrawer Open="true" Variant="DrawerVariant.Mini" Elevation="0"
+        @* T-S17-02 mobile hamburger toggle. Hidden at sm and up
+           (desktop drawer is persistent so no toggle needed there).
+           Fixed-position so it doesn't shift the existing layout
+           when the drawer is closed on mobile. *@
+        <MudHidden Breakpoint="Breakpoint.SmAndUp">
+            <MudIconButton Icon="@Icons.Material.Filled.Menu"
+                           Color="Color.Inherit"
+                           OnClick="@(() => _drawerOpen = !_drawerOpen)"
+                           Style="position:fixed;top:8px;left:8px;z-index:1300;background:#1B2B4B;color:white;" />
+        </MudHidden>
+
+        @* T-S17-02. Was Variant=Mini (always-persistent 240px) which
+           on a 375px viewport left only ~135px of content — broken.
+           Responsive variant is persistent above the breakpoint and
+           temporary slide-in below. Breakpoint.Sm = 600px which is
+           the standard MudBlazor mobile/tablet boundary. *@
+        <MudDrawer @bind-Open="_drawerOpen"
+                   Variant="DrawerVariant.Responsive"
+                   Breakpoint="Breakpoint.Sm"
+                   Elevation="0"
                    Style="background:#1B2B4B;border-right:1px solid rgba(255,255,255,0.08);width:240px;">
 
             <!-- Logo -->
@@ -106,6 +125,16 @@ else
             Default = new DefaultTypography { FontFamily = new[] { "Inter", "Segoe UI", "sans-serif" } }
         }
     };
+
+    // T-S17-02. Drawer open state, bound to MudDrawer @bind-Open.
+    // Responsive variant: open=true means "expanded" on desktop
+    // (persistent) AND "visible overlay" on mobile (temporary).
+    // Default true so desktop layout is byte-identical with the
+    // pre-S17 Mini-variant baseline (always-shown 240px drawer).
+    // Mobile users start with the drawer closed (hamburger reveals);
+    // MudBlazor handles that automatically because the temporary
+    // variant ignores the initial true and waits for user interaction.
+    private bool _drawerOpen = true;
 
     protected override void OnInitialized() { UI.OnChange += StateHasChanged; }
     void Logout() { UI.Logout(); Nav.NavigateTo("/"); }
