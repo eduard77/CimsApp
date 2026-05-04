@@ -1,0 +1,88 @@
+@page "/admin/audit"
+@using CimsApp.Services.Admin
+@inject BlazorApiClient Api
+
+<PageHeader Title="Audit (tenant-wide)" Subtitle="Cross-project audit trail for the operator's tenant — ISO 19650-5" ShowButton="false" />
+
+<MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;padding:16px;margin-bottom:16px;">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="3">
+            <MudDatePicker @bind-Date="_from" Label="From" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudDatePicker @bind-Date="_to" Label="To" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudTextField @bind-Value="_action" Label="Action contains" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudTextField @bind-Value="_entity" Label="Entity (exact)" Margin="Margin.Dense" />
+        </MudItem>
+    </MudGrid>
+    <div style="margin-top:12px;display:flex;gap:8px;">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync" Style="text-transform:none;">Apply filters</MudButton>
+        <MudButton Variant="Variant.Text" OnClick="ClearFilters" Style="text-transform:none;">Clear</MudButton>
+    </div>
+</MudCard>
+
+@if (_loading) { <Loading /> }
+else if (_page == null)
+{
+    <EmptyState Icon="@Icons.Material.Filled.Lock" Text="Insufficient permissions or service unavailable." />
+}
+else if (_page.Items.Count == 0)
+{
+    <EmptyState Icon="@Icons.Material.Filled.History" Text="No audit rows match the current filters." />
+}
+else
+{
+    <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;">
+        <MudTable Items="_page.Items" Hover="true" Elevation="0" Dense="true">
+            <HeaderContent>
+                <MudTh>Time</MudTh>
+                <MudTh>User</MudTh>
+                <MudTh>Action</MudTh>
+                <MudTh>Entity</MudTh>
+                <MudTh>Entity id</MudTh>
+                <MudTh>IP</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd><span style="font-size:12px;color:#64748B;white-space:nowrap;">@context.CreatedAt.ToString("dd MMM yyyy HH:mm")</span></MudTd>
+                <MudTd>@(context.UserName ?? "(anonymous)")</MudTd>
+                <MudTd><span style="font-family:monospace;font-size:11px;font-weight:600;color:#1D4ED8;">@context.Action</span></MudTd>
+                <MudTd>@context.Entity</MudTd>
+                <MudTd><span style="font-family:monospace;font-size:11px;color:#94A3B8;">@(context.EntityId.Length > 8 ? context.EntityId[..8] + "…" : context.EntityId)</span></MudTd>
+                <MudTd>@(context.IpAddress ?? "—")</MudTd>
+            </RowTemplate>
+        </MudTable>
+        <div style="padding:12px 16px;color:#64748B;font-size:12px;">@_page.Items.Count of @_page.Total</div>
+    </MudCard>
+}
+
+@code {
+    AdminPagedResult<AdminAuditListItem>? _page;
+    bool _loading = true;
+    DateTime? _from;
+    DateTime? _to;
+    string _action = "";
+    string _entity = "";
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    async Task LoadAsync()
+    {
+        _loading = true;
+        _page = await Api.AdminListAuditAsync(
+            from: _from,
+            to:   _to,
+            action: string.IsNullOrWhiteSpace(_action) ? null : _action,
+            entity: string.IsNullOrWhiteSpace(_entity) ? null : _entity);
+        _loading = false;
+    }
+
+    async Task ClearFilters()
+    {
+        _from = null; _to = null; _action = ""; _entity = "";
+        await LoadAsync();
+    }
+}

@@ -125,6 +125,81 @@ public class BlazorApiClient(IHttpClientFactory factory, UiStateService state)
         catch { return []; }
     }
 
+    // ── Admin Console (T-S16-04) ──────────────────────────────────────────────
+    // Each method mirrors the AdminPagedResult<T> response shape and
+    // surfaces the (success | http-status + extracted error message)
+    // tuple for the mutate calls so the UI can show a snackbar.
+
+    public async Task<CimsApp.Services.Admin.AdminPagedResult<CimsApp.Services.Admin.AdminUserListItem>?> AdminListUsersAsync(string? search = null, int skip = 0, int take = 50)
+    {
+        try { var url = $"api/v1/admin/users?skip={skip}&take={take}" + (string.IsNullOrWhiteSpace(search) ? "" : $"&search={Uri.EscapeDataString(search)}"); var b = await Http().GetStringAsync(url); return Extract<CimsApp.Services.Admin.AdminPagedResult<CimsApp.Services.Admin.AdminUserListItem>>(b, "data"); }
+        catch { return null; }
+    }
+
+    public async Task<(bool Ok, string? Error)> AdminSetGlobalRoleAsync(Guid userId, CimsApp.Models.UserRole? role)
+    {
+        try { var r = await Http().PutAsJsonAsync($"api/v1/admin/users/{userId}/global-role", new CimsApp.Services.Admin.SetGlobalRoleRequest(role)); var b = await r.Content.ReadAsStringAsync(); return r.IsSuccessStatusCode ? (true, null) : (false, ExtractError(b)); }
+        catch (Exception ex) { return (false, ex.Message); }
+    }
+
+    public async Task<(bool Ok, string? Error)> AdminDeactivateUserAsync(Guid userId)
+    {
+        try { var r = await Http().PostAsync($"api/v1/users/{userId}/deactivate", null); var b = await r.Content.ReadAsStringAsync(); return r.IsSuccessStatusCode ? (true, null) : (false, ExtractError(b)); }
+        catch (Exception ex) { return (false, ex.Message); }
+    }
+
+    public async Task<(bool Ok, string? Error)> AdminRevokeUserTokensAsync(Guid userId)
+    {
+        try { var r = await Http().PostAsync($"api/v1/users/{userId}/revoke-tokens", null); var b = await r.Content.ReadAsStringAsync(); return r.IsSuccessStatusCode ? (true, null) : (false, ExtractError(b)); }
+        catch (Exception ex) { return (false, ex.Message); }
+    }
+
+    public async Task<CimsApp.Services.Admin.AdminPagedResult<CimsApp.Services.Admin.AdminOrgListItem>?> AdminListOrgsAsync(string? search = null, int skip = 0, int take = 50, bool includeInactive = false)
+    {
+        try { var url = $"api/v1/admin/organisations?skip={skip}&take={take}&includeInactive={includeInactive}" + (string.IsNullOrWhiteSpace(search) ? "" : $"&search={Uri.EscapeDataString(search)}"); var b = await Http().GetStringAsync(url); return Extract<CimsApp.Services.Admin.AdminPagedResult<CimsApp.Services.Admin.AdminOrgListItem>>(b, "data"); }
+        catch { return null; }
+    }
+
+    public async Task<(bool Ok, string? Error)> AdminUpdateOrgAsync(Guid orgId, string name, string? country)
+    {
+        try { var r = await Http().PutAsJsonAsync($"api/v1/admin/organisations/{orgId}", new CimsApp.Services.Admin.UpdateOrganisationRequest(name, country)); var b = await r.Content.ReadAsStringAsync(); return r.IsSuccessStatusCode ? (true, null) : (false, ExtractError(b)); }
+        catch (Exception ex) { return (false, ex.Message); }
+    }
+
+    public async Task<(bool Ok, string? Error)> AdminDeactivateOrgAsync(Guid orgId)
+    {
+        try { var r = await Http().PostAsync($"api/v1/admin/organisations/{orgId}/deactivate", null); var b = await r.Content.ReadAsStringAsync(); return r.IsSuccessStatusCode ? (true, null) : (false, ExtractError(b)); }
+        catch (Exception ex) { return (false, ex.Message); }
+    }
+
+    public async Task<CimsApp.Services.Admin.AdminPagedResult<CimsApp.Services.Admin.AdminInvitationListItem>?> AdminListInvitationsAsync(Guid? organisationId = null, int skip = 0, int take = 50)
+    {
+        try { var url = $"api/v1/admin/invitations?skip={skip}&take={take}" + (organisationId is { } id ? $"&organisationId={id}" : ""); var b = await Http().GetStringAsync(url); return Extract<CimsApp.Services.Admin.AdminPagedResult<CimsApp.Services.Admin.AdminInvitationListItem>>(b, "data"); }
+        catch { return null; }
+    }
+
+    public async Task<(bool Ok, string? Error)> AdminRevokeInvitationAsync(Guid invitationId)
+    {
+        try { var r = await Http().DeleteAsync($"api/v1/admin/invitations/{invitationId}"); var b = await r.Content.ReadAsStringAsync(); return r.IsSuccessStatusCode ? (true, null) : (false, ExtractError(b)); }
+        catch (Exception ex) { return (false, ex.Message); }
+    }
+
+    public async Task<CimsApp.Services.Admin.AdminPagedResult<CimsApp.Services.Admin.AdminAuditListItem>?> AdminListAuditAsync(DateTime? from = null, DateTime? to = null, string? action = null, string? entity = null, Guid? userId = null, int skip = 0, int take = 50)
+    {
+        try
+        {
+            var qs = new List<string> { $"skip={skip}", $"take={take}" };
+            if (from is { } f) qs.Add($"from={Uri.EscapeDataString(f.ToString("o"))}");
+            if (to is { } t) qs.Add($"to={Uri.EscapeDataString(t.ToString("o"))}");
+            if (!string.IsNullOrWhiteSpace(action)) qs.Add($"action={Uri.EscapeDataString(action)}");
+            if (!string.IsNullOrWhiteSpace(entity)) qs.Add($"entity={Uri.EscapeDataString(entity)}");
+            if (userId is { } u) qs.Add($"userId={u}");
+            var b = await Http().GetStringAsync($"api/v1/admin/audit?" + string.Join("&", qs));
+            return Extract<CimsApp.Services.Admin.AdminPagedResult<CimsApp.Services.Admin.AdminAuditListItem>>(b, "data");
+        }
+        catch { return null; }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
     private static T? Extract<T>(string json, string key)
     {
