@@ -203,14 +203,27 @@ public class OrganisationAdminService(CimsDbContext db, ITenantContext tenant, A
         if (string.IsNullOrWhiteSpace(req.Name))
             throw new ValidationException(["Name is required"]);
 
-        var query = tenant.IsSuperAdmin
-            ? db.Organisations.IgnoreQueryFilters()
-            : db.Organisations.AsQueryable();
+        // Organisations has NO tenant query filter (unlike Users /
+        // Invitations / AuditLogs); OrganisationsController.List
+        // filters in code at the controller layer for the same
+        // reason. Pre-scope the lookup explicitly here so the
+        // service is a closed loop: an OrgAdmin who hits another
+        // tenant's orgId gets 404 (consistent with the no-leak
+        // pattern used for User mutations per the post-S1 role-matrix
+        // audit), NOT a 403 that confirms the row exists.
+        IQueryable<Organisation> query;
+        if (tenant.IsSuperAdmin)
+        {
+            query = db.Organisations.IgnoreQueryFilters();
+        }
+        else
+        {
+            var callerOrgId = tenant.OrganisationId
+                ?? throw new ForbiddenException("No tenant context");
+            query = db.Organisations.Where(o => o.Id == callerOrgId);
+        }
         var org = await query.FirstOrDefaultAsync(o => o.Id == orgId, ct)
             ?? throw new NotFoundException("Organisation");
-
-        if (!tenant.IsSuperAdmin && org.Id != tenant.OrganisationId)
-            throw new ForbiddenException("Cannot update another organisation");
 
         org.Name = req.Name.Trim();
         org.Country = string.IsNullOrWhiteSpace(req.Country) ? null : req.Country.Trim();
