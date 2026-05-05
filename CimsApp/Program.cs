@@ -282,11 +282,25 @@ builder.Services.AddSwaggerGen(c =>
 var app = builder.Build();
 
 app.UseMiddleware<ErrorHandlingMiddleware>();
+// T-S19-02 / OWASP A05 — security response headers on every
+// response. SecurityHeadersMiddleware is registered before
+// UseHttpsRedirection so headers apply to BOTH the redirect
+// response and the redirected-to HTTPS response.
+app.UseMiddleware<CimsApp.Middleware.SecurityHeadersMiddleware>();
 
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI(c => { c.SwaggerEndpoint("/swagger/v1/swagger.json", "CIMS API v1"); c.RoutePrefix = "swagger"; });
+}
+else
+{
+    // T-S19-02 / OWASP A05 — HSTS is production-only (UseHsts
+    // skips Development by design). Default 30-day max-age is
+    // intentionally short for the v1.0 internal pilot; bump to
+    // a year + preload at v1.1 once the pilot's HTTPS posture
+    // is stable.
+    app.UseHsts();
 }
 
 app.UseHttpsRedirection();

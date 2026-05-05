@@ -137,6 +137,24 @@ public class AuthServiceInputValidationTests
                 JobTitle: null, InvitationToken: "tok")));
     }
 
+    // ── T-S19-02 / OWASP A07 — password min-length ───────────────────────────
+
+    [Fact]
+    public async Task Register_with_too_short_password_throws_400()
+    {
+        // S19 OWASP A07 fix-forward: the minimum 8-char password
+        // rule. Pin the contract so a future "remove the check"
+        // change is caught immediately. 7 chars triggers the
+        // ValidationException; 8+ would pass to the next stage
+        // (invitation lookup, which fails for "tok" — but that's
+        // a different exception class).
+        var svc = BuildService();
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            svc.RegisterAsync(new RegisterRequest(
+                Email: "a@b.com", Password: "abc1234", FirstName: "A", LastName: "B",
+                JobTitle: null, InvitationToken: "tok")));
+    }
+
     // ── B-001 / ADR-0014 revocation endpoints ────────────────────────────────
 
     private static (DbContextOptions<CimsDbContext> options, IConfiguration cfg, Guid orgA, Guid orgB, Guid userInA, Guid userInB)
