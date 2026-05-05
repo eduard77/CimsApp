@@ -5,43 +5,51 @@ non-trivial AI session so the model starts with the right scope anchor.
 
 ---
 
-**Status:** Between sprints — S16 closed 2026-05-04; **S17 not yet
+**Status:** Between sprints — S17 closed 2026-05-05; **S18 not yet
 kicked off** (scope decision pending).
 
 **Active sprint:** none.
 
-**Next sprint (S17):** scope to be picked. Per S15 retro, the two
-candidates for the F.16/F.17 default-lean were Mobile/Responsive
-Views and Admin Console. With S16 having taken the Admin Console
-option, **F.17 Mobile / Responsive Views** is the obvious next
-default-lean. Authoritative resolution still needs the PAFM-SD
-`.docx` Appendix F.17 paste (or F.17..F.19 in one go — would
-unblock the next 3-4 sprints' kickoffs at once). Until pasted,
-S17 kickoff should follow the **S15/S16 scope-spec caveat
-pattern**: surface the predicted bullets, ask the user once with
-a concrete proposal, proceed under their answer, commit to
-reconcile on first .docx paste.
+**Next sprint (S18):** scope to be picked. The S15-S16-S17
+default-lean elimination chain is exhausted (Search → Admin →
+Mobile, all closed). Without the PAFM-SD `.docx` Appendix F.18
+paste, the next default-lean cannot be predicted reliably from
+prior retros alone — the obvious-pairing pattern that worked for
+S16/S17 doesn't generalise without the spec. **Strong
+recommendation: paste F.18..F.19 before S18 kickoff** to anchor
+scope decisively. Until pasted, S18 kickoff should follow the
+S15/S16/S17 scope-spec caveat pattern (predicted bullets, ask
+once, hold to the answer) — but the prediction will be more
+speculative than prior sprints.
 
-**Last sprint:** S16 — Admin Console (PAFM-SD F.16, predicted).
-Squash-merged at `dd62441` (2026-05-04, PR #60). See
-`docs/sprint-log/s16.md` and `docs/retrospectives/s16.md`. 4 of
-4 predicted F.16 module-DoD bullets delivered at v1.0 — user /
-org / invitation admin + tenant audit viewer. Seventeenth
-consecutive single-session sprint, thirteenth consecutive sprint
-without a CR. CI caught one latent existence-leak bug in
-`OrganisationAdminService.UpdateAsync` (cross-tenant attempt
-returned 403 vs 404, confirming row existence) — fixed pre-merge.
+**Last sprint:** S17 — Mobile / Responsive Views (PAFM-SD F.17,
+predicted). Squash-merged at `bbdae7c` (2026-05-05, PR #62). See
+`docs/sprint-log/s17.md` and `docs/retrospectives/s17.md`. 4 of 5
+predicted F.17 module-DoD bullets delivered at v1.0 (responsive
+sidebar drawer + per-page table column gating + dialog FullWidth
+fix; the fifth "no desktop regression" is structurally satisfied
+but visually verified by the user post-merge). Eighteenth
+consecutive single-session sprint, fourteenth consecutive sprint
+without a CR. UI-only sprint; no service / contract changes; test
+count unchanged at 957.
 
-**Previously closed:** S15 — Search & Discovery (PAFM-SD F.15).
-Merged at `190fa87` (2026-05-03). 3 of 4 predicted F.15 module-DoD
-bullets delivered; saved-searches explicitly deferred to v1.1 /
-B-096.
+**Previously closed:**
+- S16 — Admin Console (PAFM-SD F.16, predicted). Squash-merged
+  at `dd62441` (2026-05-04, PR #60). 4 of 4 predicted F.16
+  module-DoD bullets delivered. CI caught one latent
+  existence-leak bug in `OrganisationAdminService.UpdateAsync`
+  (cross-tenant attempt returned 403 vs 404, confirming row
+  existence) — fixed pre-merge.
+- S15 — Search & Discovery (PAFM-SD F.15). Merged at `190fa87`
+  (2026-05-03). 3 of 4 predicted F.15 module-DoD bullets
+  delivered; saved-searches explicitly deferred to v1.1 / B-096.
 
 **Branch:** `master` (live work between sprints lands on short-lived
-feature branches off master, not a long-running sprint branch).
+feature branches off master, not a long-running sprint branch;
+direct pushes to master are blocked — every change goes through PR).
 
 **Tests:** 957 / 957 green (CI). Build clean (0 warnings, 0 errors).
-Backlog at B-001..B-101.
+Backlog at B-001..B-104.
 
 ---
 
@@ -87,9 +95,17 @@ explicit unblock conditions. Per-sprint scope:
   invitations / tenant audit). Closes the laptop-pickup ritual that
   previously needed PowerShell + raw SQL UPDATE for SuperAdmin
   promotion. Backlog B-099..B-101. (No version tag landed.)
+- **S17 — Mobile / Responsive Views** (PAFM F.17, predicted). UI
+  sweep: `MainLayout` MudDrawer flipped from Mini to Responsive
+  (mobile gets slide-in temporary drawer + hamburger; desktop
+  unchanged); six MudTable pages get per-column responsive hiding
+  via `d-none d-{breakpoint}-table-cell` utility classes;
+  AdminOrganisations Edit dialog FullWidth fix. No service /
+  contract changes; test count unchanged at 957. Backlog
+  B-102..B-104. (No version tag landed.)
 
 Detail: `docs/sprint-log/s<N>.md` + `docs/retrospectives/s<N>.md`
-per sprint. Git: `git log --oneline c0cfd53..dd62441`.
+per sprint. Git: `git log --oneline c0cfd53..bbdae7c`.
 
 ---
 
@@ -174,10 +190,12 @@ From S2 → S15 sprints:
 - **`master` branch protection** scheduled to land 2026-05-18 09:00 UTC
   via agent `trig_01BJG8zcU9WBEh3hbM6RRtEN` (T-S8-05 follow-up;
   verified armed at S15 kickoff).
-- **PAFM-SD F.17..F.19 .docx paste** would unblock the next 3-4
-  sprint kickoffs in one go. Standing request. (F.16 was kicked
-  off without the paste using the S15 caveat pattern; reconciliation
-  on first F.16 paste.)
+- **PAFM-SD F.18..F.19 .docx paste** would unblock the next 2
+  sprint kickoffs. **Standing request, now stronger:** the
+  S15-S16-S17 default-lean elimination chain is exhausted, so
+  the next prediction without the spec is more speculative than
+  prior sprints. (F.16 / F.17 were kicked off without the paste
+  using the S15 caveat pattern; reconciliation on first paste.)
 - **PAFM Ch 47 paste** for any future F.13 / Genera Systems REST
   integration work (B-086..B-089 unblock condition).
 - **Pre-pilot legal review** carry-forward unchanged (UK GDPR + BSA
@@ -208,6 +226,8 @@ From S2 → S15 sprints:
   - B-095..B-098 (S15 deferrals).
   - B-099..B-101 (S16 deferrals — Admin Console v2, audit viewer
     optimisation, bulk admin operations).
+  - B-102..B-104 (S17 deferrals — mobile-first UX redesign,
+    per-page card-view tables, bottom navigation).
   - All other v1.1 backlog entries — see `docs/v1.1-backlog.md`.
 
 ---
