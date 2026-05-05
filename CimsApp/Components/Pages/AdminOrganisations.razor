@@ -52,7 +52,7 @@ else
     </MudCard>
 }
 
-<MudDialog @bind-Visible="_showEdit">
+<MudDialog @bind-Visible="_showEdit" Options='new DialogOptions{MaxWidth=MaxWidth.Small,FullWidth=true}'>
     <TitleContent><MudText Typo="Typo.h6">Edit organisation</MudText></TitleContent>
     <DialogContent>
         <MudTextField @bind-Value="_editName" Label="Name" Variant="Variant.Outlined" Margin="Margin.Dense" />
