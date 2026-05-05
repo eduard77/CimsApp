@@ -1,0 +1,173 @@
+@page "/ncrs"
+@using CimsApp.Models
+@using CimsApp.Services.SiteUserWorkflows
+@inject BlazorApiClient Api
+@inject UiStateService UI
+@inject ISnackbar Snackbar
+
+<PageHeader Title="NCRs"
+            Subtitle="@(UI.CurrentProject?.Name ?? "Select a project")"
+            ButtonLabel="Raise NCR"
+            OnButton="OpenAdd"
+            ShowButton="UI.CurrentProject != null" />
+
+@if (UI.CurrentProject == null) { <NoProject /> }
+else
+{
+    <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;padding:16px;margin-bottom:16px;">
+        <MudSelect T="NcrState?" @bind-Value="_statusFilter" Label="Filter by status" Margin="Margin.Dense" Clearable="true">
+            <MudSelectItem T="NcrState?" Value="@((NcrState?)null)">— All</MudSelectItem>
+            @foreach (var s in Enum.GetValues<NcrState>())
+            { <MudSelectItem T="NcrState?" Value="@((NcrState?)s)">@s</MudSelectItem> }
+        </MudSelect>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync" Style="text-transform:none;margin-top:8px;">Apply</MudButton>
+    </MudCard>
+
+    @if (_loading) { <Loading /> }
+    else if (_page == null)
+    {
+        <EmptyState Icon="@Icons.Material.Filled.Lock" Text="Insufficient permissions or service unavailable." />
+    }
+    else if (_page.Items.Count == 0)
+    {
+        <EmptyState Icon="@Icons.Material.Filled.Warning" Text="No NCRs match the current filter." />
+    }
+    else
+    {
+        <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;">
+            <MudTable Items="_page.Items" Hover="true" Elevation="0" Dense="true">
+                <HeaderContent>
+                    <MudTh>Number</MudTh>
+                    <MudTh>Title</MudTh>
+                    <MudTh Class="d-none d-sm-table-cell">Severity</MudTh>
+                    <MudTh>Status</MudTh>
+                    <MudTh Class="d-none d-md-table-cell">Raised by</MudTh>
+                    <MudTh Class="d-none d-md-table-cell">Assigned to</MudTh>
+                    <MudTh Style="text-align:right;">Action</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd><span style="font-family:monospace;font-size:12px;font-weight:600;color:#1B4F8A;">@context.Number</span></MudTd>
+                    <MudTd>@context.Title</MudTd>
+                    <MudTd Class="d-none d-sm-table-cell">@SeverityChip(context.Severity)</MudTd>
+                    <MudTd>@StatusChip(context.Status)</MudTd>
+                    <MudTd Class="d-none d-md-table-cell">@context.RaisedByName</MudTd>
+                    <MudTd Class="d-none d-md-table-cell">@(context.AssignedToName ?? "—")</MudTd>
+                    <MudTd Style="text-align:right;">
+                        @foreach (var t in NextStates(context.Status))
+                        {
+                            var to = t;
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => DoTransition(context, to)" Style="text-transform:none;font-size:11px;margin-right:4px;">@to</MudButton>
+                        }
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+            <div style="padding:12px 16px;color:#64748B;font-size:12px;">@_page.Items.Count of @_page.Total</div>
+        </MudCard>
+    }
+}
+
+<MudDialog @bind-Visible="_showAdd" Options='new DialogOptions{MaxWidth=MaxWidth.Small,FullWidth=true}'>
+    <TitleContent><MudText Typo="Typo.h6">Raise NCR</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_addTitle" Label="Title" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudTextField @bind-Value="_addDesc" Label="Description" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="3" Class="mt-2" />
+        <MudSelect T="NcrSeverity" @bind-Value="_addSeverity" Label="Severity" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2">
+            @foreach (var s in Enum.GetValues<NcrSeverity>())
+            { <MudSelectItem T="NcrSeverity" Value="@s">@s</MudSelectItem> }
+        </MudSelect>
+        <MudTextField @bind-Value="_addLocation" Label="Location" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showAdd = false" Style="text-transform:none;">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAdd" Style="text-transform:none;">Raise</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    NcrPagedResult? _page;
+    bool _loading = true;
+    NcrState? _statusFilter;
+
+    bool _showAdd;
+    string _addTitle = "";
+    string _addDesc = "";
+    NcrSeverity _addSeverity = NcrSeverity.Medium;
+    string _addLocation = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        UI.OnChange += () => InvokeAsync(async () => { await LoadAsync(); StateHasChanged(); });
+        await LoadAsync();
+    }
+
+    async Task LoadAsync()
+    {
+        if (UI.CurrentProject == null) { _loading = false; return; }
+        _loading = true;
+        _page = await Api.ListNcrsAsync(UI.CurrentProject.Id, _statusFilter);
+        _loading = false;
+    }
+
+    void OpenAdd()
+    {
+        _addTitle = _addDesc = _addLocation = "";
+        _addSeverity = NcrSeverity.Medium;
+        _showAdd = true;
+    }
+
+    async Task SaveAdd()
+    {
+        if (UI.CurrentProject == null) return;
+        var req = new CreateNcrRequest(_addTitle, _addDesc, _addSeverity,
+            string.IsNullOrWhiteSpace(_addLocation) ? null : _addLocation, null);
+        var (ok, err, num) = await Api.CreateNcrAsync(UI.CurrentProject.Id, req);
+        if (ok) { Snackbar.Add($"NCR raised — {num}", Severity.Success); _showAdd = false; await LoadAsync(); }
+        else    { Snackbar.Add($"Cannot raise: {err}", Severity.Error); }
+    }
+
+    async Task DoTransition(NcrItem n, NcrState to)
+    {
+        if (UI.CurrentProject == null) return;
+        var (ok, err) = await Api.TransitionNcrAsync(UI.CurrentProject.Id, n.Id, to);
+        if (ok) { Snackbar.Add($"{n.Number} → {to}", Severity.Success); await LoadAsync(); }
+        else    { Snackbar.Add($"Cannot transition: {err}", Severity.Error); }
+    }
+
+    static IEnumerable<NcrState> NextStates(NcrState from) => from switch
+    {
+        // Note: Assigned transition needs a target user — the
+        // simple-transition button here only handles same-actor
+        // moves. Full assign UI is a v1.1 polish; for now the
+        // assign button is omitted from this view (use the API
+        // directly if needed).
+        NcrState.Assigned   => [NcrState.InProgress, NcrState.Cancelled],
+        NcrState.InProgress => [NcrState.Resolved],
+        NcrState.Resolved   => [NcrState.Closed],
+        _ => Array.Empty<NcrState>(),
+    };
+
+    static RenderFragment SeverityChip(NcrSeverity s) => __builder =>
+    {
+        var color = s switch
+        {
+            NcrSeverity.Critical => Color.Error,
+            NcrSeverity.High     => Color.Warning,
+            NcrSeverity.Medium   => Color.Info,
+            _                    => Color.Default,
+        };
+        <MudChip T="string" Size="Size.Small" Color="@color" Variant="Variant.Text">@s</MudChip>
+    };
+
+    static RenderFragment StatusChip(NcrState s) => __builder =>
+    {
+        var color = s switch
+        {
+            NcrState.Closed     => Color.Success,
+            NcrState.Cancelled  => Color.Default,
+            NcrState.Resolved   => Color.Info,
+            NcrState.InProgress => Color.Warning,
+            _                   => Color.Primary,
+        };
+        <MudChip T="string" Size="Size.Small" Color="@color" Variant="Variant.Text">@s</MudChip>
+    };
+}
