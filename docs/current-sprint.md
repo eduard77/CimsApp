@@ -10,17 +10,25 @@ kicked off** (scope decision pending).
 
 **Active sprint:** none.
 
-**Next sprint (S18):** scope to be picked. The S15-S16-S17
-default-lean elimination chain is exhausted (Search → Admin →
-Mobile, all closed). Without the PAFM-SD `.docx` Appendix F.18
-paste, the next default-lean cannot be predicted reliably from
-prior retros alone — the obvious-pairing pattern that worked for
-S16/S17 doesn't generalise without the spec. **Strong
-recommendation: paste F.18..F.19 before S18 kickoff** to anchor
-scope decisively. Until pasted, S18 kickoff should follow the
-S15/S16/S17 scope-spec caveat pattern (predicted bullets, ask
-once, hold to the answer) — but the prediction will be more
-speculative than prior sprints.
+**Next sprint (S18):** **F.17 — Audit & Compliance Support** per
+PAFM Appendix F.17 (read end-to-end on 2026-05-05; reconciliation
+at `docs/scope-reconciliation-2026-05-05.md`). Three bullets:
+Evidence library (organised artefact collection per compliance
+area), External Auditor role (time-limited, scope-limited read
+access), Audit export (PDF or ZIP bundle). **Scope-spec caveat
+pattern is no longer needed — the .docx is now read.**
+
+**Important — F-section / sprint-number offset:** PAFM maps
+**`F.N = S(N-1)`** end-to-end (drift originated at our S8 = "CI
+Hardening", which is not in the PAFM roadmap; another off-roadmap
+insertion at S15 = Search & Discovery). Our S16 / S17 kickoffs
+labelled themselves F.16 / F.17 which was wrong — they shipped
+PAFM F.15 (Admin Console) and F.16 (Mobile Views) respectively.
+The S15 retro's "default-lean elimination" prediction got the
+*content* right both times (Admin then Mobile) but not the
+*labelling*. Going forward, our S18 = PAFM F.17, S19 = PAFM F.18,
+S20 = PAFM F.19, S21 = PAFM F.20 (UAT & Release — the v1.0 ship
+gate).
 
 **Last sprint:** S17 — Mobile / Responsive Views (PAFM-SD F.17,
 predicted). Squash-merged at `bbdae7c` (2026-05-05, PR #62). See
@@ -190,12 +198,11 @@ From S2 → S15 sprints:
 - **`master` branch protection** scheduled to land 2026-05-18 09:00 UTC
   via agent `trig_01BJG8zcU9WBEh3hbM6RRtEN` (T-S8-05 follow-up;
   verified armed at S15 kickoff).
-- **PAFM-SD F.18..F.19 .docx paste** would unblock the next 2
-  sprint kickoffs. **Standing request, now stronger:** the
-  S15-S16-S17 default-lean elimination chain is exhausted, so
-  the next prediction without the spec is more speculative than
-  prior sprints. (F.16 / F.17 were kicked off without the paste
-  using the S15 caveat pattern; reconciliation on first paste.)
+- ~~**PAFM-SD F.18..F.19 .docx paste**~~ **CLOSED 2026-05-05.** The
+  PAFM-SD `.docx` was read end-to-end. Reconciliation findings at
+  `docs/scope-reconciliation-2026-05-05.md`; B-105..B-108
+  promoted from PAFM gaps. F-section / sprint-number offset
+  documented (`F.N = S(N-1)`).
 - **PAFM Ch 47 paste** for any future F.13 / Genera Systems REST
   integration work (B-086..B-089 unblock condition).
 - **Pre-pilot legal review** carry-forward unchanged (UK GDPR + BSA
@@ -228,6 +235,8 @@ From S2 → S15 sprints:
     optimisation, bulk admin operations).
   - B-102..B-104 (S17 deferrals — mobile-first UX redesign,
     per-page card-view tables, bottom navigation).
+  - B-105..B-108 (PAFM F.15 / F.16 reconciliation gaps —
+    template library, subscription view, Daily Diary, NCR raising).
   - All other v1.1 backlog entries — see `docs/v1.1-backlog.md`.
 
 ---
