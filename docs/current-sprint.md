@@ -5,43 +5,72 @@ non-trivial AI session so the model starts with the right scope anchor.
 
 ---
 
-**Status:** Between sprints — S16 closed 2026-05-04; **S17 not yet
+**Status:** Between sprints — S17 closed 2026-05-05; **S18 not yet
 kicked off** (scope decision pending).
 
 **Active sprint:** none.
 
-**Next sprint (S17):** scope to be picked. Per S15 retro, the two
-candidates for the F.16/F.17 default-lean were Mobile/Responsive
-Views and Admin Console. With S16 having taken the Admin Console
-option, **F.17 Mobile / Responsive Views** is the obvious next
-default-lean. Authoritative resolution still needs the PAFM-SD
-`.docx` Appendix F.17 paste (or F.17..F.19 in one go — would
-unblock the next 3-4 sprints' kickoffs at once). Until pasted,
-S17 kickoff should follow the **S15/S16 scope-spec caveat
-pattern**: surface the predicted bullets, ask the user once with
-a concrete proposal, proceed under their answer, commit to
-reconcile on first .docx paste.
+**Next sprint (S18):** **F.17 — Audit & Compliance Support** per
+PAFM Appendix F.17 (read end-to-end on 2026-05-05; reconciliation
+at `docs/scope-reconciliation-2026-05-05.md`). Three bullets:
+Evidence library (organised artefact collection per compliance
+area), External Auditor role (time-limited, scope-limited read
+access), Audit export (PDF or ZIP bundle). **Scope-spec caveat
+pattern is no longer needed — the .docx is now read.**
 
-**Last sprint:** S16 — Admin Console (PAFM-SD F.16, predicted).
-Squash-merged at `dd62441` (2026-05-04, PR #60). See
-`docs/sprint-log/s16.md` and `docs/retrospectives/s16.md`. 4 of
-4 predicted F.16 module-DoD bullets delivered at v1.0 — user /
-org / invitation admin + tenant audit viewer. Seventeenth
-consecutive single-session sprint, thirteenth consecutive sprint
-without a CR. CI caught one latent existence-leak bug in
-`OrganisationAdminService.UpdateAsync` (cross-tenant attempt
-returned 403 vs 404, confirming row existence) — fixed pre-merge.
+**Important — F-section / sprint-number offset:** PAFM maps
+**`F.N = S(N-1)`** end-to-end (drift originated at our S8 = "CI
+Hardening", which is not in the PAFM roadmap; another off-roadmap
+insertion at S15 = Search & Discovery). Our S16 / S17 kickoffs
+labelled themselves F.16 / F.17 which was wrong — they shipped
+PAFM F.15 (Admin Console) and F.16 (Mobile Views) respectively.
 
-**Previously closed:** S15 — Search & Discovery (PAFM-SD F.15).
-Merged at `190fa87` (2026-05-03). 3 of 4 predicted F.15 module-DoD
-bullets delivered; saved-searches explicitly deferred to v1.1 /
-B-096.
+**Confirmed v1.0 sprint roadmap (post-reconciliation, 2026-05-05):**
+
+| Sprint | Scope | Source |
+|---|---|---|
+| **S18 (next)** | Audit & Compliance Support | PAFM F.17 |
+| S19 | Security & Performance | PAFM F.18 |
+| **S20 (NEW)** | Site-User Mobile Workflows (Daily Diary + NCR raising) | B-107 / B-108 (promoted from v1.1 to v1.0 per 2026-05-05 product-owner call) |
+| S21 | Documentation & Training | PAFM F.19 |
+| S22 | UAT & Release | PAFM F.20 — v1.0 ship gate |
+
+S20 inserts a third off-roadmap sprint to close two real PAFM F.16
+product gaps that the original Mobile Views sprint (our S17, scoped
+as a responsive sweep) couldn't address — Daily Diary and NCR-raising
+flows don't yet exist as v1.0 product features. Slotting between
+F.18 Security and F.19 Documentation rather than before F.17 trades
+"Evidence library covers them" against "minimal disruption to
+already-pinned S18".
+
+**Last sprint:** S17 — Mobile / Responsive Views (PAFM-SD F.17,
+predicted). Squash-merged at `bbdae7c` (2026-05-05, PR #62). See
+`docs/sprint-log/s17.md` and `docs/retrospectives/s17.md`. 4 of 5
+predicted F.17 module-DoD bullets delivered at v1.0 (responsive
+sidebar drawer + per-page table column gating + dialog FullWidth
+fix; the fifth "no desktop regression" is structurally satisfied
+but visually verified by the user post-merge). Eighteenth
+consecutive single-session sprint, fourteenth consecutive sprint
+without a CR. UI-only sprint; no service / contract changes; test
+count unchanged at 957.
+
+**Previously closed:**
+- S16 — Admin Console (PAFM-SD F.16, predicted). Squash-merged
+  at `dd62441` (2026-05-04, PR #60). 4 of 4 predicted F.16
+  module-DoD bullets delivered. CI caught one latent
+  existence-leak bug in `OrganisationAdminService.UpdateAsync`
+  (cross-tenant attempt returned 403 vs 404, confirming row
+  existence) — fixed pre-merge.
+- S15 — Search & Discovery (PAFM-SD F.15). Merged at `190fa87`
+  (2026-05-03). 3 of 4 predicted F.15 module-DoD bullets
+  delivered; saved-searches explicitly deferred to v1.1 / B-096.
 
 **Branch:** `master` (live work between sprints lands on short-lived
-feature branches off master, not a long-running sprint branch).
+feature branches off master, not a long-running sprint branch;
+direct pushes to master are blocked — every change goes through PR).
 
 **Tests:** 957 / 957 green (CI). Build clean (0 warnings, 0 errors).
-Backlog at B-001..B-101.
+Backlog at B-001..B-104.
 
 ---
 
@@ -87,9 +116,17 @@ explicit unblock conditions. Per-sprint scope:
   invitations / tenant audit). Closes the laptop-pickup ritual that
   previously needed PowerShell + raw SQL UPDATE for SuperAdmin
   promotion. Backlog B-099..B-101. (No version tag landed.)
+- **S17 — Mobile / Responsive Views** (PAFM F.17, predicted). UI
+  sweep: `MainLayout` MudDrawer flipped from Mini to Responsive
+  (mobile gets slide-in temporary drawer + hamburger; desktop
+  unchanged); six MudTable pages get per-column responsive hiding
+  via `d-none d-{breakpoint}-table-cell` utility classes;
+  AdminOrganisations Edit dialog FullWidth fix. No service /
+  contract changes; test count unchanged at 957. Backlog
+  B-102..B-104. (No version tag landed.)
 
 Detail: `docs/sprint-log/s<N>.md` + `docs/retrospectives/s<N>.md`
-per sprint. Git: `git log --oneline c0cfd53..dd62441`.
+per sprint. Git: `git log --oneline c0cfd53..bbdae7c`.
 
 ---
 
@@ -174,10 +211,11 @@ From S2 → S15 sprints:
 - **`master` branch protection** scheduled to land 2026-05-18 09:00 UTC
   via agent `trig_01BJG8zcU9WBEh3hbM6RRtEN` (T-S8-05 follow-up;
   verified armed at S15 kickoff).
-- **PAFM-SD F.17..F.19 .docx paste** would unblock the next 3-4
-  sprint kickoffs in one go. Standing request. (F.16 was kicked
-  off without the paste using the S15 caveat pattern; reconciliation
-  on first F.16 paste.)
+- ~~**PAFM-SD F.18..F.19 .docx paste**~~ **CLOSED 2026-05-05.** The
+  PAFM-SD `.docx` was read end-to-end. Reconciliation findings at
+  `docs/scope-reconciliation-2026-05-05.md`; B-105..B-108
+  promoted from PAFM gaps. F-section / sprint-number offset
+  documented (`F.N = S(N-1)`).
 - **PAFM Ch 47 paste** for any future F.13 / Genera Systems REST
   integration work (B-086..B-089 unblock condition).
 - **Pre-pilot legal review** carry-forward unchanged (UK GDPR + BSA
@@ -208,6 +246,10 @@ From S2 → S15 sprints:
   - B-095..B-098 (S15 deferrals).
   - B-099..B-101 (S16 deferrals — Admin Console v2, audit viewer
     optimisation, bulk admin operations).
+  - B-102..B-104 (S17 deferrals — mobile-first UX redesign,
+    per-page card-view tables, bottom navigation).
+  - B-105..B-108 (PAFM F.15 / F.16 reconciliation gaps —
+    template library, subscription view, Daily Diary, NCR raising).
   - All other v1.1 backlog entries — see `docs/v1.1-backlog.md`.
 
 ---
