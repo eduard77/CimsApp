@@ -21,22 +21,22 @@ else
             <HeaderContent>
                 <MudTh>Organisation</MudTh>
                 <MudTh>Email bind</MudTh>
-                <MudTh>Type</MudTh>
-                <MudTh>Created</MudTh>
-                <MudTh>Created by</MudTh>
-                <MudTh>Expires</MudTh>
+                <MudTh Class="d-none d-sm-table-cell">Type</MudTh>
+                <MudTh Class="d-none d-md-table-cell">Created</MudTh>
+                <MudTh Class="d-none d-md-table-cell">Created by</MudTh>
+                <MudTh Class="d-none d-sm-table-cell">Expires</MudTh>
                 <MudTh Style="text-align:right;">Actions</MudTh>
             </HeaderContent>
             <RowTemplate>
                 <MudTd>@context.OrganisationName</MudTd>
                 <MudTd>@(context.Email ?? "—")</MudTd>
-                <MudTd>
+                <MudTd Class="d-none d-sm-table-cell">
                     @if (context.IsBootstrap) { <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">bootstrap</MudChip> }
                     else { <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Text">standard</MudChip> }
                 </MudTd>
-                <MudTd><span style="font-size:12px;color:#64748B;white-space:nowrap;">@context.CreatedAt.ToString("dd MMM HH:mm")</span></MudTd>
-                <MudTd>@(context.CreatedByName ?? "(anonymous)")</MudTd>
-                <MudTd><span style="font-size:12px;color:#64748B;white-space:nowrap;">@context.ExpiresAt.ToString("dd MMM HH:mm")</span></MudTd>
+                <MudTd Class="d-none d-md-table-cell"><span style="font-size:12px;color:#64748B;white-space:nowrap;">@context.CreatedAt.ToString("dd MMM HH:mm")</span></MudTd>
+                <MudTd Class="d-none d-md-table-cell">@(context.CreatedByName ?? "(anonymous)")</MudTd>
+                <MudTd Class="d-none d-sm-table-cell"><span style="font-size:12px;color:#64748B;white-space:nowrap;">@context.ExpiresAt.ToString("dd MMM HH:mm")</span></MudTd>
                 <MudTd Style="text-align:right;">
                     <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" OnClick="() => Revoke(context)" Style="text-transform:none;">Revoke</MudButton>
                 </MudTd>

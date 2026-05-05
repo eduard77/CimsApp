@@ -42,19 +42,19 @@ else
         <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;">
             <MudTable Items="_shown" Hover="true" Elevation="0" Dense="true">
                 <HeaderContent>
-                    <MudTh Style="@Th()">Document Number</MudTh>
+                    <MudTh Class="d-none d-sm-table-cell" Style="@Th()">Document Number</MudTh>
                     <MudTh Style="@Th()">Title</MudTh>
-                    <MudTh Style="@Th()">Type</MudTh>
+                    <MudTh Class="d-none d-md-table-cell" Style="@Th()">Type</MudTh>
                     <MudTh Style="@Th()">State</MudTh>
-                    <MudTh Style="@Th()">Rev</MudTh>
+                    <MudTh Class="d-none d-md-table-cell" Style="@Th()">Rev</MudTh>
                     <MudTh Style="@Th()">Transition</MudTh>
                 </HeaderContent>
                 <RowTemplate>
-                    <MudTd Style="padding:14px 16px;"><span style="font-family:monospace;font-size:12px;font-weight:600;color:#1B4F8A;">@context.DocumentNumber</span></MudTd>
+                    <MudTd Class="d-none d-sm-table-cell" Style="padding:14px 16px;"><span style="font-family:monospace;font-size:12px;font-weight:600;color:#1B4F8A;">@context.DocumentNumber</span></MudTd>
                     <MudTd><div style="font-size:13px;font-weight:500;color:#1A1F2E;">@context.Title</div></MudTd>
-                    <MudTd><span style="font-size:12px;color:#64748B;">@context.Type</span></MudTd>
+                    <MudTd Class="d-none d-md-table-cell"><span style="font-size:12px;color:#64748B;">@context.Type</span></MudTd>
                     <MudTd><StatusBadge Status="@context.CurrentState.ToString()" /></MudTd>
-                    <MudTd>
+                    <MudTd Class="d-none d-md-table-cell">
                         @{ var rev = context.Revisions?.FirstOrDefault(r => r.IsLatest); }
                         @if (rev != null) { <span style="font-family:monospace;font-size:12px;background:#F8FAFC;padding:2px 8px;border-radius:4px;border:1px solid #E2E8F0;">@rev.Revision</span> }
                     </MudTd>
