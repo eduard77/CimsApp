@@ -24,11 +24,24 @@ Hardening", which is not in the PAFM roadmap; another off-roadmap
 insertion at S15 = Search & Discovery). Our S16 / S17 kickoffs
 labelled themselves F.16 / F.17 which was wrong — they shipped
 PAFM F.15 (Admin Console) and F.16 (Mobile Views) respectively.
-The S15 retro's "default-lean elimination" prediction got the
-*content* right both times (Admin then Mobile) but not the
-*labelling*. Going forward, our S18 = PAFM F.17, S19 = PAFM F.18,
-S20 = PAFM F.19, S21 = PAFM F.20 (UAT & Release — the v1.0 ship
-gate).
+
+**Confirmed v1.0 sprint roadmap (post-reconciliation, 2026-05-05):**
+
+| Sprint | Scope | Source |
+|---|---|---|
+| **S18 (next)** | Audit & Compliance Support | PAFM F.17 |
+| S19 | Security & Performance | PAFM F.18 |
+| **S20 (NEW)** | Site-User Mobile Workflows (Daily Diary + NCR raising) | B-107 / B-108 (promoted from v1.1 to v1.0 per 2026-05-05 product-owner call) |
+| S21 | Documentation & Training | PAFM F.19 |
+| S22 | UAT & Release | PAFM F.20 — v1.0 ship gate |
+
+S20 inserts a third off-roadmap sprint to close two real PAFM F.16
+product gaps that the original Mobile Views sprint (our S17, scoped
+as a responsive sweep) couldn't address — Daily Diary and NCR-raising
+flows don't yet exist as v1.0 product features. Slotting between
+F.18 Security and F.19 Documentation rather than before F.17 trades
+"Evidence library covers them" against "minimal disruption to
+already-pinned S18".
 
 **Last sprint:** S17 — Mobile / Responsive Views (PAFM-SD F.17,
 predicted). Squash-merged at `bbdae7c` (2026-05-05, PR #62). See

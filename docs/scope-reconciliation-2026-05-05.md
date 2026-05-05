@@ -266,12 +266,19 @@ schedule the external dependencies. **No backlog change.**
 
 ## Open questions for the user
 
-- **B-107 / B-108 priority:** Daily Diary and NCR-raising were
-  flagged in PAFM F.16 (Mobile Views) bullets but neither exists
-  as v1.0 product scope. Are these **product gaps** that should
-  promote into S20+ work, or **PAFM aspirations** that v1.0
-  consciously doesn't attempt? Either is defensible; the answer
-  shapes whether B-107/B-108 stay deferred or get scheduled.
+- ~~**B-107 / B-108 priority:**~~ **RESOLVED 2026-05-05.** Product
+  owner confirmed both as v1.0 product gaps to schedule, not
+  v1.1 aspirations. Both promoted from v1.1 backlog to **v1.0 /
+  S20 — Site-User Mobile Workflows** (paired sprint). Slot is
+  between S19 (F.18 Security & Performance) and S21 (F.19
+  Documentation & Training). Backlog entries B-107 / B-108
+  updated with `Status (2026-05-05): PROMOTED` markers; the
+  v1.0 sprint roadmap in `docs/current-sprint.md` reflects the
+  insertion. Trade-off accepted: F.17 Audit & Compliance
+  Support's Evidence library will not have Daily Diary / NCR
+  rows to draw from at v1.0 ship; the Evidence library shape
+  generalises so adding those evidence types in S20 is an
+  additive change, not a rework of S18.
 - **F.13 reconciliation (Genera Systems QA / HSE Integration):**
   not part of this session's "do all three" scope, but worth
   flagging — our S13 shipped Inspection & Activities under the
