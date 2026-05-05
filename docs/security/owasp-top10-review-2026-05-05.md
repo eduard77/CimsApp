@@ -205,8 +205,8 @@ the login attempt tracker (S0 / B-002) and the alert evaluator
 build + tests; the upgrade path is straightforward but adding to
 this commit risks dependency conflicts.
 
-(Update at sprint-close-time: see B-115 / B-116 in v1.1-backlog +
-the carry-forward in `docs/sprint-log/s19.md`.)
+(Update at sprint-close-time: see B-115 in v1.1-backlog + the
+carry-forward in `docs/sprint-log/s19.md`.)
 
 **Sign-off: PARTIAL** (with B-115 tracking).
 
