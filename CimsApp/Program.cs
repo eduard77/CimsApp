@@ -265,6 +265,12 @@ builder.Services.AddScoped<CimsApp.Services.Compliance.EvidenceLibraryService>()
 builder.Services.AddScoped<CimsApp.Services.Compliance.AuditorAdminService>();
 builder.Services.AddScoped<CimsApp.Services.Compliance.AuditExportService>();
 
+// T-S20-02/03 Site-user mobile workflow services. DailyDiary +
+// NCR raising. Both project-scoped via the standard
+// Project.AppointingPartyId query filter.
+builder.Services.AddScoped<CimsApp.Services.SiteUserWorkflows.DailyDiaryService>();
+builder.Services.AddScoped<CimsApp.Services.SiteUserWorkflows.NcrService>();
+
 // ── Blazor UI Services ────────────────────────────────────────────────────────
 builder.Services.AddScoped<UiStateService>();
 builder.Services.AddScoped<BlazorApiClient>();
