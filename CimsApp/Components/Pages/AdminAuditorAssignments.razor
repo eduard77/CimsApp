@@ -1,0 +1,131 @@
+@page "/admin/auditor-assignments"
+@using CimsApp.Models
+@using CimsApp.Services.Compliance
+@inject BlazorApiClient Api
+@inject ISnackbar Snackbar
+
+<PageHeader Title="External Auditor Assignments"
+            Subtitle="Time-limited, scope-limited read access (PAFM F.17)"
+            ButtonLabel="New assignment"
+            OnButton="OpenCreate"
+            ShowButton="true" />
+
+<MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;padding:16px;margin-bottom:16px;">
+    <MudSwitch T="bool" @bind-Value="_includeRevoked" Label="Include revoked" Color="Color.Primary" />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync" Style="text-transform:none;margin-left:12px;">Apply</MudButton>
+</MudCard>
+
+@if (_loading) { <Loading /> }
+else if (_page == null)
+{
+    <EmptyState Icon="@Icons.Material.Filled.Lock" Text="Insufficient permissions or service unavailable." />
+}
+else if (_page.Items.Count == 0)
+{
+    <EmptyState Icon="@Icons.Material.Filled.PersonOff" Text="No auditor assignments." />
+}
+else
+{
+    <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;">
+        <MudTable Items="_page.Items" Hover="true" Elevation="0" Dense="true">
+            <HeaderContent>
+                <MudTh>Auditor</MudTh>
+                <MudTh>Project</MudTh>
+                <MudTh Class="d-none d-sm-table-cell">Scope</MudTh>
+                <MudTh Class="d-none d-sm-table-cell">Expires</MudTh>
+                <MudTh Class="d-none d-md-table-cell">Created</MudTh>
+                <MudTh>Status</MudTh>
+                <MudTh Style="text-align:right;">Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd><div style="font-size:13px;">@context.UserName<br/><span style="font-size:11px;color:#94A3B8;">@context.UserEmail</span></div></MudTd>
+                <MudTd><span style="font-family:monospace;font-size:12px;">@context.ProjectCode</span></MudTd>
+                <MudTd Class="d-none d-sm-table-cell"><span style="font-size:11px;font-family:monospace;color:#64748B;">@context.ScopeAreas</span></MudTd>
+                <MudTd Class="d-none d-sm-table-cell"><span style="font-size:12px;color:#64748B;white-space:nowrap;">@context.ExpiresAt.ToString("dd MMM HH:mm")</span></MudTd>
+                <MudTd Class="d-none d-md-table-cell"><span style="font-size:12px;color:#64748B;white-space:nowrap;">@context.CreatedAt.ToString("dd MMM HH:mm")</span></MudTd>
+                <MudTd>@StatusChip(context)</MudTd>
+                <MudTd Style="text-align:right;">
+                    @if (!context.IsRevoked && context.ExpiresAt > DateTime.UtcNow)
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" OnClick="() => Revoke(context)" Style="text-transform:none;">Revoke</MudButton>
+                    }
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+        <div style="padding:12px 16px;color:#64748B;font-size:12px;">@_page.Items.Count of @_page.Total</div>
+    </MudCard>
+}
+
+<MudDialog @bind-Visible="_showCreate" Options='new DialogOptions{MaxWidth=MaxWidth.Small,FullWidth=true}'>
+    <TitleContent><MudText Typo="Typo.h6">New auditor assignment</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_userId" Label="User id" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudTextField @bind-Value="_projectId" Label="Project id" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" />
+        <MudDatePicker @bind-Date="_expiresAt" Label="Expires" Margin="Margin.Dense" Class="mt-2" />
+        <MudSelect T="ComplianceAreaScope" @bind-Value="_scope" Label="Scope" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2">
+            @foreach (var s in new[] { ComplianceAreaScope.All, ComplianceAreaScope.UkGdpr, ComplianceAreaScope.Bsa2022, ComplianceAreaScope.Iso19650, ComplianceAreaScope.Nec4, ComplianceAreaScope.QualityHse })
+            { <MudSelectItem T="ComplianceAreaScope" Value="@s">@s</MudSelectItem> }
+        </MudSelect>
+        <p style="color:#94A3B8;font-size:11px;margin-top:8px;">Target user must already exist (admin invites them via standard /admin/invitations first). Creating an assignment flips the user's role to ExternalAuditor (unless they're already OrgAdmin / SuperAdmin) and bumps their token cutoff.</p>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showCreate = false" Style="text-transform:none;">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveCreate" Style="text-transform:none;">Create</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    AuditorAssignmentPagedResult? _page;
+    bool _loading = true;
+    bool _includeRevoked;
+
+    bool _showCreate;
+    string _userId = "";
+    string _projectId = "";
+    DateTime? _expiresAt = DateTime.UtcNow.AddDays(30);
+    ComplianceAreaScope _scope = ComplianceAreaScope.All;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    async Task LoadAsync()
+    {
+        _loading = true;
+        _page = await Api.ListAuditorAssignmentsAsync(includeRevoked: _includeRevoked);
+        _loading = false;
+    }
+
+    void OpenCreate()
+    {
+        _userId = _projectId = "";
+        _expiresAt = DateTime.UtcNow.AddDays(30);
+        _scope = ComplianceAreaScope.All;
+        _showCreate = true;
+    }
+
+    async Task SaveCreate()
+    {
+        if (!Guid.TryParse(_userId, out var uid) || !Guid.TryParse(_projectId, out var pid) || _expiresAt is null)
+        { Snackbar.Add("User id, project id, and expiry are required", Severity.Warning); return; }
+        var req = new CreateAuditorAssignmentRequest(uid, pid, _scope, _expiresAt.Value);
+        var (ok, err) = await Api.CreateAuditorAssignmentAsync(req);
+        if (ok) { Snackbar.Add("Assignment created", Severity.Success); _showCreate = false; await LoadAsync(); }
+        else    { Snackbar.Add($"Cannot create: {err}", Severity.Error); }
+    }
+
+    async Task Revoke(AuditorAssignmentItem a)
+    {
+        var (ok, err) = await Api.RevokeAuditorAssignmentAsync(a.Id);
+        if (ok) { Snackbar.Add($"Revoked assignment for {a.UserEmail}", Severity.Success); await LoadAsync(); }
+        else    { Snackbar.Add($"Cannot revoke: {err}", Severity.Error); }
+    }
+
+    static RenderFragment StatusChip(AuditorAssignmentItem a) => __builder =>
+    {
+        if (a.IsRevoked)
+        { <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Text">revoked</MudChip> }
+        else if (a.ExpiresAt <= DateTime.UtcNow)
+        { <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Text">expired</MudChip> }
+        else
+        { <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">active</MudChip> }
+    };
+}

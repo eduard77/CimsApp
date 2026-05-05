@@ -78,15 +78,18 @@ else
                 <SideNavItem Href="/rfis"      Icon="@Icons.Material.Filled.QuestionAnswer" Label="RFIs" />
                 <SideNavItem Href="/actions"   Icon="@Icons.Material.Filled.CheckCircle" Label="Actions" />
                 <SideNavItem Href="/audit"     Icon="@Icons.Material.Filled.History"     Label="Audit Trail" />
+                @* T-S18 evidence library entry — project-scoped page. *@
+                <SideNavItem Href="/evidence"  Icon="@Icons.Material.Filled.FactCheck"   Label="Evidence" />
                 @* T-S16-04 admin entries — always shown, gated server-side
                    by [Authorize(Roles="OrgAdmin,SuperAdmin")] on each
                    /admin/* controller. Regular users hitting these pages
                    see an "Insufficient permissions" empty state. *@
                 <NavLabel>Admin</NavLabel>
-                <SideNavItem Href="/admin/users"          Icon="@Icons.Material.Filled.People"           Label="Users" />
-                <SideNavItem Href="/admin/organisations"  Icon="@Icons.Material.Filled.Business"         Label="Organisations" />
-                <SideNavItem Href="/admin/invitations"    Icon="@Icons.Material.Filled.MailOutline"      Label="Invitations" />
-                <SideNavItem Href="/admin/audit"          Icon="@Icons.Material.Filled.ManageSearch"     Label="Audit (org)" />
+                <SideNavItem Href="/admin/users"               Icon="@Icons.Material.Filled.People"           Label="Users" />
+                <SideNavItem Href="/admin/organisations"       Icon="@Icons.Material.Filled.Business"         Label="Organisations" />
+                <SideNavItem Href="/admin/invitations"         Icon="@Icons.Material.Filled.MailOutline"      Label="Invitations" />
+                <SideNavItem Href="/admin/audit"               Icon="@Icons.Material.Filled.ManageSearch"     Label="Audit (org)" />
+                <SideNavItem Href="/admin/auditor-assignments" Icon="@Icons.Material.Filled.VerifiedUser"     Label="Auditors" />
             </div>
 
             <!-- Logout -->
