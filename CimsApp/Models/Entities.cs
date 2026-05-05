@@ -2510,3 +2510,109 @@ public class AlertRule
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// Evidence library row (T-S18-02, PAFM-SD F.17 first bullet —
+/// "Evidence library — organised artefact collection per compliance
+/// area"). Discriminated-link entity: each row references exactly
+/// one of Document / RFI / AuditLog / InspectionActivity (one
+/// nullable FK populated, the rest null) plus a freeform
+/// Description for non-entity-backed evidence (e.g. a meeting
+/// minute reference, a regulatory letter scan stored elsewhere).
+/// Project-scoped via ProjectId; tenant-scoped indirectly through
+/// Project's AppointingPartyId query filter. Source-of-truth stays
+/// single — the audit-twin atomicity (PR #33) handles
+/// source-mutation history. Audit export (T-S18-04) reads the
+/// referenced entity at export time and includes the as-of-export
+/// snapshot in the bundle.
+/// </summary>
+public class EvidenceArtefact
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public ComplianceArea ComplianceArea { get; set; }
+
+    /// <summary>Exactly one of these four FKs is populated per
+    /// row; the rest are null. Validated at service-layer add time
+    /// to prevent zero-FK rows (description-only requires the
+    /// caller to set Description and leave all FKs null —
+    /// covered by the IsBareDescription helper below).</summary>
+    public Guid? DocumentId { get; set; }
+    public Document? Document { get; set; }
+
+    public Guid? RfiId { get; set; }
+    public Rfi? Rfi { get; set; }
+
+    public Guid? AuditLogId { get; set; }
+    public AuditLog? AuditLog { get; set; }
+
+    public Guid? InspectionActivityId { get; set; }
+    public InspectionActivity? InspectionActivity { get; set; }
+
+    /// <summary>Optional caller-supplied description. Required when
+    /// no entity FK is set (bare-description evidence row); optional
+    /// when an entity FK is set (acts as caller's note about why
+    /// this artefact was added).</summary>
+    [MaxLength(2000)]
+    public string? Description { get; set; }
+
+    public Guid AddedById { get; set; }
+    public User AddedBy { get; set; } = null!;
+
+    public DateTime AddedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>True when the row is a description-only artefact
+    /// (e.g. external regulatory letter referenced by URL or
+    /// physical-archive reference). Service-layer check; not a
+    /// stored column.</summary>
+    public bool IsBareDescription =>
+        DocumentId == null && RfiId == null
+        && AuditLogId == null && InspectionActivityId == null;
+}
+
+/// <summary>
+/// External auditor project assignment (T-S18-03, PAFM-SD F.17
+/// second bullet — "External Auditor role — time-limited,
+/// scope-limited read access"). Created when an
+/// ExternalAuditor-role User is granted access to a specific
+/// Project. ScopeAreas restricts the auditor to a subset of
+/// ComplianceArea values; set to ComplianceAreaScope.All for
+/// full-scope assignments. ExpiresAt drives the time-limit; on
+/// expiry the standard
+/// <see cref="CimsApp.Services.Auth.TokenRevocation.IsRevoked"/>
+/// machinery (cutoff bump + refresh sweep, ADR-0014) denies
+/// further access. Project-scoped read filter override at
+/// CimsDbContext checks for active assignment when the caller
+/// is an ExternalAuditor; mutation rejection enforced at every
+/// controller via the standard role gate.
+/// </summary>
+public class AuditorProjectAssignment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid UserId { get; set; }
+    public User User { get; set; } = null!;
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public ComplianceAreaScope ScopeAreas { get; set; } = ComplianceAreaScope.All;
+
+    public DateTime ExpiresAt { get; set; }
+
+    public Guid CreatedById { get; set; }
+    public User CreatedBy { get; set; } = null!;
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public bool IsRevoked { get; set; } = false;
+    public DateTime? RevokedAt { get; set; }
+
+    /// <summary>True when the assignment is currently usable for
+    /// access — not revoked AND not expired. Service-layer check;
+    /// not a stored column.</summary>
+    public bool IsActive => !IsRevoked && ExpiresAt > DateTime.UtcNow;
+}
+

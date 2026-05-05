@@ -81,6 +81,8 @@ public class CimsDbContext(
     public DbSet<OpportunityToImprove> OpportunitiesToImprove => Set<OpportunityToImprove>();
     public DbSet<InspectionActivity>  InspectionActivities  => Set<InspectionActivity>();
     public DbSet<AlertRule>           AlertRules            => Set<AlertRule>();
+    public DbSet<EvidenceArtefact>    EvidenceArtefacts    => Set<EvidenceArtefact>();
+    public DbSet<AuditorProjectAssignment> AuditorProjectAssignments => Set<AuditorProjectAssignment>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -762,6 +764,41 @@ public class CimsDbContext(
              .HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.NoAction);
         });
 
+        m.Entity<EvidenceArtefact>(e =>
+        {
+            e.HasIndex(x => new { x.ProjectId, x.ComplianceArea, x.AddedAt });
+            e.HasOne(x => x.Project).WithMany()
+             .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.Document).WithMany()
+             .HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.Rfi).WithMany()
+             .HasForeignKey(x => x.RfiId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.AuditLog).WithMany()
+             .HasForeignKey(x => x.AuditLogId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.InspectionActivity).WithMany()
+             .HasForeignKey(x => x.InspectionActivityId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.AddedBy).WithMany()
+             .HasForeignKey(x => x.AddedById).OnDelete(DeleteBehavior.NoAction);
+            e.Ignore(x => x.IsBareDescription);
+        });
+
+        m.Entity<AuditorProjectAssignment>(e =>
+        {
+            // (UserId, ProjectId) is the natural key for an active
+            // assignment; soft-revoke (IsRevoked + RevokedAt) means
+            // a fresh assignment for the same pair is permitted as
+            // long as the prior is not active.
+            e.HasIndex(x => new { x.UserId, x.ProjectId, x.IsRevoked });
+            e.HasIndex(x => new { x.ProjectId, x.ExpiresAt });
+            e.HasOne(x => x.User).WithMany()
+             .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.Project).WithMany()
+             .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.CreatedBy).WithMany()
+             .HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.NoAction);
+            e.Ignore(x => x.IsActive);
+        });
+
         m.Entity<GatewayPackage>(e =>
         {
             // (ProjectId, Type, Number) unique-when-active gives
@@ -928,6 +965,17 @@ public class CimsDbContext(
         m.Entity<InspectionActivity>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
         // S14 Alerts: project-scoped threshold rule.
         m.Entity<AlertRule>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        // S18 Audit & Compliance Support. EvidenceArtefact is
+        // project-scoped via Project.AppointingPartyId. Same shape
+        // as every other project-scoped entity from S2 onwards.
+        m.Entity<EvidenceArtefact>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        // AuditorProjectAssignment is project-scoped (the auditor's
+        // visibility on a specific project lives here). The User
+        // side is intentionally NOT scope-filtered — an external
+        // auditor's User row may live in any tenant; the project
+        // side is the authority. SuperAdmin reaches all assignments
+        // via IgnoreQueryFilters per ADR-0007.
+        m.Entity<AuditorProjectAssignment>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()

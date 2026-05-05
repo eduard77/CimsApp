@@ -1,6 +1,11 @@
 namespace CimsApp.Models;
 
-public enum UserRole { SuperAdmin, OrgAdmin, ProjectManager, InformationManager, TaskTeamMember, ClientRep, Viewer }
+// ExternalAuditor (S18 / PAFM F.17). Read-only role tagged at the
+// User level; per-project access governed by AuditorProjectAssignment
+// rows. Mutation gate enforced at every controller via the standard
+// role check; read scoping enforced via the project-filter override
+// for users carrying this role.
+public enum UserRole { SuperAdmin, OrgAdmin, ProjectManager, InformationManager, TaskTeamMember, ClientRep, Viewer, ExternalAuditor }
 public enum CdeState { WorkInProgress, Shared, Published, Archived, Voided }
 public enum SuitabilityCode { S0, S1, S2, S3, S4, S5, S6, D1, D2, D3, D4, D5 }
 public enum ProjectStatus { Initiation, Planning, Execution, Monitoring, Closeout, Completed, Suspended, Cancelled }
@@ -276,4 +281,37 @@ public enum AlertComparison
     LessThan,
     LessThanOrEqual,
     Equal,
+}
+
+// S18 Audit & Compliance Support (PAFM-SD F.17 first bullet —
+// "organised artefact collection per compliance area"). v1.0
+// ships the six dominant compliance areas an internal-pilot
+// project might collect evidence against. Per-tenant configurable
+// area set → v1.1 / B-111.
+public enum ComplianceArea
+{
+    UkGdpr,
+    Bsa2022,
+    Iso19650,
+    Nec4,
+    QualityHse,
+    Other,
+}
+
+// Flag enum for AuditorProjectAssignment.ScopeAreas — the subset
+// of ComplianceArea values an external auditor is granted to
+// view on the assigned project. Bitwise combinable (1, 2, 4, 8,
+// 16, 32). All = every flag set, used as the default-permissive
+// shape when a per-area scope is not specified at assignment time.
+[Flags]
+public enum ComplianceAreaScope
+{
+    None       = 0,
+    UkGdpr     = 1 << 0,
+    Bsa2022    = 1 << 1,
+    Iso19650   = 1 << 2,
+    Nec4       = 1 << 3,
+    QualityHse = 1 << 4,
+    Other      = 1 << 5,
+    All        = UkGdpr | Bsa2022 | Iso19650 | Nec4 | QualityHse | Other,
 }
