@@ -5,18 +5,20 @@ non-trivial AI session so the model starts with the right scope anchor.
 
 ---
 
-**Status:** Between sprints — S17 closed 2026-05-05; **S18 not yet
-kicked off** (scope decision pending).
+**Status:** Between sprints — S18 closed 2026-05-05; **S19 not yet
+kicked off** (scope decision pinned).
 
 **Active sprint:** none.
 
-**Next sprint (S18):** **F.17 — Audit & Compliance Support** per
-PAFM Appendix F.17 (read end-to-end on 2026-05-05; reconciliation
-at `docs/scope-reconciliation-2026-05-05.md`). Three bullets:
-Evidence library (organised artefact collection per compliance
-area), External Auditor role (time-limited, scope-limited read
-access), Audit export (PDF or ZIP bundle). **Scope-spec caveat
-pattern is no longer needed — the .docx is now read.**
+**Next sprint (S19):** **F.18 — Security & Performance** per
+PAFM Appendix F.18. Four bullets: penetration test passed with
+zero open criticals, load test 100 concurrent users without
+degradation, OWASP Top 10 review complete and signed off,
+secrets management in production. **Non-development sprint** —
+the agent can drive secrets-management ADR + OWASP Top 10
+walkthrough; pen test and load test are external dependencies
+that need scheduling at kickoff (pen tester commission,
+load-test rig provisioning).
 
 **Important — F-section / sprint-number offset:** PAFM maps
 **`F.N = S(N-1)`** end-to-end (drift originated at our S8 = "CI
@@ -25,13 +27,14 @@ insertion at S15 = Search & Discovery). Our S16 / S17 kickoffs
 labelled themselves F.16 / F.17 which was wrong — they shipped
 PAFM F.15 (Admin Console) and F.16 (Mobile Views) respectively.
 
-**Confirmed v1.0 sprint roadmap (post-reconciliation, 2026-05-05):**
+**Confirmed v1.0 sprint roadmap (post-reconciliation, 2026-05-05;
+S18 shipped 2026-05-05):**
 
 | Sprint | Scope | Source |
 |---|---|---|
-| **S18 (next)** | Audit & Compliance Support | PAFM F.17 |
-| S19 | Security & Performance | PAFM F.18 |
-| **S20 (NEW)** | Site-User Mobile Workflows (Daily Diary + NCR raising) | B-107 / B-108 (promoted from v1.1 to v1.0 per 2026-05-05 product-owner call) |
+| ~~S18~~ | ~~Audit & Compliance Support~~ — **shipped** | PAFM F.17 |
+| **S19 (next)** | Security & Performance | PAFM F.18 |
+| S20 | Site-User Mobile Workflows (Daily Diary + NCR raising) | B-107 / B-108 (promoted from v1.1 to v1.0 per 2026-05-05 product-owner call) |
 | S21 | Documentation & Training | PAFM F.19 |
 | S22 | UAT & Release | PAFM F.20 — v1.0 ship gate |
 
@@ -43,34 +46,35 @@ F.18 Security and F.19 Documentation rather than before F.17 trades
 "Evidence library covers them" against "minimal disruption to
 already-pinned S18".
 
-**Last sprint:** S17 — Mobile / Responsive Views (PAFM-SD F.17,
-predicted). Squash-merged at `bbdae7c` (2026-05-05, PR #62). See
-`docs/sprint-log/s17.md` and `docs/retrospectives/s17.md`. 4 of 5
-predicted F.17 module-DoD bullets delivered at v1.0 (responsive
-sidebar drawer + per-page table column gating + dialog FullWidth
-fix; the fifth "no desktop regression" is structurally satisfied
-but visually verified by the user post-merge). Eighteenth
-consecutive single-session sprint, fourteenth consecutive sprint
-without a CR. UI-only sprint; no service / contract changes; test
-count unchanged at 957.
+**Last sprint:** S18 — Audit & Compliance Support (PAFM-SD F.17).
+Squash-merged at `a9e77a9` (2026-05-05, PR #64). See
+`docs/sprint-log/s18.md` and `docs/retrospectives/s18.md`. 3 of 3
+F.17 module-DoD bullets delivered at v1.0 — Evidence library +
+External Auditor role + Audit export ZIP. Razor UI landed in the
+same PR as a fast-follower commit. Nineteenth consecutive
+single-session sprint, fifteenth consecutive sprint without a CR.
+**First sprint since S15 to ship under verbatim PAFM bullets** —
+the .docx was read at the post-S17 reconciliation.
 
 **Previously closed:**
-- S16 — Admin Console (PAFM-SD F.16, predicted). Squash-merged
-  at `dd62441` (2026-05-04, PR #60). 4 of 4 predicted F.16
-  module-DoD bullets delivered. CI caught one latent
-  existence-leak bug in `OrganisationAdminService.UpdateAsync`
-  (cross-tenant attempt returned 403 vs 404, confirming row
-  existence) — fixed pre-merge.
-- S15 — Search & Discovery (PAFM-SD F.15). Merged at `190fa87`
-  (2026-05-03). 3 of 4 predicted F.15 module-DoD bullets
-  delivered; saved-searches explicitly deferred to v1.1 / B-096.
+- S17 — Mobile / Responsive Views (= PAFM F.16). Squash-merged at
+  `bbdae7c` (2026-05-05, PR #62). UI-only sprint; responsive
+  sidebar drawer + per-page table column gating + dialog
+  FullWidth fix. Test count unchanged at 957.
+- S16 — Admin Console (= PAFM F.15). Squash-merged at `dd62441`
+  (2026-05-04, PR #60). 4 of 4 module-DoD bullets delivered. CI
+  caught one latent existence-leak bug in
+  `OrganisationAdminService.UpdateAsync` — fixed pre-merge.
+- S15 — Search & Discovery (off-roadmap; not in PAFM Appendix F).
+  Merged at `190fa87` (2026-05-03). 3 of 4 predicted module-DoD
+  bullets delivered; saved-searches deferred to v1.1 / B-096.
 
 **Branch:** `master` (live work between sprints lands on short-lived
 feature branches off master, not a long-running sprint branch;
 direct pushes to master are blocked — every change goes through PR).
 
-**Tests:** 957 / 957 green (CI). Build clean (0 warnings, 0 errors).
-Backlog at B-001..B-104.
+**Tests:** 972 / 972 green (CI). Build clean (0 warnings, 0 errors).
+Backlog at B-001..B-111.
 
 ---
 
@@ -116,17 +120,28 @@ explicit unblock conditions. Per-sprint scope:
   invitations / tenant audit). Closes the laptop-pickup ritual that
   previously needed PowerShell + raw SQL UPDATE for SuperAdmin
   promotion. Backlog B-099..B-101. (No version tag landed.)
-- **S17 — Mobile / Responsive Views** (PAFM F.17, predicted). UI
-  sweep: `MainLayout` MudDrawer flipped from Mini to Responsive
-  (mobile gets slide-in temporary drawer + hamburger; desktop
-  unchanged); six MudTable pages get per-column responsive hiding
-  via `d-none d-{breakpoint}-table-cell` utility classes;
+- **S17 — Mobile / Responsive Views** (= PAFM F.16). UI sweep:
+  `MainLayout` MudDrawer flipped from Mini to Responsive (mobile
+  gets slide-in temporary drawer + hamburger; desktop unchanged);
+  six MudTable pages get per-column responsive hiding via
+  `d-none d-{breakpoint}-table-cell` utility classes;
   AdminOrganisations Edit dialog FullWidth fix. No service /
   contract changes; test count unchanged at 957. Backlog
   B-102..B-104. (No version tag landed.)
+- **S18 — Audit & Compliance Support** (= PAFM F.17). Three
+  services + three controllers + two entities + Razor UI
+  fast-follower in the same PR. EvidenceArtefact (discriminated
+  link to Document / RFI / AuditLog / InspectionActivity, or
+  bare-description), AuditorProjectAssignment (per-User per-Project
+  with ScopeAreas flag enum and ExpiresAt), audit-export ZIP
+  bundle. New `UserRole.ExternalAuditor` enum value
+  intentionally outside the role hierarchy in Core.cs (every
+  HasMinimumRole(ExternalAuditor, X) returns false; mutation
+  gates auto-reject). Test count 957 → 972. Backlog
+  B-109..B-111. (No version tag landed.)
 
 Detail: `docs/sprint-log/s<N>.md` + `docs/retrospectives/s<N>.md`
-per sprint. Git: `git log --oneline c0cfd53..bbdae7c`.
+per sprint. Git: `git log --oneline c0cfd53..a9e77a9`.
 
 ---
 
@@ -250,6 +265,8 @@ From S2 → S15 sprints:
     per-page card-view tables, bottom navigation).
   - B-105..B-108 (PAFM F.15 / F.16 reconciliation gaps —
     template library, subscription view, Daily Diary, NCR raising).
+  - B-109..B-111 (S18 deferrals — External Auditor cross-tenant
+    scoping, PDF audit export, per-tenant evidence required-set).
   - All other v1.1 backlog entries — see `docs/v1.1-backlog.md`.
 
 ---
