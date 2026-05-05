@@ -38,6 +38,14 @@ public class AuthService(
             || string.IsNullOrEmpty(req.FirstName) || string.IsNullOrEmpty(req.LastName))
             throw new ValidationException(["Email, Password, FirstName, LastName are required"]);
 
+        // T-S19-02 / OWASP A07 fix-forward — minimum 8-character
+        // password rule. Full complexity rules (uppercase + digit +
+        // symbol; common-password dictionary) deferred to v1.1 /
+        // B-117. The 8-char floor is the lowest defensible bar
+        // against trivially-brute-forceable credentials.
+        if (req.Password.Length < 8)
+            throw new ValidationException(["Password must be at least 8 characters"]);
+
         // Closes SR-S0-01: tenant ownership of the new User is no longer
         // attacker-supplied. The invitation token determines OrganisationId
         // and (for bootstrap tokens minted at org-creation time) the
