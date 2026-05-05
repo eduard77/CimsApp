@@ -257,6 +257,14 @@ builder.Services.AddScoped<CimsApp.Services.Admin.OrganisationAdminService>();
 builder.Services.AddScoped<CimsApp.Services.Admin.InvitationAdminService>();
 builder.Services.AddScoped<CimsApp.Services.Admin.AuditAdminService>();
 
+// T-S18-02..04 Compliance services. EvidenceLibrary is the
+// add/list/remove for evidence artefacts; AuditorAdmin is the
+// external-auditor assignment lifecycle (reuses AuthService for
+// revocation primitive); AuditExport builds ZIP bundles.
+builder.Services.AddScoped<CimsApp.Services.Compliance.EvidenceLibraryService>();
+builder.Services.AddScoped<CimsApp.Services.Compliance.AuditorAdminService>();
+builder.Services.AddScoped<CimsApp.Services.Compliance.AuditExportService>();
+
 // ── Blazor UI Services ────────────────────────────────────────────────────────
 builder.Services.AddScoped<UiStateService>();
 builder.Services.AddScoped<BlazorApiClient>();

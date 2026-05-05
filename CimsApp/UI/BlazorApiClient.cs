@@ -200,6 +200,68 @@ public class BlazorApiClient(IHttpClientFactory factory, UiStateService state)
         catch { return null; }
     }
 
+    // ── Compliance (S18 fast-follower) ────────────────────────────────────────
+
+    public async Task<CimsApp.Services.Compliance.EvidencePagedResult?> ListEvidenceAsync(Guid projectId, ComplianceArea? area = null, int skip = 0, int take = 50)
+    {
+        try { var url = $"api/v1/projects/{projectId}/evidence?skip={skip}&take={take}" + (area is { } a ? $"&area={a}" : ""); var b = await Http().GetStringAsync(url); return Extract<CimsApp.Services.Compliance.EvidencePagedResult>(b, "data"); }
+        catch { return null; }
+    }
+
+    public async Task<(bool Ok, string? Error)> AddEvidenceAsync(Guid projectId, CimsApp.Services.Compliance.AddEvidenceRequest req)
+    {
+        try { var r = await Http().PostAsJsonAsync($"api/v1/projects/{projectId}/evidence", req); var b = await r.Content.ReadAsStringAsync(); return r.IsSuccessStatusCode ? (true, null) : (false, ExtractError(b)); }
+        catch (Exception ex) { return (false, ex.Message); }
+    }
+
+    public async Task<(bool Ok, string? Error)> RemoveEvidenceAsync(Guid projectId, Guid evidenceId)
+    {
+        try { var r = await Http().DeleteAsync($"api/v1/projects/{projectId}/evidence/{evidenceId}"); var b = await r.Content.ReadAsStringAsync(); return r.IsSuccessStatusCode ? (true, null) : (false, ExtractError(b)); }
+        catch (Exception ex) { return (false, ex.Message); }
+    }
+
+    public async Task<CimsApp.Services.Compliance.AuditorAssignmentPagedResult?> ListAuditorAssignmentsAsync(Guid? projectId = null, bool includeRevoked = false, int skip = 0, int take = 50)
+    {
+        try { var url = $"api/v1/admin/auditor-assignments?skip={skip}&take={take}&includeRevoked={includeRevoked}" + (projectId is { } p ? $"&projectId={p}" : ""); var b = await Http().GetStringAsync(url); return Extract<CimsApp.Services.Compliance.AuditorAssignmentPagedResult>(b, "data"); }
+        catch { return null; }
+    }
+
+    public async Task<(bool Ok, string? Error)> CreateAuditorAssignmentAsync(CimsApp.Services.Compliance.CreateAuditorAssignmentRequest req)
+    {
+        try { var r = await Http().PostAsJsonAsync("api/v1/admin/auditor-assignments", req); var b = await r.Content.ReadAsStringAsync(); return r.IsSuccessStatusCode ? (true, null) : (false, ExtractError(b)); }
+        catch (Exception ex) { return (false, ex.Message); }
+    }
+
+    public async Task<(bool Ok, string? Error)> RevokeAuditorAssignmentAsync(Guid assignmentId)
+    {
+        try { var r = await Http().PostAsync($"api/v1/admin/auditor-assignments/{assignmentId}/revoke", null); var b = await r.Content.ReadAsStringAsync(); return r.IsSuccessStatusCode ? (true, null) : (false, ExtractError(b)); }
+        catch (Exception ex) { return (false, ex.Message); }
+    }
+
+    /// <summary>Returns the audit-export ZIP bundle URL for the given
+    /// project + window + areas. Used by the UI's anchor-href download
+    /// pattern; the browser's Authorization header is automatically
+    /// included by the existing JWT-bearing fetch infrastructure.</summary>
+    public string AuditExportUrl(Guid projectId, DateTime? from, DateTime? to, ComplianceAreaScope areas)
+    {
+        var qs = new List<string> { $"areas={(int)areas}" };
+        if (from is { } f) qs.Add($"from={Uri.EscapeDataString(f.ToString("o"))}");
+        if (to is { } t) qs.Add($"to={Uri.EscapeDataString(t.ToString("o"))}");
+        return $"/api/v1/projects/{projectId}/audit-export?" + string.Join("&", qs);
+    }
+
+    public async Task<(bool Ok, byte[]? Bytes, string? Error)> DownloadAuditExportAsync(Guid projectId, DateTime? from, DateTime? to, ComplianceAreaScope areas)
+    {
+        try
+        {
+            var r = await Http().GetAsync(AuditExportUrl(projectId, from, to, areas));
+            if (!r.IsSuccessStatusCode)
+                return (false, null, ExtractError(await r.Content.ReadAsStringAsync()));
+            return (true, await r.Content.ReadAsByteArrayAsync(), null);
+        }
+        catch (Exception ex) { return (false, null, ex.Message); }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
     private static T? Extract<T>(string json, string key)
     {

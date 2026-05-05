@@ -22,7 +22,27 @@ public abstract class CimsControllerBase : ControllerBase
     protected async Task<UserRole> GetProjectRoleAsync(CimsDbContext db, Guid projectId)
     {
         var m = await db.ProjectMembers.FirstOrDefaultAsync(m => m.ProjectId == projectId && m.UserId == CurrentUserId && m.IsActive);
-        return m?.Role ?? throw new ForbiddenException("Not a member of this project");
+        if (m != null) return m.Role;
+
+        // T-S18-03 ExternalAuditor scope override. Users with the
+        // ExternalAuditor global role don't carry ProjectMember rows;
+        // their access flows through AuditorProjectAssignment. An
+        // active (not-revoked, not-expired) assignment yields
+        // UserRole.ExternalAuditor, which is intentionally OUTSIDE
+        // the role hierarchy — every HasMinimumRole(ExternalAuditor,
+        // X) check returns false, so mutation endpoints reject
+        // automatically. Read-only endpoints that just call
+        // GetProjectRoleAsync for membership confirmation work as
+        // expected.
+        var now = DateTime.UtcNow;
+        var assignment = await db.AuditorProjectAssignments
+            .FirstOrDefaultAsync(a => a.UserId == CurrentUserId
+                                   && a.ProjectId == projectId
+                                   && !a.IsRevoked
+                                   && a.ExpiresAt > now);
+        if (assignment != null) return UserRole.ExternalAuditor;
+
+        throw new ForbiddenException("Not a member of this project");
     }
 }
 
