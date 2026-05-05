@@ -5,20 +5,42 @@ non-trivial AI session so the model starts with the right scope anchor.
 
 ---
 
-**Status:** Between sprints — S18 closed 2026-05-05; **S19 not yet
+**Status:** Between sprints — S19 closed 2026-05-05; **S20 not yet
 kicked off** (scope decision pinned).
 
 **Active sprint:** none.
 
-**Next sprint (S19):** **F.18 — Security & Performance** per
-PAFM Appendix F.18. Four bullets: penetration test passed with
-zero open criticals, load test 100 concurrent users without
-degradation, OWASP Top 10 review complete and signed off,
-secrets management in production. **Non-development sprint** —
-the agent can drive secrets-management ADR + OWASP Top 10
-walkthrough; pen test and load test are external dependencies
-that need scheduling at kickoff (pen tester commission,
-load-test rig provisioning).
+**Next sprint (S20):** **Site-User Mobile Workflows** — Daily
+Diary entity + page (per-project, per-day, per-user — weather,
+manpower, plant, deliveries, incidents, progress notes) + NCR
+raising flow (severity, location, description, photo
+attachment, assignee, workflow states). Promoted from v1.1
+backlog to v1.0 / S20 per the 2026-05-05 product-owner call
+(`docs/scope-reconciliation-2026-05-05.md`); closes the two
+PAFM F.16 product gaps the S17 responsive-sweep sprint
+couldn't address. Off-roadmap insertion (third one alongside
+S8 CI Hardening and S15 Search). Estimated 14-18h —
+**heavier than S18's 22h budget** and at the upper end of
+single-session compression; may want to scope a second
+session.
+
+**Two ship-gate carry-forwards from S19:**
+
+- **Pen test commission** —
+  `docs/security/pen-test-scope-2026-05-05.md` is the
+  commissioning brief; user actions are: send to qualified
+  firm, receive report, close any Critical findings before
+  S22 ship gate.
+- **Load test execution** — `scripts/load-test/k6-100-vu.js`
+  + README; user actions are: provision staging instance +
+  seed user, run k6, document pass/fail; remediate if
+  degraded.
+
+**Other v1.0 ship-gate obligation:**
+
+- **B-115 vulnerable transitive packages upgrade.** OWASP A06
+  finding from S19 (3 HIGH severity). Fast-follower or
+  pre-S22; cannot drift to v1.1.
 
 **Important — F-section / sprint-number offset:** PAFM maps
 **`F.N = S(N-1)`** end-to-end (drift originated at our S8 = "CI
@@ -28,15 +50,15 @@ labelled themselves F.16 / F.17 which was wrong — they shipped
 PAFM F.15 (Admin Console) and F.16 (Mobile Views) respectively.
 
 **Confirmed v1.0 sprint roadmap (post-reconciliation, 2026-05-05;
-S18 shipped 2026-05-05):**
+S18 + S19 shipped 2026-05-05):**
 
 | Sprint | Scope | Source |
 |---|---|---|
 | ~~S18~~ | ~~Audit & Compliance Support~~ — **shipped** | PAFM F.17 |
-| **S19 (next)** | Security & Performance | PAFM F.18 |
-| S20 | Site-User Mobile Workflows (Daily Diary + NCR raising) | B-107 / B-108 (promoted from v1.1 to v1.0 per 2026-05-05 product-owner call) |
+| ~~S19~~ | ~~Security & Performance~~ — **shipped** (with 2 carry-forwards) | PAFM F.18 |
+| **S20 (next)** | Site-User Mobile Workflows (Daily Diary + NCR raising) | B-107 / B-108 (promoted from v1.1 to v1.0 per 2026-05-05 product-owner call) |
 | S21 | Documentation & Training | PAFM F.19 |
-| S22 | UAT & Release | PAFM F.20 — v1.0 ship gate |
+| S22 | UAT & Release | PAFM F.20 — v1.0 ship gate (closes pen test + load test + B-115 carry-forwards) |
 
 S20 inserts a third off-roadmap sprint to close two real PAFM F.16
 product gaps that the original Mobile Views sprint (our S17, scoped
@@ -46,21 +68,25 @@ F.18 Security and F.19 Documentation rather than before F.17 trades
 "Evidence library covers them" against "minimal disruption to
 already-pinned S18".
 
-**Last sprint:** S18 — Audit & Compliance Support (PAFM-SD F.17).
-Squash-merged at `a9e77a9` (2026-05-05, PR #64). See
-`docs/sprint-log/s18.md` and `docs/retrospectives/s18.md`. 3 of 3
-F.17 module-DoD bullets delivered at v1.0 — Evidence library +
-External Auditor role + Audit export ZIP. Razor UI landed in the
-same PR as a fast-follower commit. Nineteenth consecutive
-single-session sprint, fifteenth consecutive sprint without a CR.
-**First sprint since S15 to ship under verbatim PAFM bullets** —
-the .docx was read at the post-S17 reconciliation.
+**Last sprint:** S19 — Security & Performance (PAFM-SD F.18).
+Squash-merged at `1347056` (2026-05-05, PR #66). See
+`docs/sprint-log/s19.md` and `docs/retrospectives/s19.md`.
+4 of 4 F.18 module-DoD bullets at v1.0 (with carry-forwards
+above for pen test + load test execution). OWASP Top 10 (2021)
+review SIGNED OFF; 9 categories PASS, 1 PARTIAL with B-115
+tracking. ADR-0016 secrets management landed.
+SecurityHeadersMiddleware + HSTS + 8-char password floor as
+fix-forwards in the same PR. Twentieth consecutive
+single-session sprint, sixteenth consecutive sprint without a CR.
 
 **Previously closed:**
-- S17 — Mobile / Responsive Views (= PAFM F.16). Squash-merged at
-  `bbdae7c` (2026-05-05, PR #62). UI-only sprint; responsive
+- S18 — Audit & Compliance Support (= PAFM F.17). Squash-merged
+  at `a9e77a9` (2026-05-05, PR #64). 3 of 3 bullets shipped;
+  Evidence + ExternalAuditor + ZIP audit export + Razor UI.
+- S17 — Mobile / Responsive Views (= PAFM F.16). Squash-merged
+  at `bbdae7c` (2026-05-05, PR #62). UI-only sprint; responsive
   sidebar drawer + per-page table column gating + dialog
-  FullWidth fix. Test count unchanged at 957.
+  FullWidth fix.
 - S16 — Admin Console (= PAFM F.15). Squash-merged at `dd62441`
   (2026-05-04, PR #60). 4 of 4 module-DoD bullets delivered. CI
   caught one latent existence-leak bug in
@@ -73,8 +99,9 @@ the .docx was read at the post-S17 reconciliation.
 feature branches off master, not a long-running sprint branch;
 direct pushes to master are blocked — every change goes through PR).
 
-**Tests:** 972 / 972 green (CI). Build clean (0 warnings, 0 errors).
-Backlog at B-001..B-111.
+**Tests:** 973 / 973 green (CI). Build clean (0 warnings, 0 errors).
+Backlog at B-001..B-119 (B-116 not used; numbering aligned with
+what landed at S19 close).
 
 ---
 
@@ -139,9 +166,19 @@ explicit unblock conditions. Per-sprint scope:
   HasMinimumRole(ExternalAuditor, X) returns false; mutation
   gates auto-reject). Test count 957 → 972. Backlog
   B-109..B-111. (No version tag landed.)
+- **S19 — Security & Performance** (= PAFM F.18).
+  Non-development sprint. OWASP Top 10 (2021) review SIGNED OFF
+  (9 PASS, 1 PARTIAL with B-115 tracking). Three fix-forwards
+  in same PR: SecurityHeadersMiddleware + UseHsts (A05),
+  8-char password floor (A07), B-115 tracking for HIGH-severity
+  transitive vulns (A06). ADR-0016 secrets management landed.
+  Pen test scope spec + k6 load-test script delivered for
+  external user-execution; carry forward to S22 ship gate.
+  Test count 972 → 973. Backlog B-112..B-115 + B-117..B-119.
+  (No version tag landed.)
 
 Detail: `docs/sprint-log/s<N>.md` + `docs/retrospectives/s<N>.md`
-per sprint. Git: `git log --oneline c0cfd53..a9e77a9`.
+per sprint. Git: `git log --oneline c0cfd53..1347056`.
 
 ---
 
@@ -265,6 +302,10 @@ From S2 → S15 sprints:
     per-page card-view tables, bottom navigation).
   - B-105..B-108 (PAFM F.15 / F.16 reconciliation gaps —
     template library, subscription view, Daily Diary, NCR raising).
+  - B-112..B-115 + B-117..B-119 (S19 deferrals — pen test
+    substitute, cloud load testing, Azure Key Vault, vulnerable
+    transitives, password complexity rules, SIEM log shipping,
+    CSP tightening; B-116 unused).
   - B-109..B-111 (S18 deferrals — External Auditor cross-tenant
     scoping, PDF audit export, per-tenant evidence required-set).
   - All other v1.1 backlog entries — see `docs/v1.1-backlog.md`.
