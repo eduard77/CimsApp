@@ -12,13 +12,13 @@ else
         <MudTable Items="_logs" Hover="true" Elevation="0" Dense="true">
             <HeaderContent>
                 <MudTh Style="font-size:11px;font-weight:600;color:#94A3B8;text-transform:uppercase;padding:12px 16px;">Time</MudTh>
-                <MudTh Style="font-size:11px;font-weight:600;color:#94A3B8;text-transform:uppercase;">User</MudTh>
+                <MudTh Class="d-none d-sm-table-cell" Style="font-size:11px;font-weight:600;color:#94A3B8;text-transform:uppercase;">User</MudTh>
                 <MudTh Style="font-size:11px;font-weight:600;color:#94A3B8;text-transform:uppercase;">Action</MudTh>
-                <MudTh Style="font-size:11px;font-weight:600;color:#94A3B8;text-transform:uppercase;">Entity</MudTh>
+                <MudTh Class="d-none d-sm-table-cell" Style="font-size:11px;font-weight:600;color:#94A3B8;text-transform:uppercase;">Entity</MudTh>
             </HeaderContent>
             <RowTemplate>
                 <MudTd Style="padding:12px 16px;"><span style="font-size:12px;color:#64748B;white-space:nowrap;">@context.CreatedAt.ToString("dd MMM yyyy HH:mm")</span></MudTd>
-                <MudTd>
+                <MudTd Class="d-none d-sm-table-cell">
                     <div style="display:flex;align-items:center;gap:8px;">
                         <MudAvatar Style="width:24px;height:24px;background:#EBF3FF;color:#1B4F8A;font-size:10px;font-weight:700;">
                             @(context.User?.FirstName?.FirstOrDefault())@(context.User?.LastName?.FirstOrDefault())
@@ -27,7 +27,7 @@ else
                     </div>
                 </MudTd>
                 <MudTd><span style="@ActionStyle(context.Action)">@context.Action</span></MudTd>
-                <MudTd><span style="font-size:12px;color:#64748B;">@context.Entity</span></MudTd>
+                <MudTd Class="d-none d-sm-table-cell"><span style="font-size:12px;color:#64748B;">@context.Entity</span></MudTd>
             </RowTemplate>
         </MudTable>
     </MudCard>

@@ -25,19 +25,19 @@ else
         <MudTable Items="_page.Items" Hover="true" Elevation="0" Dense="true">
             <HeaderContent>
                 <MudTh>Name</MudTh>
-                <MudTh>Code</MudTh>
-                <MudTh>Country</MudTh>
-                <MudTh Style="text-align:right;">Users</MudTh>
-                <MudTh Style="text-align:right;">Projects</MudTh>
+                <MudTh Class="d-none d-sm-table-cell">Code</MudTh>
+                <MudTh Class="d-none d-md-table-cell">Country</MudTh>
+                <MudTh Class="d-none d-md-table-cell" Style="text-align:right;">Users</MudTh>
+                <MudTh Class="d-none d-md-table-cell" Style="text-align:right;">Projects</MudTh>
                 <MudTh>Active</MudTh>
                 <MudTh Style="text-align:right;">Actions</MudTh>
             </HeaderContent>
             <RowTemplate>
                 <MudTd>@context.Name</MudTd>
-                <MudTd><span style="font-family:monospace;font-size:12px;">@context.Code</span></MudTd>
-                <MudTd>@(context.Country ?? "—")</MudTd>
-                <MudTd Style="text-align:right;">@context.UserCount</MudTd>
-                <MudTd Style="text-align:right;">@context.ProjectCount</MudTd>
+                <MudTd Class="d-none d-sm-table-cell"><span style="font-family:monospace;font-size:12px;">@context.Code</span></MudTd>
+                <MudTd Class="d-none d-md-table-cell">@(context.Country ?? "—")</MudTd>
+                <MudTd Class="d-none d-md-table-cell" Style="text-align:right;">@context.UserCount</MudTd>
+                <MudTd Class="d-none d-md-table-cell" Style="text-align:right;">@context.ProjectCount</MudTd>
                 <MudTd>
                     @if (context.IsActive) { <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">active</MudChip> }
                     else { <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Text">disabled</MudChip> }

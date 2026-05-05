@@ -23,16 +23,16 @@ else
         <MudTable Items="_page.Items" Hover="true" Elevation="0" Dense="true">
             <HeaderContent>
                 <MudTh>Email</MudTh>
-                <MudTh>Name</MudTh>
-                <MudTh>Org</MudTh>
+                <MudTh Class="d-none d-md-table-cell">Name</MudTh>
+                <MudTh Class="d-none d-sm-table-cell">Org</MudTh>
                 <MudTh>Global role</MudTh>
                 <MudTh>Active</MudTh>
                 <MudTh Style="text-align:right;">Actions</MudTh>
             </HeaderContent>
             <RowTemplate>
                 <MudTd>@context.Email</MudTd>
-                <MudTd>@context.FirstName @context.LastName</MudTd>
-                <MudTd>@context.OrganisationCode</MudTd>
+                <MudTd Class="d-none d-md-table-cell">@context.FirstName @context.LastName</MudTd>
+                <MudTd Class="d-none d-sm-table-cell">@context.OrganisationCode</MudTd>
                 <MudTd>
                     <MudSelect T="UserRole?" Value="context.GlobalRole" ValueChanged="r => SetRole(context, r)" Dense="true" Margin="Margin.Dense" Style="min-width:140px;">
                         <MudSelectItem T="UserRole?" Value="@((UserRole?)null)">— (none)</MudSelectItem>
