@@ -21,17 +21,30 @@ public record OrgSummaryDto(Guid Id, string Name, string Code);
 public record CreateOrgRequest([StringLength(200)] string Name, [StringLength(10)] string Code, [StringLength(100)] string? Country);
 public record CreateInvitationRequest([StringLength(200)] string? Email = null, int? ExpiresInDays = null);
 public record InvitationDto(Guid Id, string Token, DateTime ExpiresAt, bool IsBootstrap, string? Email);
-public record CreateProjectRequest([StringLength(200)] string Name, [StringLength(10)] string Code, string? Description, Guid AppointingPartyId, DateTime? StartDate, DateTime? EndDate, [StringLength(200)] string? Location, [StringLength(100)] string? Country, [StringLength(10)] string Currency, decimal? BudgetValue, [StringLength(100)] string? Sector, [StringLength(200)] string? Sponsor, [StringLength(100)] string? EirRef);
-public record UpdateProjectRequest(string? Name, string? Description, ProjectStatus? Status, DateTime? StartDate, DateTime? EndDate, string? Location, decimal? BudgetValue, string? Sponsor, string? EirRef);
+// Project.Code is MaxLength(20) (NOT 10 — that's Organisation.Code).
+// Project.Currency is MaxLength(3) (ISO 4217 alpha code). The S22
+// fast-forward mistakenly set Code=10 (too strict, rejected valid
+// 11-20 char codes) and Currency=10 (too lax, allowed values DB
+// would truncate). Corrected here as part of the B-127 sweep.
+public record CreateProjectRequest([StringLength(200)] string Name, [StringLength(20)] string Code, string? Description, Guid AppointingPartyId, DateTime? StartDate, DateTime? EndDate, [StringLength(200)] string? Location, [StringLength(100)] string? Country, [StringLength(3)] string Currency, decimal? BudgetValue, [StringLength(100)] string? Sector, [StringLength(200)] string? Sponsor, [StringLength(100)] string? EirRef);
+public record UpdateProjectRequest([StringLength(200)] string? Name, string? Description, ProjectStatus? Status, DateTime? StartDate, DateTime? EndDate, [StringLength(200)] string? Location, decimal? BudgetValue, [StringLength(200)] string? Sponsor, [StringLength(100)] string? EirRef);
 public record AddMemberRequest(Guid UserId, UserRole Role);
-public record CreateContainerRequest(string Name, string Originator, string? Volume, string? Level, string Type, string? Discipline, string? Description);
-public record CreateDocumentRequest(string ProjectCode, string Originator, string? Volume, string? Level, string DocType, string? Role, int Number, string Title, string? Description, DocumentType? Type, Guid? ContainerId, string[]? Tags);
+// CdeContainer entity: Name 200, Originator 6, Volume 6, Level 6,
+// Type 4, Discipline 6.
+public record CreateContainerRequest([StringLength(200)] string Name, [StringLength(6)] string Originator, [StringLength(6)] string? Volume, [StringLength(6)] string? Level, [StringLength(4)] string Type, [StringLength(6)] string? Discipline, string? Description);
+// Document entity: ProjectCode 20, Originator 6, Volume 6, Level 6,
+// DocType 4, Role 6, Title 500. Number is int (not validated for
+// length).
+public record CreateDocumentRequest([StringLength(20)] string ProjectCode, [StringLength(6)] string Originator, [StringLength(6)] string? Volume, [StringLength(6)] string? Level, [StringLength(4)] string DocType, [StringLength(6)] string? Role, int Number, [StringLength(500)] string Title, string? Description, DocumentType? Type, Guid? ContainerId, string[]? Tags);
 public record UploadRevisionRequest(string Revision, SuitabilityCode? Suitability, string? Description, string FileName, long FileSize, string MimeType, string StorageKey, string Checksum);
 public record TransitionRequest(CdeState ToState, SuitabilityCode? Suitability);
-public record CreateRfiRequest(string Subject, string Description, string? Discipline, Priority Priority, Guid? AssignedToId, DateTime? DueDate);
+// Rfi entity: Subject 500. Description has no MaxLength (long
+// text). Discipline has no MaxLength on Rfi.
+public record CreateRfiRequest([StringLength(500)] string Subject, string Description, string? Discipline, Priority Priority, Guid? AssignedToId, DateTime? DueDate);
 public record RespondRfiRequest(string Response, RfiStatus Status);
-public record CreateActionRequest(string Title, string? Description, string? Source, Priority Priority, Guid? AssigneeId, DateTime? DueDate);
-public record UpdateActionRequest(string? Title, string? Description, Priority? Priority, ActionStatus? Status, Guid? AssigneeId, DateTime? DueDate);
+// ActionItem entity: Title 500.
+public record CreateActionRequest([StringLength(500)] string Title, string? Description, string? Source, Priority Priority, Guid? AssigneeId, DateTime? DueDate);
+public record UpdateActionRequest([StringLength(500)] string? Title, string? Description, Priority? Priority, ActionStatus? Status, Guid? AssigneeId, DateTime? DueDate);
 public record SetLineBudgetRequest(decimal? Budget);
 public record SetLineScheduleRequest(DateTime? ScheduledStart, DateTime? ScheduledEnd);
 public record SetLineProgressRequest(decimal? PercentComplete);
