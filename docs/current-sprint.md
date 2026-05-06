@@ -5,20 +5,35 @@ non-trivial AI session so the model starts with the right scope anchor.
 
 ---
 
-**Status:** Between sprints — S18 closed 2026-05-05; **S19 not yet
-kicked off** (scope decision pinned).
+**Status:** Between sprints — S20 closed 2026-05-05; **B-115
+closed 2026-05-06**; **S21 not yet kicked off** (scope pinned).
 
 **Active sprint:** none.
 
-**Next sprint (S19):** **F.18 — Security & Performance** per
-PAFM Appendix F.18. Four bullets: penetration test passed with
-zero open criticals, load test 100 concurrent users without
-degradation, OWASP Top 10 review complete and signed off,
-secrets management in production. **Non-development sprint** —
-the agent can drive secrets-management ADR + OWASP Top 10
-walkthrough; pen test and load test are external dependencies
-that need scheduling at kickoff (pen tester commission,
-load-test rig provisioning).
+**Next sprint (S21):** **F.19 — Documentation & Training** per
+PAFM Appendix F.19. Four bullets: user documentation
+(`docs/user/`) covers all modules; admin documentation
+(`docs/admin/`) covers setup; API documentation (Swagger /
+OpenAPI) published; training videos or walkthroughs for three
+primary roles. **Substantial docs-shape sprint** — the agent
+can write user/admin docs from the codebase + verify the
+existing Swagger surface; training videos are a user-execution
+gate similar to S19's pen test commission.
+
+**Two ship-gate carry-forwards remain (S22):**
+
+- **Pen test commission** —
+  `docs/security/pen-test-scope-2026-05-05.md` is the
+  commissioning brief; user actions: send to qualified firm,
+  receive report, close any Critical findings.
+- **Load test execution** — `scripts/load-test/k6-100-vu.js`
+  + README; user actions: provision staging instance + seed
+  user, run k6, document pass/fail.
+
+**B-115 (vulnerable transitive packages) closed 2026-05-06**
+via PR #69. Last v1.0 ship-gate code-side obligation cleared.
+`dotnet list package --vulnerable --include-transitive` now
+reports zero findings.
 
 **Important — F-section / sprint-number offset:** PAFM maps
 **`F.N = S(N-1)`** end-to-end (drift originated at our S8 = "CI
@@ -27,16 +42,17 @@ insertion at S15 = Search & Discovery). Our S16 / S17 kickoffs
 labelled themselves F.16 / F.17 which was wrong — they shipped
 PAFM F.15 (Admin Console) and F.16 (Mobile Views) respectively.
 
-**Confirmed v1.0 sprint roadmap (post-reconciliation, 2026-05-05;
-S18 shipped 2026-05-05):**
+**Confirmed v1.0 sprint roadmap (post-reconciliation, S18 / S19
+/ S20 + B-115 shipped):**
 
 | Sprint | Scope | Source |
 |---|---|---|
 | ~~S18~~ | ~~Audit & Compliance Support~~ — **shipped** | PAFM F.17 |
-| **S19 (next)** | Security & Performance | PAFM F.18 |
-| S20 | Site-User Mobile Workflows (Daily Diary + NCR raising) | B-107 / B-108 (promoted from v1.1 to v1.0 per 2026-05-05 product-owner call) |
-| S21 | Documentation & Training | PAFM F.19 |
-| S22 | UAT & Release | PAFM F.20 — v1.0 ship gate |
+| ~~S19~~ | ~~Security & Performance~~ — **shipped** (carry-forwards: pen test, load test) | PAFM F.18 |
+| ~~S20~~ | ~~Site-User Mobile Workflows~~ — **shipped** | B-107 / B-108 |
+| ~~B-115~~ | ~~Vulnerable transitive packages~~ — **shipped** | OWASP A06 from S19 |
+| **S21 (next)** | Documentation & Training | PAFM F.19 |
+| S22 | UAT & Release | PAFM F.20 — v1.0 ship gate (closes pen test + load test carry-forwards) |
 
 S20 inserts a third off-roadmap sprint to close two real PAFM F.16
 product gaps that the original Mobile Views sprint (our S17, scoped
@@ -46,35 +62,48 @@ F.18 Security and F.19 Documentation rather than before F.17 trades
 "Evidence library covers them" against "minimal disruption to
 already-pinned S18".
 
-**Last sprint:** S18 — Audit & Compliance Support (PAFM-SD F.17).
-Squash-merged at `a9e77a9` (2026-05-05, PR #64). See
-`docs/sprint-log/s18.md` and `docs/retrospectives/s18.md`. 3 of 3
-F.17 module-DoD bullets delivered at v1.0 — Evidence library +
-External Auditor role + Audit export ZIP. Razor UI landed in the
-same PR as a fast-follower commit. Nineteenth consecutive
-single-session sprint, fifteenth consecutive sprint without a CR.
-**First sprint since S15 to ship under verbatim PAFM bullets** —
-the .docx was read at the post-S17 reconciliation.
+**Last sprint:** S20 — Site-User Mobile Workflows (off-roadmap;
+B-107 + B-108). Squash-merged at `44e049b` (2026-05-05, PR #68).
+See `docs/sprint-log/s20.md` and `docs/retrospectives/s20.md`.
+4 of 4 module-DoD bullets at v1.0: Daily Diary entity + page,
+NCR raising flow + page (8th state machine), 5 new audit-twin
+events, both responsive (inherit S17 patterns).
+Twenty-first consecutive single-session sprint; seventeenth
+consecutive sprint without a CR. Heaviest sprint by hours since
+S18.
+
+**Most recent fast-follower:** B-115 vulnerable transitive
+packages upgrade (PR #69 merged 2026-05-06). Five transitive
+vulnerabilities cleared (Microsoft.Extensions.Caching.Memory,
+System.Text.Json, System.Formats.Asn1, Azure.Identity,
+Microsoft.Identity.Client). `dotnet list package --vulnerable`
+now reports zero findings. Last v1.0 ship-gate code-side
+obligation removed.
 
 **Previously closed:**
-- S17 — Mobile / Responsive Views (= PAFM F.16). Squash-merged at
-  `bbdae7c` (2026-05-05, PR #62). UI-only sprint; responsive
-  sidebar drawer + per-page table column gating + dialog
-  FullWidth fix. Test count unchanged at 957.
+- S19 — Security & Performance (= PAFM F.18). Squash-merged at
+  `1347056` (2026-05-05, PR #66). OWASP Top 10 review SIGNED
+  OFF (9 PASS, 1 PARTIAL closed by B-115). ADR-0016 secrets
+  management. Pen test + load test as external carry-forwards.
+- S18 — Audit & Compliance Support (= PAFM F.17). Squash-merged
+  at `a9e77a9` (2026-05-05, PR #64). 3 of 3 bullets shipped.
+- S17 — Mobile / Responsive Views (= PAFM F.16). Squash-merged
+  at `bbdae7c` (2026-05-05, PR #62). UI-only sprint.
 - S16 — Admin Console (= PAFM F.15). Squash-merged at `dd62441`
-  (2026-05-04, PR #60). 4 of 4 module-DoD bullets delivered. CI
-  caught one latent existence-leak bug in
-  `OrganisationAdminService.UpdateAsync` — fixed pre-merge.
+  (2026-05-04, PR #60). CI caught a latent existence-leak bug,
+  fixed pre-merge.
 - S15 — Search & Discovery (off-roadmap; not in PAFM Appendix F).
-  Merged at `190fa87` (2026-05-03). 3 of 4 predicted module-DoD
-  bullets delivered; saved-searches deferred to v1.1 / B-096.
+  Merged at `190fa87` (2026-05-03).
 
 **Branch:** `master` (live work between sprints lands on short-lived
 feature branches off master, not a long-running sprint branch;
 direct pushes to master are blocked — every change goes through PR).
 
-**Tests:** 972 / 972 green (CI). Build clean (0 warnings, 0 errors).
-Backlog at B-001..B-111.
+**Tests:** 985 / 985 green (CI). Build clean (0 warnings, 0 errors).
+Zero vulnerable packages reported by
+`dotnet list package --vulnerable --include-transitive`.
+Backlog at B-001..B-123 (B-115 + B-116 closed; numbering aligned
+with what landed).
 
 ---
 
@@ -130,18 +159,31 @@ explicit unblock conditions. Per-sprint scope:
   B-102..B-104. (No version tag landed.)
 - **S18 — Audit & Compliance Support** (= PAFM F.17). Three
   services + three controllers + two entities + Razor UI
-  fast-follower in the same PR. EvidenceArtefact (discriminated
-  link to Document / RFI / AuditLog / InspectionActivity, or
-  bare-description), AuditorProjectAssignment (per-User per-Project
-  with ScopeAreas flag enum and ExpiresAt), audit-export ZIP
-  bundle. New `UserRole.ExternalAuditor` enum value
-  intentionally outside the role hierarchy in Core.cs (every
-  HasMinimumRole(ExternalAuditor, X) returns false; mutation
-  gates auto-reject). Test count 957 → 972. Backlog
-  B-109..B-111. (No version tag landed.)
+  fast-follower. EvidenceArtefact, AuditorProjectAssignment,
+  audit-export ZIP. New `UserRole.ExternalAuditor` enum value
+  outside the role hierarchy. Test count 957 → 972. Backlog
+  B-109..B-111.
+- **S19 — Security & Performance** (= PAFM F.18).
+  Non-development sprint. OWASP Top 10 (2021) review SIGNED
+  OFF. SecurityHeadersMiddleware + UseHsts (A05). 8-char
+  password floor (A07). ADR-0016 secrets management. Pen test
+  scope spec + k6 load-test script delivered for external
+  user-execution. Test count 972 → 973. Backlog
+  B-112..B-115 + B-117..B-119.
+- **S20 — Site-User Mobile Workflows** (off-roadmap; B-107 +
+  B-108 promoted to v1.0). Two new entities (DailyDiaryEntry +
+  Ncr), 8th state machine (NcrWorkflow), 5 new audit-twin
+  events, two Razor pages, nav entries. Closes the PAFM F.16
+  product gaps the S17 responsive-sweep couldn't address.
+  Test count 973 → 985. Backlog B-120..B-123.
+- **B-115** fast-follower (PR #69, 2026-05-06): vulnerable
+  transitive packages upgrade. EF Core / JwtBearer 8.0.2 →
+  8.0.10; explicit pins for System.Formats.Asn1, Azure.Identity,
+  Microsoft.Identity.Client. Zero vulnerable packages
+  remaining.
 
 Detail: `docs/sprint-log/s<N>.md` + `docs/retrospectives/s<N>.md`
-per sprint. Git: `git log --oneline c0cfd53..a9e77a9`.
+per sprint. Git: `git log --oneline c0cfd53..aa8b792`.
 
 ---
 
@@ -263,10 +305,17 @@ From S2 → S15 sprints:
     optimisation, bulk admin operations).
   - B-102..B-104 (S17 deferrals — mobile-first UX redesign,
     per-page card-view tables, bottom navigation).
-  - B-105..B-108 (PAFM F.15 / F.16 reconciliation gaps —
-    template library, subscription view, Daily Diary, NCR raising).
+  - B-105 / B-106 (PAFM F.15 reconciliation gaps — template
+    library, subscription view).
+  - B-107 / B-108 — **closed S20** (Daily Diary + NCR).
   - B-109..B-111 (S18 deferrals — External Auditor cross-tenant
     scoping, PDF audit export, per-tenant evidence required-set).
+  - B-112..B-114 + B-117..B-119 (S19 deferrals — pen test
+    substitute, cloud load testing, Azure Key Vault, password
+    complexity, SIEM log shipping, CSP tightening).
+  - B-115 — **closed 2026-05-06** (vulnerable transitives).
+  - B-120..B-123 (S20 deferrals — NCR / Daily Diary photo
+    attachments, NCR workflow extensions, NCR assignee UI).
   - All other v1.1 backlog entries — see `docs/v1.1-backlog.md`.
 
 ---
