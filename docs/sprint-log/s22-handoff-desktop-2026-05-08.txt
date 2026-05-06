@@ -1,0 +1,310 @@
+CIMS S22 LAPTOP -> DESKTOP HANDOFF FOR FRIDAY 2026-05-08
+========================================================
+
+Prepared at end of laptop session 2026-05-06.
+Branch: master.
+Working tree clean.
+Pushed to origin and ready to pull.
+
+CURRENT POSITION
+-----------------
+Master is at 581abb8. v1.0 code is FEATURE-COMPLETE.
+S0..S22 substantive work all merged. 985 / 985 tests green
+in CI. Build clean (0 warnings, 0 errors). Zero vulnerable
+packages. OWASP Top 10 review SIGNED OFF.
+
+S22 (UAT & Release) is the active sprint and is awaiting the
+human UAT pass that the laptop session couldn't drive. That
+pass is the FRIDAY 2026-05-08 ASK. See "FRIDAY'S TASK" below.
+
+WHY DESKTOP, WHY FRIDAY
+------------------------
+The 2026-05-06 laptop session shipped five v1.0 sprints
+(S16/S17/S18/S19/S20/S21) plus four hardening / fix-forward
+PRs (B-115, S22 kickoff, S22 synthetic UAT DTO fix, B-127 DTO
+sweep). 16 PRs landed: #60..#75 (#67 closed stale).
+
+Two of v1.0's ship gates are external-execution items the
+agent can't drive: pen test commission, load test execution.
+The third — human UAT — is the calendar-bound 2-week-ish
+gate that S22's kickoff doc explicitly carves out as a
+user-action.
+
+A 2-week run is overkill for the v1.0 internal pilot. A
+single 30-60 minute Friday run-through against the deployed
+desktop instance closes the gate honestly: the synthetic UAT
+already covered the API contracts (PR #74 caught one real
+DTO bug); the human pass catches UX friction the agent
+fundamentally can't.
+
+FIRST THING NEXT SESSION (do before anything else)
+---------------------------------------------------
+1. git fetch && git checkout master && git pull --ff-only
+
+2. NO migration to apply on master at 581abb8 vs the desktop's
+   pre-S20 state. The S20 migration AddDailyDiaryAndNcr
+   (20260505200153) IS already on master; the desktop will
+   pick it up on the pull. Run:
+
+     dotnet ef database update --project CimsApp
+
+   Expected: applies AddEvidenceAndAuditorAssignment (S18)
+   AND AddDailyDiaryAndNcr (S20) if the desktop hasn't seen
+   them. If the desktop was already at the post-S15 checkpoint
+   from prior session, it already has every migration through
+   S15; only S18 + S20 are new.
+
+3. Sanity:
+
+     dotnet build CimsApp.sln
+     dotnet test  CimsApp.sln
+
+   Expect 985 / 985 green. Build clean. (Tests run fine on the
+   desktop; WDAC on the laptop blocked dotnet test there for the
+   last several sprints — see memory/project_laptop_wdac.md.
+   Desktop has no such block.)
+
+4. Read docs/current-sprint.md from top to bottom. It's the
+   AI-brief pointer; refreshed after S20+B-115 (PR #70) and
+   reflects the post-S21 state at the time of this handoff.
+   Wait — actually it was refreshed AFTER S21 too (PR #72).
+   So it's at "S21 closed; S22 not yet kicked off" as of
+   this handoff. (The S22 kickoff itself is at
+   docs/sprint-log/s22.md and the synthetic-UAT writeup at
+   docs/sprint-log/s22-synthetic-uat-2026-05-06.md.)
+
+   For Friday's UAT specifically, re-read also:
+   - docs/training/projectmanager-walkthrough.md (~20 min)
+   - docs/training/siteuser-walkthrough.md (~10 min)
+
+WHAT'S LANDED SINCE LAST DESKTOP PICKUP
+----------------------------------------
+The desktop's last master checkpoint was likely at the end of
+the S2..S15 sweep (the user mentioned working "a lot on the
+desktop" before the 2026-05-04 laptop pickup). At that point,
+master was around 190fa87 (post-S15 PR #59 merge).
+
+Since then, on the laptop:
+
+PR #60 — S16 Admin Console (4 services + 4 controllers + 4
+  Razor pages + 27 tests). Merged 2026-05-04 at dd62441.
+  CI caught a latent existence-leak bug in
+  OrganisationAdminService.UpdateAsync (cross-tenant 403 vs
+  404); fixed pre-merge.
+PR #61 — current-sprint pointer refresh after S2..S15 sweep.
+PR #62 — S17 Mobile / Responsive Views. UI sweep:
+  responsive sidebar drawer + per-page table column
+  responsive hiding (d-none d-{breakpoint}-table-cell utility
+  class pattern) + AdminOrganisations Edit dialog FullWidth fix.
+PR #63 — PAFM Appendix F reconciliation + post-S17 pointer
+  refresh. HEADLINE FINDING: F.N maps to S(N-1), NOT F.N=SN
+  as our recent kickoffs assumed. Drift originated from S8 CI
+  Hardening (off-roadmap) + S15 Search & Discovery
+  (off-roadmap). See memory/project_pafm_offset.md and
+  docs/scope-reconciliation-2026-05-05.md.
+PR #64 — S18 Audit & Compliance Support (PAFM F.17). Three
+  services (Evidence library, AuditorAdmin, AuditExport ZIP) +
+  three controllers + two entities + Razor UI fast-follower
+  + 15 tests. New UserRole.ExternalAuditor enum value
+  intentionally OUTSIDE the role hierarchy in Core.cs (every
+  HasMinimumRole(ExternalAuditor, X) returns false; mutation
+  gates auto-reject without per-call special-casing).
+PR #65 — pointer refresh after S18.
+PR #66 — S19 Security & Performance (PAFM F.18). Non-development
+  sprint. OWASP Top 10 review SIGNED OFF (9 PASS, 1 PARTIAL
+  closed by B-115). SecurityHeadersMiddleware + UseHsts (A05).
+  8-char password floor (A07). ADR-0016 secrets management.
+  Pen test scope spec at docs/security/pen-test-scope-2026-05-05.md.
+  k6 load-test script at scripts/load-test/k6-100-vu.js.
+PR #68 — S20 Site-User Mobile Workflows (off-roadmap; B-107
+  + B-108 promoted). Daily Diary + NCR raising. Two entities,
+  8th state machine (Core/NcrWorkflow.cs), 5 new audit-twin
+  events, two Razor pages.
+PR #69 — B-115 vulnerable transitive packages upgrade. Five
+  vulnerabilities cleared. EF Core / JwtBearer 8.0.2 -> 8.0.10;
+  explicit pins for System.Formats.Asn1, Azure.Identity,
+  Microsoft.Identity.Client. dotnet list package --vulnerable
+  now reports zero findings.
+PR #70 — pointer refresh after S20 + B-115.
+PR #71 — S21 Documentation & Training (PAFM F.19). 22 user docs
+  in docs/user/ + 3 admin docs in docs/admin/ + API doc at
+  docs/api/openapi.md + 3 role-based walkthrough scripts in
+  docs/training/. Training videos deferred to v1.1 / B-124.
+PR #72 — pointer refresh after S21.
+PR #73 — S22 kickoff + CHANGELOG.md (root) + go-live checklist
+  at docs/operations/go-live-checklist.md.
+PR #74 — fix(s22): synthetic UAT caught a 500 on bootstrap
+  with over-long Code (was 11 chars, Organisation.Code is
+  MaxLength(10)); fixed via [StringLength] attributes on
+  CreateOrgRequest, CreateProjectRequest, RegisterRequest,
+  LoginRequest, CreateInvitationRequest. 100% latent because
+  unit tests construct DTOs directly (skip model-binder).
+PR #75 — chore(b-127): DTO validation sweep. Pulled B-127
+  forward as v1.0 hardening. Two CORRECTIONS to PR #74:
+  CreateProjectRequest.Code was set to StringLength(10) but
+  Project.Code is MaxLength(20); Currency was set to 10 but
+  is MaxLength(3). Plus added StringLength to
+  UpdateProjectRequest, CreateContainerRequest,
+  CreateDocumentRequest, CreateRfiRequest, CreateActionRequest,
+  UpdateActionRequest. The remaining ~10 Create*Request DTOs
+  across the deeper API surface are tracked as B-127 in the
+  v1.1 backlog (carries forward as a name; the high-traffic
+  set is done).
+
+#67 was closed stale (post-S19 pointer that S20 superseded).
+
+FRIDAY'S TASK (the actual ask)
+-------------------------------
+**Human UAT against the deployed desktop instance.**
+
+Goal: 30-60 minute run-through that catches UX friction the
+synthetic UAT (PR #74) couldn't. Defects logged ad-hoc in this
+session; the agent fix-forwards on a branch + PR.
+
+Recommended path:
+
+1. Restart the dev server on the desktop:
+
+     dotnet run --project CimsApp
+
+   (If application-control blocks CimsApp.exe on the desktop,
+   the workaround is `dotnet bin/Debug/net8.0/CimsApp.dll` per
+   the original post-S1 handoff. Probably not needed on desktop.)
+
+2. Sign in. The desktop's LocalDB has its own user accounts
+   from the S2..S15 development era — the laptop-only
+   eduard.szigeti@genera-systems.com SuperAdmin account WON'T
+   exist on the desktop. Use whichever existing SuperAdmin
+   account you have on the desktop (from the standing post-S0
+   ritual: UPDATE Users SET GlobalRole = 0 WHERE Email = '...').
+
+3. Pick ONE walkthrough that matches what you want to verify:
+
+   Option A — PROJECT MANAGER walkthrough
+     File: docs/training/projectmanager-walkthrough.md
+     Duration: ~20 minutes
+     Covers: project create + CDE document workflow
+       (WIP -> Shared -> Published) + RFI raise + respond +
+       risk register + audit trail review.
+     Best if: you want to verify the v1.0 core PM workflow.
+
+   Option B — SITE USER walkthrough
+     File: docs/training/siteuser-walkthrough.md
+     Duration: ~10 minutes
+     Covers: mobile-shaped Daily Diary + NCR raising + workflow
+       transitions. Use browser dev tools at 375px to exercise
+       the responsive UI.
+     Best if: you want to verify the S20 surfaces and the S17
+       responsive sweep.
+
+   Option C — free-form
+     Just click around. Pick a project, browse the surfaces,
+     try things, report what feels off.
+
+4. Note anything that looks broken: wrong copy, ugly layout, an
+   action that errors when it shouldn't, a workflow that doesn't
+   make sense, missing nav entry, unhelpful error message.
+
+5. The agent fix-forwards each finding on a branch + PR. After
+   the last one merges, S22 closes:
+   - Date-stamp CHANGELOG.md (replace 2026-MM-DD with actual
+     ship date)
+   - git tag -a v1.0
+   - Write the v1.0 retrospective at
+     docs/retrospectives/s22.md
+   - PR + merge
+
+WHAT IS *NOT* PART OF THE FRIDAY ASK
+-------------------------------------
+- Pen test commission. Send the spec at
+  docs/security/pen-test-scope-2026-05-05.md to a qualified
+  firm; out-of-session (~2 weeks).
+- Load test execution. The k6 script is at
+  scripts/load-test/k6-100-vu.js with README. Needs k6
+  installed and a deployed staging instance with a seed
+  bearer token. Out-of-session.
+- Training video production. Scripts at docs/training/*.md
+  are commit-ready; recording is v1.1 / B-124.
+
+These three are the remaining external gates. v1.0 ships only
+when all four (UAT + pen test + load test + tag) clear. After
+Friday's UAT close-out, the only ship-blockers are the two
+external-tester / external-rig dependencies.
+
+OPERATIONAL NOTES
+------------------
+- gh CLI on bash needs the full path on the laptop (Program
+  Files / GitHub CLI / gh.exe). Probably similar on desktop.
+- WDAC blocked dotnet test on the laptop after every rebuild
+  (memory/project_laptop_wdac.md). The desktop has not hit
+  this. If it does on Friday, the synthetic UAT showed CI is
+  the verification gate; rely on PR CI rather than local test
+  for any fix-forward.
+- The S22 PR (#73) added CHANGELOG.md at repo root +
+  docs/operations/go-live-checklist.md. The go-live checklist
+  is the canonical pre-deploy / deploy / post-deploy procedure.
+- Direct push to master is blocked (Claude Code permission
+  rule). Every change goes through PR — use:
+    git checkout -b <branch>
+    git push -u origin <branch>
+    gh pr create
+  pattern. Master branch protection at the GitHub level lands
+  2026-05-18 09:00 UTC via T-S8-05 follow-up agent.
+
+V1.0 SHIP READINESS — current state
+------------------------------------
+- 22 PAFM Appendix F functional modules: SHIPPED
+- OWASP Top 10 (2021) review: SIGNED OFF
+- Vulnerable packages: zero
+- Audit-twin atomicity across the full mutation surface:
+  PRESERVED
+- Multi-tenant isolation: tested + documented
+- External Auditor role with time-limited project access:
+  shipped
+- Documentation: 22 user docs + 3 admin docs + API doc + 3
+  training scripts
+- CHANGELOG.md drafted with v1.0 entry
+- Go-live checklist drafted (7 phases, per-step sign-off)
+- Synthetic UAT pass + 1 real bug found (DTO validation gap,
+  fixed)
+- B-127 partial sweep (high-traffic project DTOs)
+- Master direct-push: blocked (PR-only)
+- Master branch protection: scheduled 2026-05-18 09:00 UTC
+
+Pending external gates:
+- Human UAT — FRIDAY 2026-05-08 (this handoff)
+- Pen test commission (external, ~2 weeks calendar)
+- Load test execution (external, ~30 minutes once k6 is set up)
+- v1.0 tag + deploy + CHANGELOG date stamp + S22 retro
+  (closes after the three above clear)
+
+V1.1 BACKLOG — CURRENT STATE
+-----------------------------
+Backlog at B-001..B-127. Closed: B-001..B-007, B-013, B-017,
+B-019, B-021, B-023, B-027, B-107, B-108, B-115. Skipped: B-116
+(numbering aligned with what actually landed). Detail at
+docs/v1.1-backlog.md.
+
+TO COMMIT FIRST THING (none — handoff is the only artefact)
+------------------------------------------------------------
+This handoff file is the only addition. Push to a docs branch
++ open a PR; the post-S1 era pattern of "commit handoffs
+directly on master" no longer applies because direct-master
+push is blocked.
+
+If on Friday you find a quick bug to fix-forward, follow the
+pattern that worked all session: branch, commit, push, PR,
+wait for CI green, merge.
+
+If on Friday everything walks clean and there's nothing to
+fix-forward, the next step is the v1.0 ship close-out
+sequence — but that needs the pen test report and the load
+test result first, both of which are external. So Friday
+either:
+  (a) finds bugs -> agent fix-forwards on branch -> merge ->
+      ready for the next external gate to fire
+  (b) walks clean -> human UAT gate is closed -> waiting on
+      pen test + load test before tag + deploy
+
+Either outcome is acceptable. The session ends ready for the
+external gates to fire whenever they fire.
