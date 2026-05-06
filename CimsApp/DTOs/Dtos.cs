@@ -1,17 +1,27 @@
+using System.ComponentModel.DataAnnotations;
 using CimsApp.Models;
 
 namespace CimsApp.DTOs;
 
-public record RegisterRequest(string Email, string Password, string FirstName, string LastName, string? JobTitle, string InvitationToken);
-public record LoginRequest(string Email, string Password);
+// T-S22-04 (synthetic UAT) input-validation hardening: DTOs on the
+// anonymous + auth + bootstrap surface get StringLength attributes
+// matching the underlying entity MaxLength. Without these, over-long
+// input becomes a 500 (SQL "string would be truncated") instead of
+// the clean 400 (ValidationException) that the API contract promises.
+// Synthetic-UAT regression test: 11-char Code on bootstrap-org POST
+// returned 500; with the attribute it now returns 400 with a useful
+// validation message.
+
+public record RegisterRequest([StringLength(200)] string Email, [StringLength(200)] string Password, [StringLength(100)] string FirstName, [StringLength(100)] string LastName, [StringLength(200)] string? JobTitle, string InvitationToken);
+public record LoginRequest([StringLength(200)] string Email, [StringLength(200)] string Password);
 public record RefreshRequest(string RefreshToken);
 public record AuthResponse(string AccessToken, string RefreshToken, UserSummaryDto User);
 public record UserSummaryDto(Guid Id, string Email, string FirstName, string LastName, string? JobTitle, OrgSummaryDto Organisation);
 public record OrgSummaryDto(Guid Id, string Name, string Code);
-public record CreateOrgRequest(string Name, string Code, string? Country);
-public record CreateInvitationRequest(string? Email = null, int? ExpiresInDays = null);
+public record CreateOrgRequest([StringLength(200)] string Name, [StringLength(10)] string Code, [StringLength(100)] string? Country);
+public record CreateInvitationRequest([StringLength(200)] string? Email = null, int? ExpiresInDays = null);
 public record InvitationDto(Guid Id, string Token, DateTime ExpiresAt, bool IsBootstrap, string? Email);
-public record CreateProjectRequest(string Name, string Code, string? Description, Guid AppointingPartyId, DateTime? StartDate, DateTime? EndDate, string? Location, string? Country, string Currency, decimal? BudgetValue, string? Sector, string? Sponsor, string? EirRef);
+public record CreateProjectRequest([StringLength(200)] string Name, [StringLength(10)] string Code, string? Description, Guid AppointingPartyId, DateTime? StartDate, DateTime? EndDate, [StringLength(200)] string? Location, [StringLength(100)] string? Country, [StringLength(10)] string Currency, decimal? BudgetValue, [StringLength(100)] string? Sector, [StringLength(200)] string? Sponsor, [StringLength(100)] string? EirRef);
 public record UpdateProjectRequest(string? Name, string? Description, ProjectStatus? Status, DateTime? StartDate, DateTime? EndDate, string? Location, decimal? BudgetValue, string? Sponsor, string? EirRef);
 public record AddMemberRequest(Guid UserId, UserRole Role);
 public record CreateContainerRequest(string Name, string Originator, string? Volume, string? Level, string Type, string? Discipline, string? Description);
