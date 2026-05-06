@@ -283,6 +283,22 @@ public enum AlertComparison
     Equal,
 }
 
+// S20 NCR (Non-Conformance Report) — PAFM F.16 site-user
+// workflows gap. Distinct from DocumentType.Ncr enum which is
+// just a typing tag on Document. NcrSeverity drives workflow
+// urgency; NcrState is the 5-state linear workflow + Cancelled
+// branch. State-machine enforcement in Core/NcrWorkflow.cs.
+public enum NcrSeverity { Low, Medium, High, Critical }
+public enum NcrState
+{
+    Raised,
+    Assigned,
+    InProgress,
+    Resolved,
+    Closed,
+    Cancelled,
+}
+
 // S18 Audit & Compliance Support (PAFM-SD F.17 first bullet —
 // "organised artefact collection per compliance area"). v1.0
 // ships the six dominant compliance areas an internal-pilot

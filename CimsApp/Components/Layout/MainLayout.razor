@@ -80,6 +80,9 @@ else
                 <SideNavItem Href="/audit"     Icon="@Icons.Material.Filled.History"     Label="Audit Trail" />
                 @* T-S18 evidence library entry — project-scoped page. *@
                 <SideNavItem Href="/evidence"  Icon="@Icons.Material.Filled.FactCheck"   Label="Evidence" />
+                @* T-S20 site-user mobile workflows — project-scoped pages. *@
+                <SideNavItem Href="/diary"     Icon="@Icons.Material.Filled.MenuBook"    Label="Daily Diary" />
+                <SideNavItem Href="/ncrs"      Icon="@Icons.Material.Filled.Warning"     Label="NCRs" />
                 @* T-S16-04 admin entries — always shown, gated server-side
                    by [Authorize(Roles="OrgAdmin,SuperAdmin")] on each
                    /admin/* controller. Regular users hitting these pages

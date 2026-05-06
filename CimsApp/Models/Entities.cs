@@ -2616,3 +2616,99 @@ public class AuditorProjectAssignment
     public bool IsActive => !IsRevoked && ExpiresAt > DateTime.UtcNow;
 }
 
+/// <summary>
+/// Daily Diary entry (T-S20-02, B-107). Per-project, per-day,
+/// per-user. Multi-author per day permitted (e.g. site supervisor
+/// + safety officer + foreman). Service-layer enforces
+/// (ProjectId, DiaryDate, AuthorId) uniqueness on create.
+/// Project-scoped via Project.AppointingPartyId query filter.
+/// Update window: free at v1.0 (no time-bound; audit trail
+/// captures every edit). Tighter rules → v1.1 if pilot
+/// surfaces tampering concerns.
+/// </summary>
+public class DailyDiaryEntry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>The calendar date the entry covers (NOT
+    /// CreatedAt). DateOnly avoids timezone confusion;
+    /// service-layer accepts UTC date only.</summary>
+    public DateOnly DiaryDate { get; set; }
+
+    public Guid AuthorId { get; set; }
+    public User Author { get; set; } = null!;
+
+    [MaxLength(500)] public string? Weather { get; set; }
+    [MaxLength(2000)] public string? Manpower { get; set; }
+    [MaxLength(2000)] public string? Plant { get; set; }
+    [MaxLength(2000)] public string? Deliveries { get; set; }
+    [MaxLength(2000)] public string? Incidents { get; set; }
+    [MaxLength(4000)] public string? ProgressNotes { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// NCR — Non-Conformance Report (T-S20-03, B-108). Distinct from
+/// the <see cref="DocumentType.Ncr"/> enum value (which just tags
+/// a Document; this is the structured raise-to-close workflow
+/// entity). Per-project sequential <see cref="Number"/> like
+/// "NCR-0001" matching the existing RFI / change-request /
+/// inspection pattern. State machine: Raised → Assigned →
+/// InProgress → Resolved → Closed (+ Cancelled from
+/// Raised/Assigned only). Project-scoped via Project's
+/// AppointingPartyId query filter. PhotoStorageKey is a v1.0
+/// placeholder — v1.0 doesn't ship inline upload (B-120).
+/// </summary>
+public class Ncr
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    /// <summary>Per-project sequential, e.g. "NCR-0001". Service
+    /// computes at create time as
+    /// "NCR-" + (max(existing) + 1).PadLeft(4, '0').</summary>
+    [Required, MaxLength(20)]
+    public string Number { get; set; } = "";
+
+    [Required, MaxLength(200)]
+    public string Title { get; set; } = "";
+
+    [Required]
+    public string Description { get; set; } = "";
+
+    public NcrSeverity Severity { get; set; } = NcrSeverity.Medium;
+
+    [MaxLength(500)]
+    public string? Location { get; set; }
+
+    public NcrState Status { get; set; } = NcrState.Raised;
+
+    public Guid RaisedById { get; set; }
+    public User RaisedBy { get; set; } = null!;
+
+    public Guid? AssignedToId { get; set; }
+    public User? AssignedTo { get; set; }
+
+    /// <summary>v1.0 placeholder for an external blob reference.
+    /// Inline photo upload is v1.1 / B-120.</summary>
+    [MaxLength(500)]
+    public string? PhotoStorageKey { get; set; }
+
+    [MaxLength(4000)]
+    public string? ResolutionNotes { get; set; }
+
+    public DateTime? AssignedAt { get; set; }
+    public DateTime? ResolvedAt { get; set; }
+    public DateTime? ClosedAt { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+

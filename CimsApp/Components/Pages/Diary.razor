@@ -1,0 +1,113 @@
+@page "/diary"
+@using CimsApp.Services.SiteUserWorkflows
+@inject BlazorApiClient Api
+@inject UiStateService UI
+@inject ISnackbar Snackbar
+
+<PageHeader Title="Daily Diary"
+            Subtitle="@(UI.CurrentProject?.Name ?? "Select a project")"
+            ButtonLabel="Add today's entry"
+            OnButton="OpenAdd"
+            ShowButton="UI.CurrentProject != null" />
+
+@if (UI.CurrentProject == null) { <NoProject /> }
+else
+{
+    @if (_loading) { <Loading /> }
+    else if (_page == null)
+    {
+        <EmptyState Icon="@Icons.Material.Filled.Lock" Text="Insufficient permissions or service unavailable." />
+    }
+    else if (_page.Items.Count == 0)
+    {
+        <EmptyState Icon="@Icons.Material.Filled.MenuBook" Text="No diary entries yet." />
+    }
+    else
+    {
+        <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;">
+            <MudTable Items="_page.Items" Hover="true" Elevation="0" Dense="true">
+                <HeaderContent>
+                    <MudTh>Date</MudTh>
+                    <MudTh>Author</MudTh>
+                    <MudTh Class="d-none d-sm-table-cell">Weather</MudTh>
+                    <MudTh Class="d-none d-md-table-cell">Progress notes</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd><span style="font-family:monospace;font-size:12px;font-weight:600;">@context.DiaryDate.ToString("yyyy-MM-dd")</span></MudTd>
+                    <MudTd>@context.AuthorName</MudTd>
+                    <MudTd Class="d-none d-sm-table-cell">@(context.Weather ?? "—")</MudTd>
+                    <MudTd Class="d-none d-md-table-cell"><span style="font-size:12px;color:#64748B;">@(context.ProgressNotes is { } pn && pn.Length > 80 ? pn[..80] + "…" : context.ProgressNotes ?? "—")</span></MudTd>
+                </RowTemplate>
+            </MudTable>
+            <div style="padding:12px 16px;color:#64748B;font-size:12px;">@_page.Items.Count of @_page.Total</div>
+        </MudCard>
+    }
+}
+
+<MudDialog @bind-Visible="_showAdd" Options='new DialogOptions{MaxWidth=MaxWidth.Small,FullWidth=true}'>
+    <TitleContent><MudText Typo="Typo.h6">New diary entry</MudText></TitleContent>
+    <DialogContent>
+        <MudDatePicker @bind-Date="_addDate" Label="Date" Margin="Margin.Dense" />
+        <MudTextField @bind-Value="_weather" Label="Weather" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" />
+        <MudTextField @bind-Value="_manpower" Label="Manpower" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" Class="mt-2" />
+        <MudTextField @bind-Value="_plant" Label="Plant" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" Class="mt-2" />
+        <MudTextField @bind-Value="_deliveries" Label="Deliveries" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" Class="mt-2" />
+        <MudTextField @bind-Value="_incidents" Label="Incidents" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" Class="mt-2" />
+        <MudTextField @bind-Value="_progressNotes" Label="Progress notes" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="3" Class="mt-2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showAdd = false" Style="text-transform:none;">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAdd" Style="text-transform:none;">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    DailyDiaryPagedResult? _page;
+    bool _loading = true;
+
+    bool _showAdd;
+    DateTime? _addDate = DateTime.UtcNow.Date;
+    string _weather = "";
+    string _manpower = "";
+    string _plant = "";
+    string _deliveries = "";
+    string _incidents = "";
+    string _progressNotes = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        UI.OnChange += () => InvokeAsync(async () => { await LoadAsync(); StateHasChanged(); });
+        await LoadAsync();
+    }
+
+    async Task LoadAsync()
+    {
+        if (UI.CurrentProject == null) { _loading = false; return; }
+        _loading = true;
+        _page = await Api.ListDiaryAsync(UI.CurrentProject.Id);
+        _loading = false;
+    }
+
+    void OpenAdd()
+    {
+        _addDate = DateTime.UtcNow.Date;
+        _weather = _manpower = _plant = _deliveries = _incidents = _progressNotes = "";
+        _showAdd = true;
+    }
+
+    async Task SaveAdd()
+    {
+        if (UI.CurrentProject == null || _addDate is null) return;
+        var req = new CreateDailyDiaryRequest(
+            DateOnly.FromDateTime(_addDate.Value),
+            string.IsNullOrWhiteSpace(_weather) ? null : _weather,
+            string.IsNullOrWhiteSpace(_manpower) ? null : _manpower,
+            string.IsNullOrWhiteSpace(_plant) ? null : _plant,
+            string.IsNullOrWhiteSpace(_deliveries) ? null : _deliveries,
+            string.IsNullOrWhiteSpace(_incidents) ? null : _incidents,
+            string.IsNullOrWhiteSpace(_progressNotes) ? null : _progressNotes);
+        var (ok, err) = await Api.CreateDiaryAsync(UI.CurrentProject.Id, req);
+        if (ok) { Snackbar.Add("Diary entry saved", Severity.Success); _showAdd = false; await LoadAsync(); }
+        else    { Snackbar.Add($"Cannot save: {err}", Severity.Error); }
+    }
+}

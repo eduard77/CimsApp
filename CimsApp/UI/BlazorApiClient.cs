@@ -262,6 +262,71 @@ public class BlazorApiClient(IHttpClientFactory factory, UiStateService state)
         catch (Exception ex) { return (false, null, ex.Message); }
     }
 
+    // ── Site-user mobile workflows (S20) ──────────────────────────────────────
+
+    public async Task<CimsApp.Services.SiteUserWorkflows.DailyDiaryPagedResult?> ListDiaryAsync(Guid projectId, DateOnly? from = null, DateOnly? to = null, int skip = 0, int take = 50)
+    {
+        try
+        {
+            var qs = new List<string> { $"skip={skip}", $"take={take}" };
+            if (from is { } f) qs.Add($"from={f:yyyy-MM-dd}");
+            if (to   is { } t) qs.Add($"to={t:yyyy-MM-dd}");
+            var b = await Http().GetStringAsync($"api/v1/projects/{projectId}/diary?" + string.Join("&", qs));
+            return Extract<CimsApp.Services.SiteUserWorkflows.DailyDiaryPagedResult>(b, "data");
+        }
+        catch { return null; }
+    }
+
+    public async Task<(bool Ok, string? Error)> CreateDiaryAsync(Guid projectId, CimsApp.Services.SiteUserWorkflows.CreateDailyDiaryRequest req)
+    {
+        try { var r = await Http().PostAsJsonAsync($"api/v1/projects/{projectId}/diary", req); var b = await r.Content.ReadAsStringAsync(); return r.IsSuccessStatusCode ? (true, null) : (false, ExtractError(b)); }
+        catch (Exception ex) { return (false, ex.Message); }
+    }
+
+    public async Task<CimsApp.Services.SiteUserWorkflows.NcrPagedResult?> ListNcrsAsync(Guid projectId, NcrState? status = null, int skip = 0, int take = 50)
+    {
+        try { var url = $"api/v1/projects/{projectId}/ncrs?skip={skip}&take={take}" + (status is { } s ? $"&status={s}" : ""); var b = await Http().GetStringAsync(url); return Extract<CimsApp.Services.SiteUserWorkflows.NcrPagedResult>(b, "data"); }
+        catch { return null; }
+    }
+
+    public async Task<(bool Ok, string? Error, string? Number)> CreateNcrAsync(Guid projectId, CimsApp.Services.SiteUserWorkflows.CreateNcrRequest req)
+    {
+        try
+        {
+            var r = await Http().PostAsJsonAsync($"api/v1/projects/{projectId}/ncrs", req);
+            var b = await r.Content.ReadAsStringAsync();
+            if (!r.IsSuccessStatusCode) return (false, ExtractError(b), null);
+            using var doc = System.Text.Json.JsonDocument.Parse(b);
+            var num = doc.RootElement.TryGetProperty("data", out var d) && d.TryGetProperty("number", out var nn) ? nn.GetString() : null;
+            return (true, null, num);
+        }
+        catch (Exception ex) { return (false, ex.Message, null); }
+    }
+
+    public async Task<(bool Ok, string? Error)> TransitionNcrAsync(Guid projectId, Guid ncrId, NcrState toState, string? resolutionNotes = null)
+    {
+        try
+        {
+            var req = new CimsApp.Services.SiteUserWorkflows.TransitionNcrRequest(toState, resolutionNotes);
+            var r = await Http().PostAsJsonAsync($"api/v1/projects/{projectId}/ncrs/{ncrId}/transition", req);
+            var b = await r.Content.ReadAsStringAsync();
+            return r.IsSuccessStatusCode ? (true, null) : (false, ExtractError(b));
+        }
+        catch (Exception ex) { return (false, ex.Message); }
+    }
+
+    public async Task<(bool Ok, string? Error)> AssignNcrAsync(Guid projectId, Guid ncrId, Guid assignedToId)
+    {
+        try
+        {
+            var req = new CimsApp.Services.SiteUserWorkflows.AssignNcrRequest(assignedToId);
+            var r = await Http().PostAsJsonAsync($"api/v1/projects/{projectId}/ncrs/{ncrId}/assign", req);
+            var b = await r.Content.ReadAsStringAsync();
+            return r.IsSuccessStatusCode ? (true, null) : (false, ExtractError(b));
+        }
+        catch (Exception ex) { return (false, ex.Message); }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
     private static T? Extract<T>(string json, string key)
     {

@@ -83,6 +83,8 @@ public class CimsDbContext(
     public DbSet<AlertRule>           AlertRules            => Set<AlertRule>();
     public DbSet<EvidenceArtefact>    EvidenceArtefacts    => Set<EvidenceArtefact>();
     public DbSet<AuditorProjectAssignment> AuditorProjectAssignments => Set<AuditorProjectAssignment>();
+    public DbSet<DailyDiaryEntry>     DailyDiaryEntries    => Set<DailyDiaryEntry>();
+    public DbSet<Ncr>                 Ncrs                 => Set<Ncr>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -799,6 +801,32 @@ public class CimsDbContext(
             e.Ignore(x => x.IsActive);
         });
 
+        m.Entity<DailyDiaryEntry>(e =>
+        {
+            // (ProjectId, DiaryDate, AuthorId) is the natural key.
+            // Service-layer enforces uniqueness on Create; index
+            // here is for read perf on the common date-range query.
+            e.HasIndex(x => new { x.ProjectId, x.DiaryDate, x.AuthorId }).IsUnique();
+            e.HasIndex(x => new { x.ProjectId, x.DiaryDate });
+            e.HasOne(x => x.Project).WithMany()
+             .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.Author).WithMany()
+             .HasForeignKey(x => x.AuthorId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        m.Entity<Ncr>(e =>
+        {
+            // Per-project sequential Number; uniqueness enforced.
+            e.HasIndex(x => new { x.ProjectId, x.Number }).IsUnique();
+            e.HasIndex(x => new { x.ProjectId, x.Status });
+            e.HasOne(x => x.Project).WithMany()
+             .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.RaisedBy).WithMany()
+             .HasForeignKey(x => x.RaisedById).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.AssignedTo).WithMany()
+             .HasForeignKey(x => x.AssignedToId).OnDelete(DeleteBehavior.NoAction);
+        });
+
         m.Entity<GatewayPackage>(e =>
         {
             // (ProjectId, Type, Number) unique-when-active gives
@@ -976,6 +1004,11 @@ public class CimsDbContext(
         // side is the authority. SuperAdmin reaches all assignments
         // via IgnoreQueryFilters per ADR-0007.
         m.Entity<AuditorProjectAssignment>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        // S20 Site-User Mobile Workflows. Both project-scoped via
+        // Project.AppointingPartyId — same shape as every project
+        // entity from S2 onwards.
+        m.Entity<DailyDiaryEntry>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
+        m.Entity<Ncr>().HasQueryFilter(x => x.Project.AppointingPartyId == _tenant.OrganisationId);
     }
 
     public override int SaveChanges()
@@ -1027,6 +1060,8 @@ public class CimsDbContext(
             else if (e.Entity is OpportunityToImprove oti) oti.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is InspectionActivity insp) insp.UpdatedAt = DateTime.UtcNow;
             else if (e.Entity is AlertRule ar) ar.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is DailyDiaryEntry dde) dde.UpdatedAt = DateTime.UtcNow;
+            else if (e.Entity is Ncr ncr) ncr.UpdatedAt = DateTime.UtcNow;
         }
     }
 }
