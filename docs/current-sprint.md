@@ -5,35 +5,48 @@ non-trivial AI session so the model starts with the right scope anchor.
 
 ---
 
-**Status:** Between sprints — S20 closed 2026-05-05; **B-115
-closed 2026-05-06**; **S21 not yet kicked off** (scope pinned).
+**Status:** Between sprints — S21 closed 2026-05-06;
+**S22 not yet kicked off** (scope pinned). **One sprint to v1.0
+ship.**
 
 **Active sprint:** none.
 
-**Next sprint (S21):** **F.19 — Documentation & Training** per
-PAFM Appendix F.19. Four bullets: user documentation
-(`docs/user/`) covers all modules; admin documentation
-(`docs/admin/`) covers setup; API documentation (Swagger /
-OpenAPI) published; training videos or walkthroughs for three
-primary roles. **Substantial docs-shape sprint** — the agent
-can write user/admin docs from the codebase + verify the
-existing Swagger surface; training videos are a user-execution
-gate similar to S19's pen test commission.
+**Next sprint (S22):** **F.20 — UAT & Release.** v1.0 ship
+gate. Five bullets:
+- 2-week UAT with one internal test user against one real
+  pilot project
+- All critical UAT defects closed
+- Release candidate tagged + deployed to production
+- Go-live checklist completed
+- CHANGELOG updated to v1.0
 
-**Two ship-gate carry-forwards remain (S22):**
+**Structurally different from S0-S21.** Most work is
+**gated on external execution**: user runs UAT, commissions /
+receives pen-test report, runs load test, optionally records
+training videos. The agent's role at S22 is **fixing UAT
+findings + writing the release artefacts** (CHANGELOG,
+go-live checklist), not kicking off a single-session
+implementation sprint.
+
+**Three ship-gate carry-forwards close at S22:**
 
 - **Pen test commission** —
   `docs/security/pen-test-scope-2026-05-05.md` is the
-  commissioning brief; user actions: send to qualified firm,
+  commissioning brief. User actions: send to qualified firm,
   receive report, close any Critical findings.
 - **Load test execution** — `scripts/load-test/k6-100-vu.js`
-  + README; user actions: provision staging instance + seed
+  + README. User actions: provision staging instance + seed
   user, run k6, document pass/fail.
+- **Training video production (optional)** — scripts at
+  `docs/training/*.md`; videos = v1.1 / B-124. v1.0 can ship
+  without if pilot operator is OK with text walkthroughs.
 
-**B-115 (vulnerable transitive packages) closed 2026-05-06**
-via PR #69. Last v1.0 ship-gate code-side obligation cleared.
-`dotnet list package --vulnerable --include-transitive` now
-reports zero findings.
+**v1.0 code is feature-complete after S21.** Backlog at
+B-001..B-126 (B-116 unused; B-107/B-108/B-115 closed). All 22
+PAFM Appendix F functional modules shipped. OWASP Top 10
+SIGNED OFF, zero vulnerable packages, audit-twin atomicity,
+multi-tenant isolation, External Auditor role with
+time-limited access, complete documentation surface.
 
 **Important — F-section / sprint-number offset:** PAFM maps
 **`F.N = S(N-1)`** end-to-end (drift originated at our S8 = "CI
@@ -43,7 +56,7 @@ labelled themselves F.16 / F.17 which was wrong — they shipped
 PAFM F.15 (Admin Console) and F.16 (Mobile Views) respectively.
 
 **Confirmed v1.0 sprint roadmap (post-reconciliation, S18 / S19
-/ S20 + B-115 shipped):**
+/ S20 / S21 + B-115 shipped):**
 
 | Sprint | Scope | Source |
 |---|---|---|
@@ -51,8 +64,8 @@ PAFM F.15 (Admin Console) and F.16 (Mobile Views) respectively.
 | ~~S19~~ | ~~Security & Performance~~ — **shipped** (carry-forwards: pen test, load test) | PAFM F.18 |
 | ~~S20~~ | ~~Site-User Mobile Workflows~~ — **shipped** | B-107 / B-108 |
 | ~~B-115~~ | ~~Vulnerable transitive packages~~ — **shipped** | OWASP A06 from S19 |
-| **S21 (next)** | Documentation & Training | PAFM F.19 |
-| S22 | UAT & Release | PAFM F.20 — v1.0 ship gate (closes pen test + load test carry-forwards) |
+| ~~S21~~ | ~~Documentation & Training~~ — **shipped** | PAFM F.19 |
+| **S22 (next)** | UAT & Release | PAFM F.20 — v1.0 ship gate (closes pen test + load test + training video carry-forwards) |
 
 S20 inserts a third off-roadmap sprint to close two real PAFM F.16
 product gaps that the original Mobile Views sprint (our S17, scoped
@@ -62,29 +75,29 @@ F.18 Security and F.19 Documentation rather than before F.17 trades
 "Evidence library covers them" against "minimal disruption to
 already-pinned S18".
 
-**Last sprint:** S20 — Site-User Mobile Workflows (off-roadmap;
-B-107 + B-108). Squash-merged at `44e049b` (2026-05-05, PR #68).
-See `docs/sprint-log/s20.md` and `docs/retrospectives/s20.md`.
-4 of 4 module-DoD bullets at v1.0: Daily Diary entity + page,
-NCR raising flow + page (8th state machine), 5 new audit-twin
-events, both responsive (inherit S17 patterns).
-Twenty-first consecutive single-session sprint; seventeenth
-consecutive sprint without a CR. Heaviest sprint by hours since
-S18.
+**Last sprint:** S21 — Documentation & Training (PAFM-SD F.19).
+Squash-merged at `f024aa4` (2026-05-06, PR #71). See
+`docs/sprint-log/s21.md` and `docs/retrospectives/s21.md`. 4 of
+4 module-DoD bullets at v1.0: 22 user docs in `docs/user/`,
+3 admin docs in `docs/admin/`, API doc at `docs/api/openapi.md`,
+3 role-based walkthrough scripts in `docs/training/`. Training
+videos deferred to v1.1 / B-124.
+Twenty-second consecutive single-session sprint; eighteenth
+without a CR.
 
 **Most recent fast-follower:** B-115 vulnerable transitive
 packages upgrade (PR #69 merged 2026-05-06). Five transitive
-vulnerabilities cleared (Microsoft.Extensions.Caching.Memory,
-System.Text.Json, System.Formats.Asn1, Azure.Identity,
-Microsoft.Identity.Client). `dotnet list package --vulnerable`
-now reports zero findings. Last v1.0 ship-gate code-side
-obligation removed.
+vulnerabilities cleared. `dotnet list package --vulnerable`
+now reports zero findings.
 
 **Previously closed:**
+- S20 — Site-User Mobile Workflows (off-roadmap; B-107 + B-108).
+  Squash-merged at `44e049b` (2026-05-05, PR #68). Daily Diary
+  + NCR raising. Heaviest sprint by hours since S18.
 - S19 — Security & Performance (= PAFM F.18). Squash-merged at
   `1347056` (2026-05-05, PR #66). OWASP Top 10 review SIGNED
-  OFF (9 PASS, 1 PARTIAL closed by B-115). ADR-0016 secrets
-  management. Pen test + load test as external carry-forwards.
+  OFF. ADR-0016 secrets management. Pen test + load test as
+  external carry-forwards.
 - S18 — Audit & Compliance Support (= PAFM F.17). Squash-merged
   at `a9e77a9` (2026-05-05, PR #64). 3 of 3 bullets shipped.
 - S17 — Mobile / Responsive Views (= PAFM F.16). Squash-merged
@@ -102,8 +115,8 @@ direct pushes to master are blocked — every change goes through PR).
 **Tests:** 985 / 985 green (CI). Build clean (0 warnings, 0 errors).
 Zero vulnerable packages reported by
 `dotnet list package --vulnerable --include-transitive`.
-Backlog at B-001..B-123 (B-115 + B-116 closed; numbering aligned
-with what landed).
+Backlog at B-001..B-126 (B-107/B-108/B-115 closed; B-116 unused;
+numbering aligned with what landed).
 
 ---
 
@@ -181,9 +194,15 @@ explicit unblock conditions. Per-sprint scope:
   8.0.10; explicit pins for System.Formats.Asn1, Azure.Identity,
   Microsoft.Identity.Client. Zero vulnerable packages
   remaining.
+- **S21 — Documentation & Training** (= PAFM F.19). 22 user
+  docs (`docs/user/`) + 3 admin docs (`docs/admin/`) + 1 API
+  doc (`docs/api/openapi.md`) + 3 training walkthrough scripts
+  (`docs/training/`). Training videos deferred to v1.1 / B-124.
+  Test count unchanged at 985 (docs sprint). Backlog
+  B-124..B-126.
 
 Detail: `docs/sprint-log/s<N>.md` + `docs/retrospectives/s<N>.md`
-per sprint. Git: `git log --oneline c0cfd53..aa8b792`.
+per sprint. Git: `git log --oneline c0cfd53..f024aa4`.
 
 ---
 
@@ -316,6 +335,8 @@ From S2 → S15 sprints:
   - B-115 — **closed 2026-05-06** (vulnerable transitives).
   - B-120..B-123 (S20 deferrals — NCR / Daily Diary photo
     attachments, NCR workflow extensions, NCR assignee UI).
+  - B-124..B-126 (S21 deferrals — training video production,
+    per-tenant docs customisation, in-app contextual help).
   - All other v1.1 backlog entries — see `docs/v1.1-backlog.md`.
 
 ---
