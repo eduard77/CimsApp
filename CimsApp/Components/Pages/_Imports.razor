@@ -1,0 +1,5 @@
+@using Microsoft.AspNetCore.Authorization
+@* ADR-0016 §1: every routed page is authenticated by default. Pages
+   that must remain anonymous (Login) opt out with @attribute
+   [AllowAnonymous]. AuthorizeRouteView in Routes.razor enforces this. *@
+@attribute [Authorize]

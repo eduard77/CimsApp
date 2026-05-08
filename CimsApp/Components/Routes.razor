@@ -1,6 +1,18 @@
+@inject NavigationManager Nav
+
+@* ADR-0016 §1: AuthorizeRouteView gates page rendering on the cookie
+   principal. Anonymous requests to authenticated pages bounce to "/"
+   (the Login page) before the page's OnInitializedAsync fires its
+   API calls. The Login page itself is annotated [AllowAnonymous]
+   below so this gate does not bounce on the route that issues the
+   cookie. *@
 <Router AppAssembly="typeof(App).Assembly">
     <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+            <NotAuthorized>
+                @{ Nav.NavigateTo("/", forceLoad: false); }
+            </NotAuthorized>
+        </AuthorizeRouteView>
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
 </Router>
