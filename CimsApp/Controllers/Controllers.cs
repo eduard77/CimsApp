@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -69,8 +70,23 @@ public class AuthController(AuthService svc) : ControllerBase
         Created("", new { success = true, data = await svc.RegisterAsync(req) });
 
     [AllowAnonymous, HttpPost("login"), EnableRateLimiting("anon-login")]
-    public async Task<IActionResult> Login(LoginRequest req) =>
-        Ok(new { success = true, data = await svc.LoginAsync(req, Request.Headers.UserAgent.ToString(), HttpContext.Connection.RemoteIpAddress?.ToString()) });
+    public async Task<IActionResult> Login(LoginRequest req)
+    {
+        var auth = await svc.LoginAsync(req,
+            Request.Headers.UserAgent.ToString(),
+            HttpContext.Connection.RemoteIpAddress?.ToString());
+        // ADR-0016 §1: issue the CimsAuth cookie alongside the JWT
+        // response. Cookie is the durable Blazor identity; JWT remains
+        // the transport credential for /api/* and non-Blazor consumers.
+        var principal = await svc.BuildCookiePrincipalAsync(auth.User.Id);
+        await HttpContext.SignInAsync("CimsAuth", principal, new AuthenticationProperties
+        {
+            IsPersistent = true,
+            ExpiresUtc   = DateTimeOffset.UtcNow.AddHours(8),
+            AllowRefresh = true,
+        });
+        return Ok(new { success = true, data = auth });
+    }
 
     [AllowAnonymous, HttpPost("refresh"), EnableRateLimiting("anon-default")]
     public async Task<IActionResult> Refresh(RefreshRequest req)
@@ -78,7 +94,14 @@ public class AuthController(AuthService svc) : ControllerBase
 
     [AllowAnonymous, HttpPost("logout"), EnableRateLimiting("anon-default")]
     public async Task<IActionResult> Logout(RefreshRequest req)
-    { await svc.LogoutAsync(req.RefreshToken); return Ok(new { success = true }); }
+    {
+        await svc.LogoutAsync(req.RefreshToken);
+        // ADR-0016 §1: clear the CimsAuth cookie. Symmetric with
+        // sign-in; without this a stale cookie outlives the user's
+        // intent.
+        await HttpContext.SignOutAsync("CimsAuth");
+        return Ok(new { success = true });
+    }
 
     [Authorize, HttpGet("me")]
     public async Task<IActionResult> Me()
@@ -100,6 +123,11 @@ public class AuthController(AuthService svc) : ControllerBase
     {
         var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         await svc.RevokeOwnTokensAsync(userId);
+        // ADR-0016 §1 + ADR-0014: also clear this caller's CimsAuth
+        // cookie. The cutoff bump kills every other session at the
+        // revalidation boundary; clearing the cookie kills this one
+        // immediately.
+        await HttpContext.SignOutAsync("CimsAuth");
         return Ok(new { success = true });
     }
 }

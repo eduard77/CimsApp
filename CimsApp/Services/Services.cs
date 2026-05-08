@@ -309,6 +309,34 @@ public class AuthService(
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
+    /// <summary>
+    /// ADR-0016 §2 / §3: build the lean ClaimsPrincipal stored in the
+    /// CimsAuth cookie. Same source of truth (User row) as the JWT;
+    /// includes an `iat` claim so the revalidation predicate can compare
+    /// against <see cref="User.TokenInvalidationCutoff"/> exactly.
+    /// </summary>
+    public async Task<ClaimsPrincipal> BuildCookiePrincipalAsync(Guid userId)
+    {
+        var user = await db.Users.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(u => u.Id == userId)
+            ?? throw new NotFoundException("User");
+        var iat = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new(CimsApp.Services.Tenancy.HttpTenantContext.OrganisationClaimType, user.OrganisationId.ToString()),
+            new("iat", iat),
+        };
+        if (user.GlobalRole is { } role)
+            claims.Add(new Claim(CimsApp.Services.Tenancy.HttpTenantContext.GlobalRoleClaimType, role.ToString()));
+        var identity = new ClaimsIdentity(
+            claims,
+            authenticationType: "CimsAuth",
+            nameType: ClaimTypes.NameIdentifier,
+            roleType: CimsApp.Services.Tenancy.HttpTenantContext.GlobalRoleClaimType);
+        return new ClaimsPrincipal(identity);
+    }
+
     private async Task<RefreshToken> CreateRefreshAsync(Guid userId, string? ua, string? ip)
     {
         var t = new RefreshToken { Token = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"), UserId = userId, ExpiresAt = DateTime.UtcNow.AddDays(RefreshDays), UserAgent = ua, IpAddress = ip };
