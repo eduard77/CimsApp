@@ -2,38 +2,16 @@ using CimsApp.Models;
 
 namespace CimsApp.UI;
 
-// Holds client-side login state and selected project
+// ADR-0016 §2: ephemeral UI state only. Auth identity lives on the
+// cookie principal cascaded by CookieAuthenticationStateProvider;
+// display fields (name, initials, org name) live on
+// CurrentUserService; the JWT lives nowhere in this process other
+// than the per-call AccessTokenProvider mint.
 public class UiStateService
 {
-    public string?      AccessToken  { get; private set; }
-    public string?      UserFullName { get; private set; }
-    public string?      UserInitials { get; private set; }
-    public string?      OrgName      { get; private set; }
-    public Guid         UserId       { get; private set; }
-    public Project?     CurrentProject { get; private set; }
-    public bool         IsLoggedIn   => AccessToken != null;
+    public Project? CurrentProject { get; private set; }
 
     public event Action? OnChange;
-
-    public void SetLogin(string token, Guid userId, string firstName, string lastName, string orgName)
-    {
-        AccessToken  = token;
-        UserId       = userId;
-        UserFullName = $"{firstName} {lastName}";
-        UserInitials = $"{firstName.FirstOrDefault()}{lastName.FirstOrDefault()}".ToUpperInvariant();
-        OrgName      = orgName;
-        OnChange?.Invoke();
-    }
-
-    public void Logout()
-    {
-        AccessToken     = null;
-        UserFullName    = null;
-        UserInitials    = null;
-        OrgName         = null;
-        CurrentProject  = null;
-        OnChange?.Invoke();
-    }
 
     public void SetProject(Project? p) { CurrentProject = p; OnChange?.Invoke(); }
 }

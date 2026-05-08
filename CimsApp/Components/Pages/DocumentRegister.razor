@@ -1,8 +1,8 @@
 @page "/documents/register"
-@rendermode @(new InteractiveServerRenderMode(prerender: false))
 @inject CimsApp.Services.DocumentsService DocSvc
 @inject CimsApp.Services.CdeService CdeSvc
 @inject UiStateService UI
+@inject CurrentUserService Me
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 
@@ -269,7 +269,8 @@ else
                 docType,
                 _f.ContainerId,
                 null);
-            var result = await DocSvc.CreateAsync(UI.CurrentProject!.Id, req, UI.UserId, null, null);
+            await Me.EnsureLoadedAsync();
+            var result = await DocSvc.CreateAsync(UI.CurrentProject!.Id, req, Me.UserId, null, null);
             Snackbar.Add($"Document {result.DocumentNumber} registered", Severity.Success);
             Nav.NavigateTo("/documents");
         }

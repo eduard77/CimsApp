@@ -5,15 +5,19 @@ using CimsApp.DTOs;
 
 namespace CimsApp.UI;
 
-public class BlazorApiClient(IHttpClientFactory factory, UiStateService state)
+// ADR-0016 §4: Authorization header carries a short-lived JWT minted
+// on demand from the cookie principal by IAccessTokenProvider. The
+// JWT never lives in the browser; UiStateService no longer holds auth.
+public class BlazorApiClient(IHttpClientFactory factory, IAccessTokenProvider tokens)
 {
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase, Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } };
 
-    private HttpClient Http()
+    private async Task<HttpClient> HttpAsync()
     {
         var c = factory.CreateClient("Self");
-        if (state.AccessToken != null)
-            c.DefaultRequestHeaders.Authorization = new("Bearer", state.AccessToken);
+        var token = await tokens.GetTokenAsync();
+        if (token != null)
+            c.DefaultRequestHeaders.Authorization = new("Bearer", token);
         return c;
     }
 
@@ -22,7 +26,7 @@ public class BlazorApiClient(IHttpClientFactory factory, UiStateService state)
     {
         try
         {
-            var r = await Http().PostAsJsonAsync("api/v1/auth/login", new LoginRequest(email, password));
+            var r = await (await HttpAsync()).PostAsJsonAsync("api/v1/auth/login", new LoginRequest(email, password));
             var body = await r.Content.ReadAsStringAsync();
             if (r.IsSuccessStatusCode)
             {
@@ -38,90 +42,90 @@ public class BlazorApiClient(IHttpClientFactory factory, UiStateService state)
     // ── Organisations ─────────────────────────────────────────────────────────
     public async Task<List<Organisation>> GetOrgsAsync()
     {
-        try { var b = await Http().GetStringAsync("api/v1/organisations"); return Extract<List<Organisation>>(b, "data") ?? []; }
+        try { var b = await (await HttpAsync()).GetStringAsync("api/v1/organisations"); return Extract<List<Organisation>>(b, "data") ?? []; }
         catch { return []; }
     }
 
     public async Task<Organisation?> CreateOrgAsync(CreateOrgRequest req)
     {
-        try { var r = await Http().PostAsJsonAsync("api/v1/organisations", req); var b = await r.Content.ReadAsStringAsync(); return Extract<Organisation>(b, "data"); }
+        try { var r = await (await HttpAsync()).PostAsJsonAsync("api/v1/organisations", req); var b = await r.Content.ReadAsStringAsync(); return Extract<Organisation>(b, "data"); }
         catch { return null; }
     }
 
     // ── Projects ──────────────────────────────────────────────────────────────
     public async Task<List<Project>> GetProjectsAsync(string? search = null)
     {
-        try { var b = await Http().GetStringAsync($"api/v1/projects{(search != null ? $"?search={search}" : "")}"); return Extract<List<Project>>(b, "data") ?? []; }
+        try { var b = await (await HttpAsync()).GetStringAsync($"api/v1/projects{(search != null ? $"?search={search}" : "")}"); return Extract<List<Project>>(b, "data") ?? []; }
         catch { return []; }
     }
 
     public async Task<Project?> CreateProjectAsync(CreateProjectRequest req)
     {
-        try { var r = await Http().PostAsJsonAsync("api/v1/projects", req); var b = await r.Content.ReadAsStringAsync(); return Extract<Project>(b, "data"); }
+        try { var r = await (await HttpAsync()).PostAsJsonAsync("api/v1/projects", req); var b = await r.Content.ReadAsStringAsync(); return Extract<Project>(b, "data"); }
         catch { return null; }
     }
 
     // ── Documents ─────────────────────────────────────────────────────────────
     public async Task<List<Document>> GetDocumentsAsync(Guid projectId, string? state = null, string? search = null)
     {
-        try { var url = $"api/v1/projects/{projectId}/documents?" + (state != null ? $"state={state}&" : "") + (search != null ? $"search={search}" : ""); var b = await Http().GetStringAsync(url); return Extract<List<Document>>(b, "data") ?? []; }
+        try { var url = $"api/v1/projects/{projectId}/documents?" + (state != null ? $"state={state}&" : "") + (search != null ? $"search={search}" : ""); var b = await (await HttpAsync()).GetStringAsync(url); return Extract<List<Document>>(b, "data") ?? []; }
         catch { return []; }
     }
 
     public async Task<Document?> CreateDocumentAsync(Guid projectId, CreateDocumentRequest req)
     {
-        try { var r = await Http().PostAsJsonAsync($"api/v1/projects/{projectId}/documents", req); var b = await r.Content.ReadAsStringAsync(); return Extract<Document>(b, "data"); }
+        try { var r = await (await HttpAsync()).PostAsJsonAsync($"api/v1/projects/{projectId}/documents", req); var b = await r.Content.ReadAsStringAsync(); return Extract<Document>(b, "data"); }
         catch { return null; }
     }
 
     public async Task<Document?> TransitionDocumentAsync(Guid projectId, Guid documentId, CdeState toState)
     {
-        try { var r = await Http().PostAsJsonAsync($"api/v1/projects/{projectId}/documents/{documentId}/transition", new TransitionRequest(toState, null)); var b = await r.Content.ReadAsStringAsync(); return Extract<Document>(b, "data"); }
+        try { var r = await (await HttpAsync()).PostAsJsonAsync($"api/v1/projects/{projectId}/documents/{documentId}/transition", new TransitionRequest(toState, null)); var b = await r.Content.ReadAsStringAsync(); return Extract<Document>(b, "data"); }
         catch { return null; }
     }
 
     // ── RFIs ──────────────────────────────────────────────────────────────────
     public async Task<List<Rfi>> GetRfisAsync(Guid projectId, string? status = null)
     {
-        try { var url = $"api/v1/projects/{projectId}/rfis" + (status != null ? $"?status={status}" : ""); var b = await Http().GetStringAsync(url); return Extract<List<Rfi>>(b, "data") ?? []; }
+        try { var url = $"api/v1/projects/{projectId}/rfis" + (status != null ? $"?status={status}" : ""); var b = await (await HttpAsync()).GetStringAsync(url); return Extract<List<Rfi>>(b, "data") ?? []; }
         catch { return []; }
     }
 
     public async Task<Rfi?> CreateRfiAsync(Guid projectId, CreateRfiRequest req)
     {
-        try { var r = await Http().PostAsJsonAsync($"api/v1/projects/{projectId}/rfis", req); var b = await r.Content.ReadAsStringAsync(); return Extract<Rfi>(b, "data"); }
+        try { var r = await (await HttpAsync()).PostAsJsonAsync($"api/v1/projects/{projectId}/rfis", req); var b = await r.Content.ReadAsStringAsync(); return Extract<Rfi>(b, "data"); }
         catch { return null; }
     }
 
     public async Task<Rfi?> RespondRfiAsync(Guid projectId, Guid rfiId, RespondRfiRequest req)
     {
-        try { var r = await Http().PostAsJsonAsync($"api/v1/projects/{projectId}/rfis/{rfiId}/respond", req); var b = await r.Content.ReadAsStringAsync(); return Extract<Rfi>(b, "data"); }
+        try { var r = await (await HttpAsync()).PostAsJsonAsync($"api/v1/projects/{projectId}/rfis/{rfiId}/respond", req); var b = await r.Content.ReadAsStringAsync(); return Extract<Rfi>(b, "data"); }
         catch { return null; }
     }
 
     // ── Actions ───────────────────────────────────────────────────────────────
     public async Task<List<ActionItem>> GetActionsAsync(Guid projectId, string? status = null, bool overdue = false)
     {
-        try { var url = $"api/v1/projects/{projectId}/actions?" + (status != null ? $"status={status}&" : "") + (overdue ? "overdue=true" : ""); var b = await Http().GetStringAsync(url); return Extract<List<ActionItem>>(b, "data") ?? []; }
+        try { var url = $"api/v1/projects/{projectId}/actions?" + (status != null ? $"status={status}&" : "") + (overdue ? "overdue=true" : ""); var b = await (await HttpAsync()).GetStringAsync(url); return Extract<List<ActionItem>>(b, "data") ?? []; }
         catch { return []; }
     }
 
     public async Task<ActionItem?> CreateActionAsync(Guid projectId, CreateActionRequest req)
     {
-        try { var r = await Http().PostAsJsonAsync($"api/v1/projects/{projectId}/actions", req); var b = await r.Content.ReadAsStringAsync(); return Extract<ActionItem>(b, "data"); }
+        try { var r = await (await HttpAsync()).PostAsJsonAsync($"api/v1/projects/{projectId}/actions", req); var b = await r.Content.ReadAsStringAsync(); return Extract<ActionItem>(b, "data"); }
         catch { return null; }
     }
 
     public async Task<ActionItem?> UpdateActionAsync(Guid projectId, Guid actionId, UpdateActionRequest req)
     {
-        try { var r = await Http().PatchAsJsonAsync($"api/v1/projects/{projectId}/actions/{actionId}", req); var b = await r.Content.ReadAsStringAsync(); return Extract<ActionItem>(b, "data"); }
+        try { var r = await (await HttpAsync()).PatchAsJsonAsync($"api/v1/projects/{projectId}/actions/{actionId}", req); var b = await r.Content.ReadAsStringAsync(); return Extract<ActionItem>(b, "data"); }
         catch { return null; }
     }
 
     // ── Audit ─────────────────────────────────────────────────────────────────
     public async Task<List<AuditLog>> GetAuditAsync(Guid projectId)
     {
-        try { var b = await Http().GetStringAsync($"api/v1/projects/{projectId}/audit?limit=50"); return Extract<List<AuditLog>>(b, "data") ?? []; }
+        try { var b = await (await HttpAsync()).GetStringAsync($"api/v1/projects/{projectId}/audit?limit=50"); return Extract<List<AuditLog>>(b, "data") ?? []; }
         catch { return []; }
     }
 

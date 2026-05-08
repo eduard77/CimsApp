@@ -1,11 +1,12 @@
 @page "/dashboard"
 @inject BlazorApiClient Api
 @inject UiStateService UI
+@inject CurrentUserService Me
 @inject NavigationManager Nav
 
 <div style="margin-bottom:32px;">
     <h1 style="font-size:24px;font-weight:700;color:#1A1F2E;margin:0 0 4px;">
-        Good @_greeting, @UI.UserFullName?.Split(' ').FirstOrDefault()
+        Good @_greeting, @Me.FullName.Split(' ').FirstOrDefault()
     </h1>
     <p style="color:#64748B;margin:0;">Here's your project overview.</p>
 </div>
@@ -112,6 +113,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await Me.EnsureLoadedAsync();
         _projects = await Api.GetProjectsAsync();
         _loading  = false;
         if (_projects.Count > 0 && UI.CurrentProject == null)
