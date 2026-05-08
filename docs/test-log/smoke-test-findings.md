@@ -138,6 +138,24 @@ or allow selection. Submit then fails (separately also blocked by BUG-006).
 
 ---
 
+### BUG-011 — Audit trail double-writes domain events alongside EF mutations
+
+- **Severity:** low — UX and forensic clarity, not data integrity
+- **Status:** open — defer to audit-polish ticket
+- **Area:** Audit pipeline / EF interceptor
+
+**Symptom:** Project creation produces three audit rows: `project.created`
+(domain event, Project) plus `Insert` (Project) plus `Insert` (ProjectMember).
+The first two describe the same business action at different layers. Will
+recur on every domain event that also writes a row.
+
+**Fix sketch:** Suppress EF interceptor audit rows for entity changes that
+are already covered by a same-transaction domain event. Either tag the
+EF context with the active domain-event key and skip logging when present,
+or post-process to dedupe in the audit query.
+
+---
+
 ### TASK-003 — New Project form missing PAFM v2.0 initiation fields
 
 - **Phase / Step:** Phase 3, Step 17
