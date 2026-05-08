@@ -46,6 +46,80 @@ a controlled vocabulary so projects can be aggregated and filtered consistently.
 
 ---
 
+### BUG-006 — Project creation returns HTTP 403 Forbidden
+
+- **Phase / Step:** Phase 3, Step 17 (Test B)
+- **Severity:** critical — blocks Phase 3 onwards
+- **Status:** investigating
+- **Area:** projects, api, authorization
+
+**Endpoint:** POST https://localhost:55069/api/v1/projects
+**Response:** 403 in ~35ms (no exception thrown server-side; rejected by auth pipeline)
+
+**Repro:** Fill New Project form with valid data (Project Name, Project Code,
+Location, Sector, Budget Value, Client Organisation = Genera Systems); click Create.
+
+**Expected:** 201 Created, project appears in /projects list.
+**Actual:** 403 Forbidden. Toast "Failed to create project". Client-side
+JsonReaderException is downstream symptom of empty 403 body, not a separate defect.
+
+**Diagnostic data still to collect:**
+- JWT payload claims (roles, tenant_id, permissions) — decode at jwt.io.
+- ProjectsController [Authorize(...)] attribute on the Create action.
+- Response headers (any WWW-Authenticate / error detail).
+
+**Likely causes (ranked):**
+1. Seed dev user lacks required role (e.g. ProjectManager / TenantAdmin).
+2. JWT missing tenant_id or other required claim.
+3. Anti-forgery / policy mismatch on POST.
+
+**Acceptance criteria:**
+- Authenticated dev user (Eduard, on Genera Systems tenant) can create a project end-to-end.
+- Authorisation requirements documented in code (XML doc on the action) and in the PAFM role matrix.
+- Negative test: a user without the required role receives 403, not 500, and a clear error body.
+- Integration test covering the happy path and the role-denied path.
+
+---
+
+### BUG-007 — Client Organisation dropdown becomes non-functional after page reload
+
+- **Phase / Step:** Phase 3, Step 17 (Test B retry with DevTools open)
+- **Severity:** high (intermittent — blocks project creation when triggered)
+- **Status:** open
+- **Area:** projects, dialog, dropdowns, state
+
+**Repro:**
+1. Open + New Project dialog. Confirm dropdown works.
+2. Cancel or interact with the dialog.
+3. Reload the page (F5 / Ctrl+R) with DevTools Network tab open.
+4. Open + New Project dialog again.
+5. Try to select Genera Systems (GENERA) from Client Organisation.
+
+**Expected:** Dropdown opens, options load, selection works as on first open.
+**Actual:** Dropdown shows the Guid.Empty placeholder and does not open
+or allow selection. Submit then fails (separately also blocked by BUG-006).
+
+**Possible causes (unconfirmed):**
+- Client organisations list loaded once on app boot; reload destroys
+  client-side state but server cache not repopulating per-circuit.
+- DevTools throttling/preserve-log toggling the WebSocket lifecycle.
+- Disposed-circuit residue from earlier failures (ObjectDisposedException
+  observed previously in BUG-002 cascade).
+
+**Diagnostic data still to collect:**
+- VS Output: any errors when the dropdown fails to open.
+- Network tab: is there a GET for organisations on dialog open? Status code?
+- Does Ctrl+Shift+R (hard refresh) restore it, or only an app restart?
+
+**Acceptance criteria:**
+- Dropdown loads and allows selection on every dialog open, regardless of
+  how many page reloads have occurred.
+- Reference data (organisations, sectors, contract forms) cached at the
+  appropriate scope and refreshed on circuit creation.
+- UI test asserts dropdown is interactive after a forced reload sequence.
+
+---
+
 ### TASK-003 — New Project form missing PAFM v2.0 initiation fields
 
 - **Phase / Step:** Phase 3, Step 17
