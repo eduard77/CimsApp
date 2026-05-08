@@ -1,6 +1,10 @@
 using System.Text;
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -23,9 +27,42 @@ builder.Services.AddDbContext<CimsDbContext>((sp, o) =>
 builder.Services.AddScoped<IProjectProvisioningService, ProjectProvisioningService>();
 builder.Services.AddScoped<CimsApp.Services.Iso19650.Iso19650FilenameValidator>();
 
-// ── JWT Auth ──────────────────────────────────────────────────────────────────
+// ── Auth schemes ──────────────────────────────────────────────────────────────
+// ADR-0016: cookie scheme `CimsAuth` for the Blazor request surface,
+// JWT bearer scheme for `/api/*` and `/hubs/*`. A polyscheme inspects
+// the request path and forwards to the right handler so the two never
+// overlap.
 var jwtKey = builder.Configuration["Jwt:AccessSecret"]!;
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+builder.Services
+    .AddAuthentication(opts =>
+    {
+        opts.DefaultScheme          = "CimsAuthSelector";
+        opts.DefaultChallengeScheme = "CimsAuthSelector";
+    })
+    .AddPolicyScheme("CimsAuthSelector", "Cookie or JWT by request path", o =>
+    {
+        o.ForwardDefaultSelector = ctx =>
+        {
+            var path = ctx.Request.Path;
+            if (path.StartsWithSegments("/api") || path.StartsWithSegments("/hubs"))
+                return JwtBearerDefaults.AuthenticationScheme;
+            return "CimsAuth";
+        };
+    })
+    .AddCookie("CimsAuth", o =>
+    {
+        // ADR-0016 §1: lean cookie for the Blazor surface only.
+        o.Cookie.Name        = "cims_auth";
+        o.Cookie.HttpOnly    = true;
+        o.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        o.Cookie.SameSite    = SameSiteMode.Strict;
+        o.Cookie.IsEssential = true;
+        o.ExpireTimeSpan     = TimeSpan.FromHours(8);
+        o.SlidingExpiration  = true;
+        o.LoginPath          = "/";
+        o.LogoutPath         = "/";
+        o.AccessDeniedPath   = "/";
+    })
     .AddJwtBearer(o =>
     {
         o.TokenValidationParameters = new TokenValidationParameters
@@ -149,6 +186,18 @@ builder.Services.AddSignalR();
 // ── Blazor Server ─────────────────────────────────────────────────────────────
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+// ADR-0016 §3 / §6: cookie-backed AuthenticationStateProvider with
+// revalidation. Capture-once happens via the framework's
+// IHostEnvironmentAuthenticationStateProvider handoff on initial render —
+// no manual CircuitHandler needed for the principal capture.
+// Revalidation predicate runs every RevalidationInterval and re-checks
+// the User row.
+builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddScoped<AuthenticationStateProvider,
+    CimsApp.UI.CookieAuthenticationStateProvider>();
+// ADR-0016 §4: scoped JWT mint for BlazorApiClient.
+builder.Services.AddScoped<CimsApp.UI.IAccessTokenProvider,
+    CimsApp.UI.AccessTokenProvider>();
 builder.Services.AddMudServices();
 builder.Services.AddHttpClient("Self", client =>
 {
@@ -251,6 +300,10 @@ builder.Services.AddScoped<CimsApp.Services.Search.SearchAggregatorService>();
 // ── Blazor UI Services ────────────────────────────────────────────────────────
 builder.Services.AddScoped<UiStateService>();
 builder.Services.AddScoped<BlazorApiClient>();
+// ADR-0016 §2: per-circuit display-field lookup (FirstName, LastName,
+// OrgName) keyed on the cookie principal's sub. Replaces the
+// auth-side fields previously held on UiStateService.
+builder.Services.AddScoped<CurrentUserService>();
 
 // ── Swagger ───────────────────────────────────────────────────────────────────
 builder.Services.AddEndpointsApiExplorer();
@@ -279,6 +332,44 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();    // B-002 — must follow Authentication so policies
                          // can partition on IP after the connection is set.
+// ADR-0016 §1: Blazor cookie sign-in / sign-out endpoints. Form-POST
+// targets so the browser receives Set-Cookie on a real HTTP response
+// (an in-circuit click handler runs over SignalR with HttpContext == null
+// and can neither set nor clear cookies). Antiforgery token is rendered
+// by Login.razor's <AntiforgeryToken /> (sign-in) and MainLayout's
+// AntiforgeryToken in the sidebar logout form (sign-out).
+app.MapPost("/login", async (
+    HttpContext ctx,
+    [FromForm] string? email,
+    [FromForm] string? password,
+    AuthService svc) =>
+{
+    try
+    {
+        var auth = await svc.LoginAsync(
+            new CimsApp.DTOs.LoginRequest(email ?? "", password ?? ""),
+            ctx.Request.Headers.UserAgent.ToString(),
+            ctx.Connection.RemoteIpAddress?.ToString());
+        var principal = await svc.BuildCookiePrincipalAsync(auth.User.Id);
+        await ctx.SignInAsync("CimsAuth", principal, new AuthenticationProperties
+        {
+            IsPersistent = true,
+            ExpiresUtc   = DateTimeOffset.UtcNow.AddHours(8),
+            AllowRefresh = true,
+        });
+        return Results.Redirect("/dashboard");
+    }
+    catch (CimsApp.Core.AppException ex)
+    {
+        return Results.Redirect($"/?err={Uri.EscapeDataString(ex.Message)}");
+    }
+}).RequireRateLimiting("anon-login");
+
+app.MapPost("/logout", async (HttpContext ctx) =>
+{
+    await ctx.SignOutAsync("CimsAuth");
+    return Results.Redirect("/");
+});
 app.MapControllers();
 // T-S14-02 SignalR hub for in-app notifications. Auth-required;
 // route prefix /hubs is what JwtBearerEvents.OnMessageReceived
