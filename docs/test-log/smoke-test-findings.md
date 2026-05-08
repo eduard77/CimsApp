@@ -120,6 +120,24 @@ or allow selection. Submit then fails (separately also blocked by BUG-006).
 
 ---
 
+### BUG-008 — Client throws JsonReaderException on non-JSON 403/401 responses
+
+- **Severity:** low
+- **Status:** open — defer to error-handling polish sprint
+- **Area:** client API error handler
+- **Reproduction:** Trigger any 403 or 401 from the API. Console shows
+  System.Text.Json.JsonReaderException; UI shows generic "Failed to create
+  project" toast instead of the actual reason.
+- **Fix sketch:** In the API client wrapper, check response.Content.Headers.ContentType
+  before deserializing. If not application/json, surface response.StatusCode and
+  ReasonPhrase to the toast instead of attempting JSON parse.
+
+> **Numbering note:** Logged as BUG-008 (the user-supplied entry header
+> said "BUG-007" but BUG-007 is already taken by the post-reload
+> dropdown defect above; assumed typo, not supersession).
+
+---
+
 ### TASK-003 — New Project form missing PAFM v2.0 initiation fields
 
 - **Phase / Step:** Phase 3, Step 17
