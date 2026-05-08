@@ -133,3 +133,22 @@ No `/admin` route or admin UI exists in the current build. Confirmed by:
 - [ ] Critical/high findings have console/log evidence attached
 - [ ] Promoted to GitHub Issues; status updated with `promoted-to-issue:#NN`
 - [ ] File committed to repo at `docs/test-log/smoke-test-findings.md`
+- [ ] ### OBS-001 — New Project dialog flickered closed on first attempt, opened on second
+
+- **Phase / Step:** Phase 3, Step 17
+- **Severity:** low (intermittent, self-recovered)
+- **Status:** open — monitor; promote to BUG if it recurs
+- **Area:** dashboard, projects, dialog
+
+**Repro:** Clicked + New Project after MudBlazor providers fix and app restart.
+First click: dialog opened and immediately closed.
+Second click (no other action between): dialog opened and stayed.
+
+**Diagnostic data:** Not captured — need to be quicker next time.
+If this recurs, capture VS Output (ASP.NET Core Web Server) and browser
+Console at the moment of flicker.
+
+**Possible causes (unconfirmed):**
+- First-render race: dialog initialised before circuit fully attached.
+- LocalDB cold-start delay on first query (timeout, then EF retry succeeded).
+- Stale JS state from previous broken circuit.
