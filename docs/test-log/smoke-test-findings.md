@@ -144,3 +144,17 @@ or allow selection. Submit then fails (separately also blocked by BUG-006).
 in the initiation dialog (these aren't optional in any UK PM context).
 Sponsor and IPA gateway move to a "Governance" tab that opens immediately
 after project creation. Decide before this gets built.
+
+---
+
+### OBS-002 — BUG-006 verification step 9B deferred (no non-admin seed user)
+
+- **Phase / Step:** Auth-persistence verification, step 9 part B
+- **Severity:** n/a (test-data gap, not a defect)
+- **Status:** open — to verify during BUG-006 fix
+- **Area:** seed data, testing
+
+**Detail:** Step 9A (unauthenticated → 401) verified clean. Step 9B
+(authenticated non-admin → 403) skipped because no non-admin user is
+seeded. To be verified when BUG-006 is fixed and the seed is broadened
+to include at least one user without OrgAdmin/SuperAdmin.
