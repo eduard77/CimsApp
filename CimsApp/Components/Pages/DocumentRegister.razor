@@ -35,7 +35,7 @@ else
 
                     <MudItem xs="12" sm="6">
                         <FieldLabel Text="Document type" Required="true" />
-                        <MudAutocomplete T="CodeItem" @bind-Value="_selectedType"
+                        <MudAutocomplete T="CodeItem" @bind-Value="_selectedType" @bind-Value:after="Validate"
                                          SearchFunc="SearchTypes" ToStringFunc="@(x => x==null ? "" : $"{x.Code} — {x.Label}")"
                                          Variant="Variant.Outlined" Margin="Margin.Dense" CoerceValue="false"
                                          Dense="true" ResetValueOnEmptyText="true"
@@ -81,7 +81,7 @@ else
                 <MudGrid Spacing="3" Style="margin-bottom:32px;">
                     <MudItem xs="12" sm="6">
                         <FieldLabel Text="Number" Required="true" />
-                        <MudNumericField @bind-Value="_f.Number" Min="1" Max="9999"
+                        <MudNumericField @bind-Value="_f.Number" @bind-Value:after="Validate" Min="1" Max="9999"
                                          Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense"
                                          HelperText="1 - 9999 (auto zero-padded to 4 digits)" />
                     </MudItem>
@@ -101,7 +101,7 @@ else
                 <MudGrid Spacing="3">
                     <MudItem xs="12">
                         <FieldLabel Text="Title" Required="true" />
-                        <MudTextField @bind-Value="_f.Title" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense"
+                        <MudTextField @bind-Value="_f.Title" @bind-Value:after="Validate" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense"
                                       Placeholder="e.g. Ground Floor General Arrangement"
                                       Immediate="true" />
                     </MudItem>
