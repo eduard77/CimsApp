@@ -28,7 +28,7 @@ else
                     </MudItem>
                     <MudItem xs="12" sm="6">
                         <FieldLabel Text="Originator" Required="true" />
-                        <MudTextField @bind-Value="_f.Originator" Placeholder="e.g. ARCCO" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense"
+                        <MudTextField @bind-Value="_f.Originator" @bind-Value:after="OnOriginatorChanged" Placeholder="e.g. ARCCO" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense"
                                       MaxLength="6" HelperText="Your organisation's 3-6 letter code"
                                       Immediate="true" />
                     </MudItem>
@@ -245,6 +245,13 @@ else
         if (_f.Number < 1)                                _errors.Add("Number must be 1 or greater");
         if (string.IsNullOrWhiteSpace(_f.Title))          _errors.Add("Title is required");
         return _errors.Count == 0;
+    }
+
+    void OnOriginatorChanged()
+    {
+        if (!string.IsNullOrEmpty(_f.Originator))
+            _f.Originator = _f.Originator.ToUpperInvariant();
+        Validate();
     }
 
     protected override void OnParametersSet() => Validate();
