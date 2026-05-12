@@ -112,7 +112,7 @@ else
         Project? result = null;
         try
         {
-            result = await Api.CreateProjectAsync(new CreateProjectRequest(_f.Name, _f.Code.ToUpper(), null, _f.OrgId, null, null, _f.Location, null, "GBP", _f.Budget, _f.Sector, null, null));
+            result = await Api.CreateProjectAsync(new CreateProjectRequest(_f.Name, _f.Code.Trim().ToUpper(), null, _f.OrgId, null, null, _f.Location, null, "GBP", _f.Budget, _f.Sector, null, null));
         }
         catch (Exception ex)
         {

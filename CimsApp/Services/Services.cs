@@ -494,7 +494,7 @@ public class ProjectsService(CimsDbContext db, AuditService audit, CimsApp.Servi
             : tenant.OrganisationId ?? throw new ForbiddenException("No tenant context");
         if (!tenant.IsSuperAdmin && req.AppointingPartyId != appointingPartyId)
             throw new ForbiddenException("AppointingPartyId must match the caller's organisation");
-        var p = new Project { Name = req.Name, Code = req.Code.ToUpperInvariant(), Description = req.Description, AppointingPartyId = appointingPartyId, StartDate = req.StartDate, EndDate = req.EndDate, Location = req.Location, Country = req.Country, Currency = req.Currency ?? "GBP", BudgetValue = req.BudgetValue, Sector = req.Sector, Sponsor = req.Sponsor, EirRef = req.EirRef, Members = [new ProjectMember { UserId = userId, Role = UserRole.ProjectManager }] };
+        var p = new Project { Name = req.Name, Code = req.Code.Trim().ToUpperInvariant(), Description = req.Description, AppointingPartyId = appointingPartyId, StartDate = req.StartDate, EndDate = req.EndDate, Location = req.Location, Country = req.Country, Currency = req.Currency ?? "GBP", BudgetValue = req.BudgetValue, Sector = req.Sector, Sponsor = req.Sponsor, EirRef = req.EirRef, Members = [new ProjectMember { UserId = userId, Role = UserRole.ProjectManager }] };
         db.Projects.Add(p);
         await audit.WriteAsync(userId, tenant.IsSuperAdmin ? "project.created.superadmin_bypass" : "project.created", "Project", p.Id.ToString(), p.Id, ip: ip, ua: ua);
         await db.SaveChangesAsync();

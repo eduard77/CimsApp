@@ -28,14 +28,14 @@ else
                     </MudItem>
                     <MudItem xs="12" sm="6">
                         <FieldLabel Text="Originator" Required="true" />
-                        <MudTextField @bind-Value="_f.Originator" Placeholder="e.g. ARCCO" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense"
+                        <MudTextField @bind-Value="_f.Originator" @bind-Value:after="OnOriginatorChanged" Placeholder="e.g. ARCCO" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense"
                                       MaxLength="6" HelperText="Your organisation's 3-6 letter code"
                                       Immediate="true" />
                     </MudItem>
 
                     <MudItem xs="12" sm="6">
                         <FieldLabel Text="Document type" Required="true" />
-                        <MudAutocomplete T="CodeItem" @bind-Value="_selectedType"
+                        <MudAutocomplete T="CodeItem" @bind-Value="_selectedType" @bind-Value:after="Revalidate"
                                          SearchFunc="SearchTypes" ToStringFunc="@(x => x==null ? "" : $"{x.Code} — {x.Label}")"
                                          Variant="Variant.Outlined" Margin="Margin.Dense" CoerceValue="false"
                                          Dense="true" ResetValueOnEmptyText="true"
@@ -81,7 +81,7 @@ else
                 <MudGrid Spacing="3" Style="margin-bottom:32px;">
                     <MudItem xs="12" sm="6">
                         <FieldLabel Text="Number" Required="true" />
-                        <MudNumericField @bind-Value="_f.Number" Min="1" Max="9999"
+                        <MudNumericField @bind-Value="_f.Number" @bind-Value:after="Revalidate" Min="1" Max="9999"
                                          Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense"
                                          HelperText="1 - 9999 (auto zero-padded to 4 digits)" />
                     </MudItem>
@@ -101,7 +101,7 @@ else
                 <MudGrid Spacing="3">
                     <MudItem xs="12">
                         <FieldLabel Text="Title" Required="true" />
-                        <MudTextField @bind-Value="_f.Title" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense"
+                        <MudTextField @bind-Value="_f.Title" @bind-Value:after="Revalidate" Variant="Variant.Outlined" FullWidth="true" Margin="Margin.Dense"
                                       Placeholder="e.g. Ground Floor General Arrangement"
                                       Immediate="true" />
                     </MudItem>
@@ -246,6 +246,15 @@ else
         if (string.IsNullOrWhiteSpace(_f.Title))          _errors.Add("Title is required");
         return _errors.Count == 0;
     }
+
+    void OnOriginatorChanged()
+    {
+        if (!string.IsNullOrEmpty(_f.Originator))
+            _f.Originator = _f.Originator.ToUpperInvariant();
+        Validate();
+    }
+
+    void Revalidate() => Validate();
 
     protected override void OnParametersSet() => Validate();
 
