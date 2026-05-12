@@ -149,6 +149,13 @@ builder.Services.AddSignalR();
 // ── Blazor Server ─────────────────────────────────────────────────────────────
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions>(o =>
+    {
+        o.DetailedErrors = true;
+    });
+}
 builder.Services.AddMudServices();
 builder.Services.AddHttpClient("Self", client =>
 {
