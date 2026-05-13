@@ -1,7 +1,8 @@
 # Changelog
 
-All notable changes to CIMS — Construction Information Management
-System.
+All notable changes to Genera PM (codebase `GeneraPm`; product
+renamed from "CIMS" / "Genera CIMS" on 2026-05-13). Entries
+dated before 2026-05-13 use the historical product name.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
@@ -11,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 The v1.0 internal-pilot release. 22 PAFM Appendix F functional
 modules across 21 development sprints + 1 ship sprint, ISO 19650
-+ PMBOK 7 alignment, multi-tenant by construction, audit-twin
++ PMBOK 8 alignment, multi-tenant by construction, audit-twin
 forensic adequacy across the full mutation surface.
 
 ### Added — Foundations

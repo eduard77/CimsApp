@@ -1,4 +1,4 @@
-# CIMS Smoke Test — Findings Log
+# Genera PM Smoke Test — Findings Log
 
 **Test session:** 2026-05-08
 **Build under test:** _add commit hash_

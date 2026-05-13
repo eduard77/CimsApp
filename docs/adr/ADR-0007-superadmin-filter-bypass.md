@@ -1,5 +1,11 @@
 # ADR-0007 — SuperAdmin tenant-filter bypass via explicit `IgnoreQueryFilters`
 
+> **Note (2026-05-13):** the product was renamed from "CIMS" to
+> "Genera PM" on 2026-05-13. Body text below preserves the
+> original "CIMS" wording for historical accuracy. Token-level
+> identifiers (e.g. `CimsDbContext`, `cims:role`) have been
+> updated to match current code; product-name prose has not.
+
 **Status:** Accepted (retroactive — the implementation landed at
 T-S0-07 / commit `b2a5781` during S0; this ADR formalises the
 policy and resolves the dangling `ADR-0007` references in the

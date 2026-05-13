@@ -1,6 +1,6 @@
 # v1.0 Go-Live Checklist
 
-Pre-deploy → deploy → post-deploy procedure for the CIMS v1.0
+Pre-deploy → deploy → post-deploy procedure for the Genera PM v1.0
 internal-pilot ship. Every step has a sign-off line; complete in
 order. Skip with reason if not applicable; do NOT proceed past a
 failed step without an ADR or formal waiver.
@@ -45,7 +45,7 @@ Sign-off date: ____________________
       for HTTPS termination + Host / X-Forwarded-Proto headers.
       Sign-off: ________
 - [ ] **Production SQL Server provisioned.** Reachable from app
-      host; CIMS DB user created with appropriate permissions
+      host; Genera PM DB user created with appropriate permissions
       (db_ddladmin for first migration, downgradable after).
       Sign-off: ________
 - [ ] **Required env vars set** on the production host
@@ -66,7 +66,7 @@ Sign-off date: ____________________
       Verify from the app host with a manual test. Sign-off:
       ________
 - [ ] **Backups configured** for the production SQL Server
-      (per the DB layer's backup strategy — CIMS doesn't
+      (per the DB layer's backup strategy — Genera PM doesn't
       prescribe). At least: daily full + transaction log
       backups; restore tested at least once. Sign-off: ________
 - [ ] **`storage/projects/` filesystem path** exists, writable
@@ -89,7 +89,7 @@ Sign-off date: ____________________
       Sign-off: ________
 
 - [ ] **Build the release artefact** from the tagged commit.
-      `dotnet publish CimsApp/CimsApp.csproj -c Release -o
+      `dotnet publish GeneraPm/GeneraPm.csproj -c Release -o
       out/v1.0` (or your preferred publish target). Verify the
       output runs locally with the production env vars.
       Sign-off: ________
@@ -103,7 +103,7 @@ Sign-off date: ____________________
 - [ ] **App host stopped.** Existing process (if any) shut down
       cleanly. Sign-off: ________
 - [ ] **EF migrations applied** to production DB:
-      `dotnet ef database update --project CimsApp` from a
+      `dotnet ef database update --project GeneraPm` from a
       machine with the production connection string.
       Sign-off: ________
 - [ ] **Release artefact deployed** to the app host. File

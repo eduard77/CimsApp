@@ -1,6 +1,6 @@
-# CIMS User Documentation
+# Genera PM User Documentation
 
-Construction Information Management System — user-facing reference
+User-facing reference
 covering every module the v1.0 pilot ships. Each entry below links
 to a module-specific doc with: what the page is for, who uses it,
 primary actions, and common gotchas.
@@ -52,7 +52,7 @@ primary actions, and common gotchas.
 
 ## Conventions used in these docs
 
-- **Roles** referenced by their CIMS enum names (`SuperAdmin`,
+- **Roles** referenced by their Genera PM enum names (`SuperAdmin`,
   `OrgAdmin`, `ProjectManager`, `InformationManager`,
   `TaskTeamMember`, `ClientRep`, `Viewer`, `ExternalAuditor`).
   See `docs/security/role-matrix.md` for the full per-endpoint

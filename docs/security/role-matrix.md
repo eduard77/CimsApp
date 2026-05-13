@@ -1,6 +1,6 @@
 # Endpoint role matrix
 
-**Scope:** every HTTP endpoint in `CimsApp/Controllers/` as of 2026-04-24
+**Scope:** every HTTP endpoint in `GeneraPm/Controllers/` as of 2026-04-24
 (post-T-S0-08).
 **Authorization model:** ADR-0010 two-tier (global + per-project).
 **Role hierarchy** (low → high):
@@ -10,7 +10,7 @@ ProjectManager < OrgAdmin < SuperAdmin`.
 ## Legend
 
 - **Global role** gates are `[Authorize(Roles = "...")]` attributes;
-  the JWT's `cims:role` claim is read via ASP.NET role mapping.
+  the JWT's `genera:role` claim is read via ASP.NET role mapping.
 - **Project role** gates use `HasMinimumRole(await
   GetProjectRoleAsync(db, projectId), UserRole.X)` inside the action
   body. The role is the caller's `ProjectMember.Role` on that specific
@@ -263,7 +263,7 @@ strict-on-new-only per T-S9-03; MIDP / TIDP CRUD live here.
 
 PAFM-SD F.10. HRB flagging, Gateway 1/2/3 packages, MOR,
 Safety Case Summary, Golden Thread immutability. Statutory
-legal sign-off is a pre-pilot review step (PAFM-CIMS-001 PDF
+legal sign-off is a pre-pilot review step (PAFM-Genera PM-001 PDF
 + legal review), not a v1.0 deliverable.
 
 | Method | Route | Global role | Project role | Comment |
@@ -288,7 +288,7 @@ PAFM-SD F.11. ROPA, DPIA, SAR, data breach log, retention
 schedules. **4 of 5 entity routes are org-scoped (no
 projectId in path)**; DPIA is project-scoped. Pre-pilot
 legal review of GDPR field shapes is a separate step
-(PAFM-CIMS-001 PDF + legal sign-off). // GDPR ref: Arts
+(PAFM-Genera PM-001 PDF + legal sign-off). // GDPR ref: Arts
 5(1)(e), 12, 15, 30, 33, 34, 35.
 
 | Method | Route | Global role | Project role | Comment |
@@ -352,7 +352,7 @@ First non-statutory module since S6. Mixed scoping:
 
 ## Inspection Activities (F.13 Option A)
 
-PAFM-SD F.13 fourth bullet (CIMS quality record half).
+PAFM-SD F.13 fourth bullet (Genera PM quality record half).
 **Genera Systems QA / HSE bidirectional sync deferred** to
 v1.1 / B-086..089 (REST API per PAFM Ch 47 + webhook + SSO +
 sync). v1.0 ships manual workflow only.

@@ -1,5 +1,11 @@
 # ADR-0012 — Project tenancy semantics: caller's-org default, SuperAdmin bypass
 
+> **Note (2026-05-13):** the product was renamed from "CIMS" to
+> "Genera PM" on 2026-05-13. Body text below preserves the
+> original "CIMS" wording for historical accuracy. Token-level
+> identifiers (e.g. `CimsDbContext`, `cims:role`) have been
+> updated to match current code; product-name prose has not.
+
 **Status:** Accepted (2026-04-24, Sprint S0, closes SR-S0-02)
 **Supersedes:** —
 
@@ -9,7 +15,7 @@ Security review finding SR-S0-02 (2026-04-24) identified that
 `ProjectsService.CreateAsync` wrote `req.AppointingPartyId` verbatim.
 The tenant query filter for `Project` is
 `p.AppointingPartyId == _tenant.OrganisationId` (see
-`CimsApp/Data/CimsDbContext.cs:165`). An attacker with `OrgAdmin`
+`GeneraPm/Data/GeneraPmDbContext.cs:165`). An attacker with `OrgAdmin`
 authority on organisation A could therefore set
 `req.AppointingPartyId = orgB.Id` and plant a project visible only
 to orgB. Cross-tenant write primitive.
@@ -101,5 +107,5 @@ success response and makes API misuse invisible in logs.
   (`docs/security/s0-review-2026-04-24.md#sr-s0-02--project-creation-accepts-attacker-controlled-appointingpartyid-high`).
 - CR-002 (change register entry for both SR-S0-01 and SR-S0-02
   fixes).
-- `CimsApp/Services/Services.cs#ProjectsService.CreateAsync` — the
+- `GeneraPm/Services/Services.cs#ProjectsService.CreateAsync` — the
   implementation.

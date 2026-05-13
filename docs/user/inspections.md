@@ -36,7 +36,7 @@ B-086..B-089:
 - B-086 Genera Systems REST API endpoints
 - B-087 Webhook subscription for QA / HSE events
 - B-088 Identity sync / shared SSO with Genera
-- B-089 Bidirectional sync of inspection activities to CIMS
+- B-089 Bidirectional sync of inspection activities to Genera PM
   quality records
 
 These will land alongside the **PAFM Ch 47 paste** (the

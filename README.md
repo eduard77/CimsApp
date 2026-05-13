@@ -1,8 +1,13 @@
-# CIMS
+# Genera PM
 
-**Construction Information Management System.** ASP.NET Core
-8 + Blazor Server. Multi-tenant, ISO 19650 / PMBOK 7 aligned,
-NEC4 cumulative payment-certificate semantics by default.
+ASP.NET Core 8 + Blazor Server. Multi-tenant, ISO 19650 /
+PMBOK 8 aligned, NEC4 cumulative payment-certificate semantics
+by default.
+
+> Internal codebase identifier: `GeneraPm`. Public product
+> name: "Genera PM" (formerly known as the Construction
+> Information Management System; renamed 2026-05-13). Parent
+> company unchanged: Genera Systems.
 
 ## Status
 
@@ -23,7 +28,7 @@ Prerequisites:
 - **.NET SDK 8.0+** (CI pins to `8.0.x`).
 - **SQL Server** — LocalDB (`(localdb)\mssqllocaldb`) is fine
   for development; the connection string lives in
-  `CimsApp/appsettings.json` under
+  `GeneraPm/appsettings.json` under
   `ConnectionStrings:DefaultConnection`.
 - **`dotnet-ef` global tool** —
   `dotnet tool install --global dotnet-ef` (currently pinned to
@@ -34,16 +39,16 @@ Prerequisites:
 Build, migrate, run:
 
 ```bash
-dotnet restore CimsApp.sln
-dotnet ef database update --project CimsApp     # applies all migrations
-dotnet build CimsApp.sln
-cd CimsApp && dotnet run                        # http://localhost:5000
+dotnet restore GeneraPm.sln
+dotnet ef database update --project GeneraPm     # applies all migrations
+dotnet build GeneraPm.sln
+cd GeneraPm && dotnet run                        # http://localhost:5000
 ```
 
 Test:
 
 ```bash
-dotnet test CimsApp.sln
+dotnet test GeneraPm.sln
 ```
 
 To start fresh, register an organisation via
@@ -55,11 +60,11 @@ OrgAdmin user (see ADR-0011).
 ## Project structure
 
 ```
-CimsApp/                  Web app (ASP.NET Core + Blazor Server)
+GeneraPm/                  Web app (ASP.NET Core + Blazor Server)
   Components/             Razor pages and layouts
   Controllers/            HTTP API controllers
   Core/                   Domain primitives (Evm.cs, exceptions, CDE state machine)
-  Data/                   CimsDbContext + tenant query filters
+  Data/                   GeneraPmDbContext + tenant query filters
   DTOs/                   Request / response records
   Middleware/             ErrorHandlingMiddleware (AppException -> JSON)
   Migrations/             EF Core migrations
@@ -71,7 +76,7 @@ CimsApp/                  Web app (ASP.NET Core + Blazor Server)
     Tenancy/              ITenantContext, HttpTenantContext
   UI/                     Blazor-side helpers (BlazorApiClient, UiStateService)
 
-CimsApp.Tests/            Behavioural tests against the in-memory provider
+GeneraPm.Tests/            Behavioural tests against the in-memory provider
   Core/                   Pure-function tests (Evm, etc.)
   Controllers/            Controller-level scoping tests
   Data/                   Tenant-filter sweep + per-entity isolation
@@ -121,7 +126,7 @@ For domain context:
 - Entity Framework Core 8 (SQL Server provider for production,
   in-memory provider for tests per ADR-0009)
 - BCrypt.Net-Next for password hashing
-- JWT bearer auth with custom `cims:role` claim (ADR-0010);
+- JWT bearer auth with custom `genera:role` claim (ADR-0010);
   per-user revocation via `User.TokenInvalidationCutoff`
   checked in `JwtBearerEvents.OnTokenValidated`
   (B-001 / ADR-0014)

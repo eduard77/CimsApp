@@ -78,7 +78,7 @@ Per S18:
 
 ## Backups
 
-- **SQL Server**: standard backup pattern. CIMS doesn't
+- **SQL Server**: standard backup pattern. Genera PM doesn't
   prescribe — your DB layer's existing backup strategy applies.
   Tenants share one database; restore is necessarily all-tenants.
 - **Storage** (`storage/projects/{code}/`): per-project PMBOK

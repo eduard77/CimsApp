@@ -6,10 +6,10 @@
 ## Context
 
 T-S0-04 requires a behavioural integration test proving that two
-tenants running against the same `CimsDbContext` see only their own
+tenants running against the same `GeneraPmDbContext` see only their own
 `Project` and `Document` rows. A model-inspection unit test already
 asserts each tenant-scoped entity has a query filter registered
-(`CimsApp.Tests/Data/CimsDbContextTenantFilterTests.cs`), but that
+(`GeneraPm.Tests/Data/GeneraPmDbContextTenantFilterTests.cs`), but that
 doesn't prove runtime behaviour.
 
 Testing runtime behaviour needs a database. Three options:
@@ -49,8 +49,8 @@ onward.
 - **Security history:** no CVEs as of 2026-04-24.
 - **Maintenance burden:** tracks EF Core versions; upgrade alongside
   the main EF package.
-- **Scope:** referenced only from `CimsApp.Tests`, never from
-  `CimsApp`.
+- **Scope:** referenced only from `GeneraPm.Tests`, never from
+  `GeneraPm`.
 
 ## Alternatives considered
 

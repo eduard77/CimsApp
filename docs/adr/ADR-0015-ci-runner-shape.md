@@ -33,7 +33,7 @@ shape for that smoke job. Three plausible options:
 **Option A — Linux runner + `mssql/server` Docker service
 container.**
 
-Connection string for CI: `Server=localhost,1433;Database=cims_ci;
+Connection string for CI: `Server=localhost,1433;Database=generapm_ci;
 User Id=sa;Password=<set-via-Actions-secret>;TrustServerCertificate=
 True;` — handled via `appsettings.CI.json` overlay or an
 `ASPNETCORE_*` env var set in the workflow step. Dev keeps using
@@ -74,7 +74,7 @@ B-027 backlog entry.
 
 Ch 24.6 governs adding new NuGet **packages** to the project (the
 ADR-0009 EF InMemory wait was for `Microsoft.EntityFrameworkCore.
-InMemory`, a NuGet reference added to `CimsApp.Tests.csproj`).
+InMemory`, a NuGet reference added to `GeneraPm.Tests.csproj`).
 
 This ADR introduces a Docker image (`mcr.microsoft.com/mssql/server`)
 used only as a GitHub Actions service container. The image is:

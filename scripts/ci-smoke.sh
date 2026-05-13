@@ -2,7 +2,7 @@
 # T-S8-03 — CI SQL Server smoke walk (B-027).
 #
 # Runs the five smoke endpoints from docs/v1.1-backlog.md B-027
-# against an already-running CIMS app. Caller is responsible for
+# against an already-running Genera PM app. Caller is responsible for
 # starting the app (workflow does this in the previous step).
 #
 # Each smoke step asserts:
@@ -14,20 +14,20 @@
 # and merge is blocked.
 #
 # Inputs (env):
-#   CIMS_BASE_URL   default "http://localhost:5000"
-#   CIMS_RUN_ID     default $RANDOM (used to suffix org code +
+#   GENERAPM_BASE_URL   default "http://localhost:5000"
+#   GENERAPM_RUN_ID     default $RANDOM (used to suffix org code +
 #                   user email so concurrent runs cannot collide
 #                   even on a hypothetical shared DB).
 set -euo pipefail
 
-BASE_URL="${CIMS_BASE_URL:-http://localhost:5000}"
+BASE_URL="${GENERAPM_BASE_URL:-http://localhost:5000}"
 # Organisation.Code MaxLength is 10. Keep RUN_ID short enough that
 # "CI<run_id>" fits inside the column. GitHub Actions provides
 # GITHUB_RUN_ID (numeric, 10-12 digits) which is unique across CI
 # runs; locally we fall back to a 5-digit random seed. Both are
 # truncated to 6 chars so "CI<run_id>" is at most 8.
 DEFAULT_RUN_ID="${GITHUB_RUN_ID:-$RANDOM}"
-RUN_ID="${CIMS_RUN_ID:-${DEFAULT_RUN_ID:0:6}}"
+RUN_ID="${GENERAPM_RUN_ID:-${DEFAULT_RUN_ID:0:6}}"
 
 ORG_CODE="CI${RUN_ID}"
 USER_EMAIL="ci+${RUN_ID}@example.com"

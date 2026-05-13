@@ -6,7 +6,7 @@
 ## Context
 
 Sessions 1 and 2 (before this manual was consulted) shipped a
-filename validator at `CimsApp/Services/Iso19650/…` with a Blazor page
+filename validator at `GeneraPm/Services/Iso19650/…` with a Blazor page
 at `/tools/iso19650-validator`. The work implements 12 checks from
 PAFM Appendix F.9 — which is the Definition of Done for Sprint 8
 (module S8, "ISO 19650 / MIDP").

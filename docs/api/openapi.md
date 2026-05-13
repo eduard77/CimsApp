@@ -1,6 +1,6 @@
 # API Documentation
 
-CIMS exposes a REST API rooted at `/api/v1/`. Authentication is
+Genera PM exposes a REST API rooted at `/api/v1/`. Authentication is
 JWT bearer; payloads are JSON; OpenAPI 3.0 is published via
 Swagger UI.
 

@@ -1,5 +1,11 @@
 # ADR-0010 — Two-tier role authorization model
 
+> **Note (2026-05-13):** the product was renamed from "CIMS" to
+> "Genera PM" on 2026-05-13. Body text below preserves the
+> original "CIMS" wording for historical accuracy. Token-level
+> identifiers (e.g. `CimsDbContext`, `cims:role`) have been
+> updated to match current code; product-name prose has not.
+
 **Status:** Accepted (2026-04-24, Sprint S0, T-S0-08)
 **Supersedes:** —
 
@@ -12,7 +18,7 @@ practice, CIMS has two distinct role concepts:
 
 1. **Global role** (`User.GlobalRole`) — takes values `SuperAdmin`,
    `OrgAdmin`, and the other `UserRole` enum members. Emitted on the
-   JWT as the custom claim `cims:role` by `AuthService`. Governs
+   JWT as the custom claim `genera:role` by `AuthService`. Governs
    cross-organisation capability (e.g., admin actions).
 2. **Per-project role** (`ProjectMember.Role`) — held on the join row
    between a `User` and a `Project`. Governs what a user can do
@@ -48,7 +54,7 @@ Adopt a **two-tier authorization model** as the project standard:
 
 To make attribute-based gates work, `Program.cs` sets
 `TokenValidationParameters.RoleClaimType` to
-`HttpTenantContext.GlobalRoleClaimType` (`"cims:role"`), so the JWT's
+`HttpTenantContext.GlobalRoleClaimType` (`"genera:role"`), so the JWT's
 custom role claim is recognised by ASP.NET's authorization
 middleware.
 

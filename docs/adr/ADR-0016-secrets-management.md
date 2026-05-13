@@ -1,5 +1,11 @@
 # ADR-0016 — Secrets management
 
+> **Note (2026-05-13):** the product was renamed from "CIMS" to
+> "Genera PM" on 2026-05-13. Body text below preserves the
+> original "CIMS" wording for historical accuracy. Token-level
+> identifiers (e.g. `CimsDbContext`, `cims:role`) have been
+> updated to match current code; product-name prose has not.
+
 **Status:** Accepted (2026-05-05, S19 / PAFM F.18 fourth bullet).
 **Supersedes:** —
 **Related:** ADR-0014 (access-token residual-authority SLA),
