@@ -36,7 +36,7 @@ change.
 
 Navigate to: **GitHub repo → Settings → Branches → Branch
 protection rules → Add classic branch protection rule**
-(URL: `https://github.com/eduard77/CimsApp/settings/branches`).
+(URL: `https://github.com/eduard77/GeneraPm/settings/branches`).
 
 ### 2. Configure the rule
 

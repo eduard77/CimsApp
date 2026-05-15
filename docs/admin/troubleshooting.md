@@ -25,7 +25,7 @@ Check `ConnectionStrings__DefaultConnection`. Common issues:
 ### "Database X is not present"
 
 Run migrations:
-`dotnet ef database update --project CimsApp`
+`dotnet ef database update --project GeneraPm`
 
 ## App starts but every request fails authentication
 

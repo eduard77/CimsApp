@@ -2,7 +2,7 @@
 
 ## Logging in
 
-CIMS authenticates with email + password. After successful login
+Genera PM authenticates with email + password. After successful login
 you receive a JWT access token (60-minute lifetime) plus an opaque
 refresh token (7-day lifetime). The refresh token rotates on every
 use; the access token can be revoked by an admin or by you (sign

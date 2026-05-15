@@ -26,21 +26,21 @@ jobs:
             **/*.csproj
 
       - name: Restore
-        run: dotnet restore CimsApp.sln
+        run: dotnet restore GeneraPm.sln
 
       - name: Build (warnings as errors)
         # T-S8-06: -p:TreatWarningsAsErrors=true elevates any new
         # compiler warnings to build failures so the green-CI bar
         # stays green. Today's build is 0 warnings (verified at
         # S7 close); this keeps it that way.
-        run: dotnet build CimsApp.sln --configuration Release --no-restore -p:TreatWarningsAsErrors=true
+        run: dotnet build GeneraPm.sln --configuration Release --no-restore -p:TreatWarningsAsErrors=true
 
       - name: Test
         id: test
         run: |
           # T-S8-06: capture test results into a TRX log so the step
           # summary can surface counts + duration.
-          dotnet test CimsApp.sln \
+          dotnet test GeneraPm.sln \
             --configuration Release --no-build \
             --logger "trx;LogFileName=test-results.trx" \
             --results-directory artifacts/test-results \
@@ -119,21 +119,21 @@ jobs:
           exit 1
 
       - name: Restore
-        run: dotnet restore CimsApp.sln
+        run: dotnet restore GeneraPm.sln
 
       - name: Build
-        run: dotnet build CimsApp.sln --configuration Release --no-restore
+        run: dotnet build GeneraPm.sln --configuration Release --no-restore
 
       - name: Start app (auto-migrates on startup)
         env:
-          ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=cims_ci;User Id=SA;Password=Strong@Passw0rd!;TrustServerCertificate=True;Encrypt=False"
+          ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=generapm_ci;User Id=SA;Password=Strong@Passw0rd!;TrustServerCertificate=True;Encrypt=False"
           ASPNETCORE_URLS: "http://localhost:5000"
           ASPNETCORE_ENVIRONMENT: Production
         # Detached app process; PID captured for the stop step.
-        # Migrations run on app startup per CimsApp/Program.cs.
+        # Migrations run on app startup per GeneraPm/Program.cs.
         run: |
           mkdir -p artifacts
-          nohup dotnet run --project CimsApp --configuration Release --no-build \
+          nohup dotnet run --project GeneraPm --configuration Release --no-build \
             --urls "http://localhost:5000" \
             > artifacts/app.log 2>&1 &
           echo $! > artifacts/app.pid
@@ -201,7 +201,7 @@ jobs:
           --health-retries 20
           --health-start-period 30s
     env:
-      ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=cims_migrate;User Id=SA;Password=Strong@Passw0rd!;TrustServerCertificate=True;Encrypt=False"
+      ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=generapm_migrate;User Id=SA;Password=Strong@Passw0rd!;TrustServerCertificate=True;Encrypt=False"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -231,16 +231,16 @@ jobs:
           echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
 
       - name: Restore
-        run: dotnet restore CimsApp.sln
+        run: dotnet restore GeneraPm.sln
 
       - name: Build
-        run: dotnet build CimsApp.sln --configuration Release --no-restore
+        run: dotnet build GeneraPm.sln --configuration Release --no-restore
 
       - name: Apply all migrations (Up)
-        run: dotnet ef database update --project CimsApp --no-build --configuration Release
+        run: dotnet ef database update --project GeneraPm --no-build --configuration Release
 
       - name: Revert all migrations (Down to 0)
-        run: dotnet ef database update 0 --project CimsApp --no-build --configuration Release
+        run: dotnet ef database update 0 --project GeneraPm --no-build --configuration Release
 
       - name: Re-apply all migrations (Up)
-        run: dotnet ef database update --project CimsApp --no-build --configuration Release
+        run: dotnet ef database update --project GeneraPm --no-build --configuration Release

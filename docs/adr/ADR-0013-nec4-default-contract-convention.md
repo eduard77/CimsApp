@@ -1,5 +1,11 @@
 # ADR-0013 — NEC4 selected as v1.0 default contract convention for payment certificate semantics
 
+> **Note (2026-05-13):** the product was renamed from "CIMS" to
+> "Genera PM" on 2026-05-13. Body text below preserves the
+> original "CIMS" wording for historical accuracy. Token-level
+> identifiers (e.g. `CimsDbContext`, `cims:role`) have been
+> updated to match current code; product-name prose has not.
+
 **Status:** Accepted (2026-04-27, Sprint S1, T-S1-09)
 **Supersedes:** —
 

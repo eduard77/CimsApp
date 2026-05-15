@@ -26,7 +26,7 @@ The Iso19650FilenameValidator enforces the field shapes; see
 ## State transitions
 
 Each transition has a role gate (per
-`CimsApp/Core/Core.cs:CdeStateMachine.TransitionRoles`). Common
+`GeneraPm/Core/Core.cs:CdeStateMachine.TransitionRoles`). Common
 patterns:
 
 - **WIP → Shared**: TTM-and-up.

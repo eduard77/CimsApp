@@ -1,6 +1,6 @@
 # Setup
 
-Production-grade deployment of CIMS v1.0. Development setup is in
+Production-grade deployment of Genera PM v1.0. Development setup is in
 `README.md`; this doc is for operator-facing first-run on a clean
 host.
 
@@ -54,7 +54,7 @@ Other configuration keys are non-secret and live in
 1. Create the SQL Server database (the app's user needs
    `db_ddladmin` for the first migration; can be downgraded
    to `db_datareader + db_datawriter` after).
-2. Apply EF migrations: `dotnet ef database update --project CimsApp`
+2. Apply EF migrations: `dotnet ef database update --project GeneraPm`
    (or run the migration bundle binary if you produced one).
 3. Set the env vars above.
 4. Start the app. The first request will fail authentication —

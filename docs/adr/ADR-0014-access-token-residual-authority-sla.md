@@ -1,5 +1,11 @@
 # ADR-0014 — Access-token residual-authority SLA
 
+> **Note (2026-05-13):** the product was renamed from "CIMS" to
+> "Genera PM" on 2026-05-13. Body text below preserves the
+> original "CIMS" wording for historical accuracy. Token-level
+> identifiers (e.g. `CimsDbContext`, `cims:role`) have been
+> updated to match current code; product-name prose has not.
+
 **Status:** Accepted (2026-04-28, post-S1, B-001 closeout) — §3
 amended same day, see Amendment log below.
 **Supersedes:** —
@@ -11,8 +17,8 @@ authorization), ADR-0011 (invitation-token user provisioning).
 
 CIMS issues bearer JWT access tokens with a 60-minute lifetime
 (`Jwt:AccessExpiresMinutes` in `appsettings.json`, default 60). The
-access token carries the caller's `cims:role` GlobalRole claim and
-their tenant `cims:org` claim baked in at issue time. After issue,
+access token carries the caller's `genera:role` GlobalRole claim and
+their tenant `genera:org` claim baked in at issue time. After issue,
 no claims can be amended without re-issue.
 
 Three security-sensitive User mutations interact with this design:

@@ -1,0 +1,156 @@
+@page "/evidence"
+@using GeneraPm.Models
+@using GeneraPm.Services.Compliance
+@inject BlazorApiClient Api
+@inject UiStateService UI
+@inject ISnackbar Snackbar
+
+<PageHeader Title="Evidence Library"
+            Subtitle="@(UI.CurrentProject?.Name ?? "Select a project")"
+            ButtonLabel="Add evidence"
+            OnButton="OpenAdd"
+            ShowButton="UI.CurrentProject != null" />
+
+@if (UI.CurrentProject == null) { <NoProject /> }
+else
+{
+
+<MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;padding:16px;margin-bottom:16px;">
+    <MudSelect T="ComplianceArea?" @bind-Value="_areaFilter" Label="Filter by area" Margin="Margin.Dense" Clearable="true">
+        <MudSelectItem T="ComplianceArea?" Value="@((ComplianceArea?)null)">— All areas</MudSelectItem>
+        @foreach (var a in Enum.GetValues<ComplianceArea>())
+        {
+            <MudSelectItem T="ComplianceArea?" Value="@((ComplianceArea?)a)">@a</MudSelectItem>
+        }
+    </MudSelect>
+    <div style="margin-top:8px;">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync" Style="text-transform:none;">Apply</MudButton>
+    </div>
+</MudCard>
+
+@if (_loading) { <Loading /> }
+else if (_page == null)
+{
+    <EmptyState Icon="@Icons.Material.Filled.Lock" Text="Insufficient permissions or service unavailable." />
+}
+else if (_page.Items.Count == 0)
+{
+    <EmptyState Icon="@Icons.Material.Filled.Folder" Text="No evidence rows yet." />
+}
+else
+{
+    <MudCard Elevation="0" Style="border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;">
+        <MudTable Items="_page.Items" Hover="true" Elevation="0" Dense="true">
+            <HeaderContent>
+                <MudTh>Area</MudTh>
+                <MudTh>Source</MudTh>
+                <MudTh Class="d-none d-sm-table-cell">Description</MudTh>
+                <MudTh Class="d-none d-md-table-cell">Added</MudTh>
+                <MudTh Class="d-none d-md-table-cell">By</MudTh>
+                <MudTh Style="text-align:right;">Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd><MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text">@context.ComplianceArea</MudChip></MudTd>
+                <MudTd>@SourceLabel(context)</MudTd>
+                <MudTd Class="d-none d-sm-table-cell"><span style="font-size:12px;color:#64748B;">@(context.Description ?? "—")</span></MudTd>
+                <MudTd Class="d-none d-md-table-cell"><span style="font-size:12px;color:#64748B;white-space:nowrap;">@context.AddedAt.ToString("dd MMM HH:mm")</span></MudTd>
+                <MudTd Class="d-none d-md-table-cell">@context.AddedByName</MudTd>
+                <MudTd Style="text-align:right;">
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" OnClick="() => Remove(context)" Style="text-transform:none;">Remove</MudButton>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+        <div style="padding:12px 16px;color:#64748B;font-size:12px;">@_page.Items.Count of @_page.Total</div>
+    </MudCard>
+}
+
+<MudDialog @bind-Visible="_showAdd" Options='new DialogOptions{MaxWidth=MaxWidth.Small,FullWidth=true}'>
+    <TitleContent><MudText Typo="Typo.h6">Add evidence</MudText></TitleContent>
+    <DialogContent>
+        <MudSelect T="ComplianceArea" @bind-Value="_addArea" Label="Compliance area" Variant="Variant.Outlined" Margin="Margin.Dense">
+            @foreach (var a in Enum.GetValues<ComplianceArea>())
+            { <MudSelectItem T="ComplianceArea" Value="@a">@a</MudSelectItem> }
+        </MudSelect>
+        <p style="color:#94A3B8;font-size:11px;margin-top:12px;">Reference one source entity by id, OR add description-only evidence (leave all ids blank, fill description).</p>
+        <MudTextField @bind-Value="_addDocId" Label="Document id (optional)" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" />
+        <MudTextField @bind-Value="_addRfiId" Label="RFI id (optional)" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" />
+        <MudTextField @bind-Value="_addAuditId" Label="Audit log id (optional)" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" />
+        <MudTextField @bind-Value="_addInspId" Label="Inspection id (optional)" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" />
+        <MudTextField @bind-Value="_addDescription" Label="Description" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="3" Class="mt-2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showAdd = false" Style="text-transform:none;">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAdd" Style="text-transform:none;">Add</MudButton>
+    </DialogActions>
+</MudDialog>
+
+}
+
+@code {
+    EvidencePagedResult? _page;
+    bool _loading = true;
+    ComplianceArea? _areaFilter;
+
+    bool _showAdd;
+    ComplianceArea _addArea = ComplianceArea.UkGdpr;
+    string _addDocId = "";
+    string _addRfiId = "";
+    string _addAuditId = "";
+    string _addInspId = "";
+    string _addDescription = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        UI.OnChange += () => InvokeAsync(async () => { await LoadAsync(); StateHasChanged(); });
+        await LoadAsync();
+    }
+
+    async Task LoadAsync()
+    {
+        if (UI.CurrentProject == null) { _loading = false; return; }
+        _loading = true;
+        _page = await Api.ListEvidenceAsync(UI.CurrentProject.Id, _areaFilter);
+        _loading = false;
+    }
+
+    void OpenAdd()
+    {
+        _addArea = ComplianceArea.UkGdpr;
+        _addDocId = _addRfiId = _addAuditId = _addInspId = _addDescription = "";
+        _showAdd = true;
+    }
+
+    async Task SaveAdd()
+    {
+        if (UI.CurrentProject == null) return;
+        var req = new AddEvidenceRequest(
+            _addArea,
+            ParseGuid(_addDocId),
+            ParseGuid(_addRfiId),
+            ParseGuid(_addAuditId),
+            ParseGuid(_addInspId),
+            string.IsNullOrWhiteSpace(_addDescription) ? null : _addDescription);
+        var (ok, err) = await Api.AddEvidenceAsync(UI.CurrentProject.Id, req);
+        if (ok) { Snackbar.Add("Evidence added", Severity.Success); _showAdd = false; await LoadAsync(); }
+        else    { Snackbar.Add($"Cannot add: {err}", Severity.Error); }
+    }
+
+    async Task Remove(EvidenceListItem item)
+    {
+        if (UI.CurrentProject == null) return;
+        var (ok, err) = await Api.RemoveEvidenceAsync(UI.CurrentProject.Id, item.Id);
+        if (ok) { Snackbar.Add("Evidence removed", Severity.Success); await LoadAsync(); }
+        else    { Snackbar.Add($"Cannot remove: {err}", Severity.Error); }
+    }
+
+    static Guid? ParseGuid(string s) => Guid.TryParse(s, out var g) ? g : null;
+
+    static string SourceLabel(EvidenceListItem i)
+    {
+        if (i.DocumentId is { }) return $"Document · {i.DocumentTitle}";
+        if (i.RfiId is { }) return $"RFI · {i.RfiNumber}";
+        if (i.AuditLogId is { }) return $"Audit · {i.AuditLogAction}";
+        if (i.InspectionActivityId is { }) return $"Inspection · {i.InspectionTitle}";
+        return "(description only)";
+    }
+}

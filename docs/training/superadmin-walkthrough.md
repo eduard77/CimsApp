@@ -1,10 +1,10 @@
 # Training walkthrough — SuperAdmin / OrgAdmin
 
-**Audience:** the operator commissioning CIMS for a tenant.
+**Audience:** the operator commissioning Genera PM for a tenant.
 **Goal:** sign in, bootstrap an organisation, invite the first
 project manager, and verify the tenant is correctly isolated.
 **Duration:** ~15 minutes.
-**Prerequisites:** a deployed CIMS instance with env vars set
+**Prerequisites:** a deployed Genera PM instance with env vars set
 (see `docs/admin/setup.md`), a SuperAdmin account already
 provisioned via the bootstrap-and-promote ritual.
 

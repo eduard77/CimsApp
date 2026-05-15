@@ -296,10 +296,10 @@ From S2 → S15 sprints:
   integration work (B-086..B-089 unblock condition).
 - **Pre-pilot legal review** carry-forward unchanged (UK GDPR + BSA
   2022 field shapes).
-- **Laptop WDAC** blocks rebuilt `CimsApp.dll` from `dotnet test`
+- **Laptop WDAC** blocks rebuilt `GeneraPm.dll` from `dotnet test`
   discovery (error `0x800711C7`, kernel-level, hash-based). First
   hit S16. Resolution options at the policy layer (WDAC rule for
-  `C:\Code\CimsApp\**\*.dll`, Smart App Control toggle, signed
+  `C:\Code\GeneraPm\**\*.dll`, Smart App Control toggle, signed
   assemblies); until then, test verification on the laptop happens
   via push-to-CI rather than locally. See
   `memory/project_laptop_wdac.md`.

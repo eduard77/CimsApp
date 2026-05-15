@@ -37,7 +37,7 @@ rolled into LPS health metrics on the dashboard.
 ## MS Project import / export
 
 `Core/MsProjectXml.cs` reads / writes the .xml interchange
-format. Imports map MSP activity IDs → CIMS Activity rows;
+format. Imports map MSP activity IDs → Genera PM Activity rows;
 predecessor links translate to ActivityDependency rows.
 
 ## Common gotchas

@@ -6,7 +6,7 @@
 ## Context
 
 PAFM Appendix F.1 requires tenant isolation across all tenant-scoped
-entities in CimsApp. The Sprint 0 DoD explicitly names "`OrganisationId`
+entities in GeneraPm. The Sprint 0 DoD explicitly names "`OrganisationId`
 global query filter" as the mechanism. Three options were considered:
 
 1. **Row-level with global query filter** — every tenant's data shares
@@ -25,8 +25,8 @@ Option 1: row-level multi-tenancy with EF Core global query filters.
 
 - `ITenantContext` service (request-scoped) exposes `OrganisationId`
   and `UserId`, resolved from JWT claims `ClaimTypes.NameIdentifier`
-  and the custom `cims:org` claim emitted by `AuthService`.
-- `CimsDbContext` takes `ITenantContext?` in its constructor and falls
+  and the custom `genera:org` claim emitted by `AuthService`.
+- `GeneraPmDbContext` takes `ITenantContext?` in its constructor and falls
   back to a `NullTenantContext` for EF design-time (migrations,
   scaffolding).
 - `HasQueryFilter` is registered on every tenant-scoped entity in
@@ -59,7 +59,7 @@ migrations. Cost outweighs the marginal isolation win.
 
 **Positive:**
 - One database, one migration path, one backup.
-- Filter is centrally defined in `CimsDbContext`; services and
+- Filter is centrally defined in `GeneraPmDbContext`; services and
   controllers inherit isolation for free.
 - SuperAdmin cross-tenant visibility is modelled later as
   `IgnoreQueryFilters()` at the query site with audit (T-S0-07).

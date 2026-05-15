@@ -8,7 +8,7 @@ v1.0-critical paths. Pass criteria: p95 < 1s, error rate < 0.1%.
 - `k6` CLI installed (`choco install k6` on Windows;
   `brew install k6` on macOS; or download from
   https://k6.io/docs/get-started/installation/).
-- A deployed CIMS instance reachable from the machine running
+- A deployed Genera PM instance reachable from the machine running
   k6 (HTTPS or HTTP). Local dev server works for sanity
   checking; a deployed staging instance is the realistic test.
 - A long-lived bearer token for a pre-created LoadTest user.
